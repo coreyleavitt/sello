@@ -56,6 +56,9 @@ This is the project's whole reason for caution — hold new code to it:
 - Pass **Google Wycheproof** adversarial vectors — the verifier must reject every malleable/non-canonical/small-order forgery. ✅ `test_wycheproof*.nim`.
 - A **dudect/ctgrind-style timing harness** (intended `tests/ct/`) for the signer once it exists. ❌ not yet.
 
+## Compact Instructions
+When compacting, preserve in the summary: the active RFC and its handoff-doc path, the current stage/round, slices done vs remaining, open forks awaiting me, and the exact resume command. After compacting, re-read the handoff doc and MEMORY.md before continuing.
+
 ## Conventions
 - Port from permissively-licensed references (ref10/djb, TweetNaCl, orlp) and **attribute in the module header** as existing files do. Get functional correctness against vectors first, then CT-harden the signer.
 - Secrets (signing, X25519 scalars): fixed-size stack `array[N, uintXX]`, never `seq`/`string`; zero allocation in the hot path.
