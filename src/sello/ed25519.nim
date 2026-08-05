@@ -44,8 +44,12 @@ func pointEncode*(p: GeP3): array[32, byte] =
   return enc
 
 func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
-  ## Decode a compressed point. Returns None if encoding is invalid.
-  ## This is the "verification-safe" path; non-constant-time.
+  ## Decode a compressed point per RFC 8032 §5.1.3. Returns None if the
+  ## encoding is invalid: y >= p, no square root exists, or x = 0 with
+  ## the sign bit set. Non-constant-time; verify-path only.
+  if not feBytesCanonical(bytes):
+    return none[GeP3]()
+
   var D, I: Fe
   D.limbs = Ed25519D_Raw
   I = FeOne
@@ -85,18 +89,20 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
   feSub(vxx, vxx, u)
 
   if feIsNonZero(vxx):
-    feAdd(vxx, vxx, u)      # v*x^2 + u
-    feAdd(vxx, vxx, u)      # v*x^2 + u  (re-adding u since vxx was vx^2-u)
-    # Actually: need vx^2 - u == 0 or vx^2 + u == 0
-    # If vx^2 != u, check vx^2 == -u i.e. vx^2 + u == 0
+    # v*x^2 != u; retry with x*sqrt(-1), which squares to -x^2.
+    # Valid iff v*x^2 == -u; anything else means u/v is not a square.
     var S: Fe
     S.limbs = SqrtM1_Raw
-    feMul(x, x, S)          # multiply by sqrt(-1)
+    feMul(x, x, S)
     feSq(vxx, x)
     feMul(vxx, vxx, v)
     feSub(vxx, vxx, u)
     if feIsNonZero(vxx):
       return none[GeP3]()
+
+  # RFC 8032 §5.1.3 step 4: x = 0 with sign bit set is invalid.
+  if sign and not feIsNonZero(x):
+    return none[GeP3]()
 
   if feIsNegative(x) != sign:
     feNeg(x, x)
@@ -367,21 +373,17 @@ func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
   # 4. k = SHA-512(R || PK || msg) mod L
   var sha: sha512
   sha.init()
-  sha.update(cast[ptr byte](unsafeAddr rArr[0]), 32'u)
-  sha.update(cast[ptr byte](unsafeAddr pk[0]), 32'u)
-  if msg.len > 0:
-    sha.update(cast[ptr byte](unsafeAddr msg[0]), uint(msg.len))
+  sha.update(rArr)
+  sha.update(pk)
+  sha.update(msg)
   var k64: array[64, byte]
   sha.finish(k64)
 
   var kRed: array[32, byte]
   scReduce(kRed, k64)
 
-  # 5. Compute [S]B - [k]A, compare to R
-  #    Per RFC: [S]B = R + [k]A  => check pointEncode([S]B - [k]A) == R
-  #
-  #    Actually RFC says: check [S]B == R + [k]A
-  #    So compute lhs = [S]B and rhs = R + [k]A, compare
+  # 5. Check the group equation [S]B == R + [k]A (RFC 8032 §5.1.7 step 3,
+  #    cofactorless form): compare canonical encodings of both sides.
 
   # Base point
   var B: GeP3

@@ -1,5 +1,6 @@
-import std/unittest
-import sello/ed25519, sello/field, sello/scalar
+import std/[unittest, options]
+import sello          # public facade: verify + key/signature types
+import sello/ed25519  # module internals under test: pointDecode
 
 # RFC 8032 §7.1 Test Vectors
 # Test 1: Secret key + public key + signature + message (known answers)
@@ -75,3 +76,40 @@ suite "ed25519 verify - RFC 8032 test vectors":
     var wrongSig = tv1_sig
     wrongSig[0] = wrongSig[0] xor 1
     check not verify(wrongSig, tv1_msg, tv1_pk)
+
+# Canonicity: RFC 8032 §5.1.3 requires rejecting y >= p and (x=0, sign=1).
+# These are the encodings Wycheproof uses for malleable-point forgeries.
+
+func fieldEnc(low: byte; fill: byte; high: byte): array[32, byte] =
+  result[0] = low
+  for i in 1 .. 30: result[i] = fill
+  result[31] = high
+
+suite "ed25519 point decoding - canonicity":
+  test "rejects y = p (non-canonical zero)":
+    check pointDecode(fieldEnc(0xED, 0xFF, 0x7F)).isNone
+
+  test "rejects y = p + 1 (non-canonical one)":
+    check pointDecode(fieldEnc(0xEE, 0xFF, 0x7F)).isNone
+
+  test "rejects y = p with sign bit (non-canonical, signed)":
+    check pointDecode(fieldEnc(0xED, 0xFF, 0xFF)).isNone
+
+  test "accepts y = p - 1 (canonical -1, the order-2 point)":
+    check pointDecode(fieldEnc(0xEC, 0xFF, 0x7F)).isSome
+
+  test "accepts y = 1 (the identity)":
+    check pointDecode(fieldEnc(0x01, 0x00, 0x00)).isSome
+
+  test "rejects x = 0 with sign bit set":
+    check pointDecode(fieldEnc(0x01, 0x00, 0x80)).isNone
+
+  test "verify rejects signature with non-canonical R":
+    var sig = tv1_sig
+    let badR = fieldEnc(0xEE, 0xFF, 0x7F)
+    for i in 0 ..< 32: sig[i] = badR[i]
+    check not verify(sig, tv1_msg, tv1_pk)
+
+  test "verify rejects non-canonical public key":
+    let badPk = fieldEnc(0xEE, 0xFF, 0x7F)
+    check not verify(tv1_sig, tv1_msg, badPk)

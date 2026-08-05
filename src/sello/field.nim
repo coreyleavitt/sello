@@ -173,6 +173,17 @@ func feToBytes*(f: Fe): array[32, byte] {.inline.} =
 # Predicates
 # ---------------------------------------------------------------------------
 
+func feBytesCanonical*(b: array[32, byte]): bool =
+  ## True iff the low 255 bits of `b` (little-endian; bit 255 ignored)
+  ## encode a value < p = 2^255 - 19, i.e. the unique canonical encoding
+  ## of a field element. Not constant-time; verify-path only.
+  for i in countdown(31, 0):
+    let v = if i == 31: b[31] and 0x7F'u8 else: b[i]
+    let p = if i == 31: 0x7F'u8 elif i == 0: 0xED'u8 else: 0xFF'u8
+    if v < p: return true
+    if v > p: return false
+  false  # equal to p: non-canonical
+
 func feIsNegative*(f: Fe): bool {.inline.} =
   let b = feToBytes(f)
   (b[0] and 1) != 0
