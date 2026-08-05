@@ -12,43 +12,51 @@ This split drives the whole API and trust story — preserve it:
 
 - **Verification** (`ed25519.verify`) touches only public data (pubkey, message, signature). It has **no constant-time requirement**, is fully testable, and is the part that ships to everyone with no asterisks. `scalarmult` in `scalar.nim` uses plain 4-bit windows precisely because it only ever runs on the verify path — **do not add the signer's secret scalar to it.**
 - **Signing / keygen** (not yet implemented) holds the secret scalar → **must be constant-time** and carries the roll-your-own-crypto trust tax. When built, it needs its own CT-hardened scalar mul (arithmetic masking, `{.push checks: off.}`, stack-only `array` secrets, volatile wipe, emit barriers — see `prompt.md` §"Constant-time toolkit"), plus an **optional libsodium FFI adapter behind `-d:selloLibsodium`** exposing the same API.
+- **X25519** (`x25519.nim`) also holds a secret (the caller's private scalar). Its Montgomery ladder is branchless on secret data (masked `feCSwap`, `{.push checks: off.}`, stack-only arrays); the rest of the CT toolkit (volatile wipe, dudect harness) lands with the signing milestone.
 
 ## Architecture (bottom-up layering)
 
-Three modules under `src/sello/`, each built strictly on the one below:
+`src/sello.nim` is the public facade — the supported API surface (`verify`, `x25519`, `x25519Base`, key/signature types). Consumers `import sello`; submodules are importable but carry no stability promise.
 
-1. **`field.nim`** — GF(2²⁵⁵−19) arithmetic. Radix 2²⁵·⁵, 10 `int32` limbs (`Fe` object). Direct ref10/orlp port (public domain). All the `fe*` primitives: mul, sq, invert, `fePow22523`, encode/decode, constant-time `feCMove`.
+Modules under `src/sello/`, each built strictly on the one below:
+
+1. **`field.nim`** — GF(2²⁵⁵−19) arithmetic. Radix 2²⁵·⁵, 10 `int32` limbs (`Fe` object). Direct ref10/orlp port (public domain). All the `fe*` primitives: mul, sq, invert, `fePow22523`, encode/decode, canonicity check (`feBytesCanonical`), constant-time `feCMove`/`feCSwap`.
 2. **`scalar.nim`** — Curve25519 group ops in extended Edwards coordinates (`GeP3`/`GeP2`/`GeP1P1`/`GeCached`). Point add/sub/double and variable-base `scalarmult`. Curve constants (`Ed25519D_Raw`, `Ed25519Gx/Gy_Raw`, `SqrtM1_Raw`) live here.
-3. **`ed25519.nim`** — RFC 8032 layer: `pointEncode`/`pointDecode`, `scReduce` (512→mod L, ref10 port), `scIsCanonical`, and `verify`. Pulls SHA-512 from `nimcrypto/sha2`.
+3. **`ed25519.nim`** — RFC 8032 layer: `pointEncode`/`pointDecode` (strict §5.1.3: rejects y ≥ p and x=0-with-sign-bit), `scReduce` (512→mod L, ref10 port), `scIsCanonical`, and `verify`. Pulls SHA-512 from `nimcrypto/sha2`.
+4. **`x25519.nim`** — RFC 7748 layer on `field.nim` only (no Edwards code): Montgomery ladder, `x25519` (returns `none` on all-zero shared secret, i.e. small-order peer point) and `x25519Base`.
 
 ### Implementation status (verify against the code, not this list)
-- ✅ field, curve ops, `scalarmult`, ed25519 `verify`
-- ❌ ed25519 sign/keygen, X25519 (`x25519.nim` does not exist yet), libsodium adapter, Ristretto255 (deliberately deferred — leave a clean extension point, don't build it)
-
-X25519 is in scope and reuses this exact field/curve core (same math minus the SHA-512 wrapping). The `nimble test` task already references a `tests/unit/test_x25519.nim` that does not yet exist.
+- ✅ field, curve ops, `scalarmult`, ed25519 `verify` (RFC 8032 + Wycheproof clean), X25519 (RFC 7748 + Wycheproof clean), public facade
+- ❌ ed25519 sign/keygen, libsodium adapter, dudect/ctgrind timing harness (`tests/ct/`), Ristretto255 (deliberately deferred — leave a clean extension point, don't build it)
 
 ## Building & testing
 
-There is **no host Nim toolchain** in this environment. The project builds inside a container image (`Containerfile.amox`, based on `ghcr.io/coreyleavitt/nim:2.2.10`). Run Nim commands inside that container, or wherever Nim 2.2.10+ is available.
-
-`nim.cfg` sets `path="vendor"` (vendored nimcrypto) and `path="src"` and `--mm:orc`, so imports like `import sello/field` resolve without extra flags.
+There is **no host Nim toolchain** in this environment. The project builds inside a container image (`Containerfile.amox`, based on `ghcr.io/coreyleavitt/nim:2.2.10`):
 
 ```sh
-nimble test                              # full suite (see sello.nimble; references a not-yet-present test_x25519.nim)
+podman run --rm -v "$PWD":/workspace -w /workspace ghcr.io/coreyleavitt/nim:2.2.10 nimble test
+```
+
+`nim.cfg` sets `path="vendor"` (vendored nimcrypto), `path="src"`, `--mm:orc`, and `--outdir:"build"` (compiled binaries land in `build/`, which is gitignored — never commit binaries).
+
+```sh
+nimble test                              # full suite
 nim c -r tests/unit/test_field.nim       # one test module
-nim c -r tests/unit/test_ed25519.nim
 ```
 
 ### Tests
-- **Real suite:** `tests/unit/test_field.nim`, `test_ed25519.nim` (RFC 8032 §7.1 vectors).
-- **Scratch/diagnostic files** — `test_femul.nim`, `test_pow.nim`, `test_x2.nim`, `test_p1p1.nim` (repo root, with committed binaries), and `tests/unit/diag*.nim`, `test_basic.nim`, `test_diag.nim`. These are debugging artifacts from porting, not the maintained suite. Don't treat them as the bar; don't extend them.
+- `tests/unit/test_field.nim` — field arithmetic sanity.
+- `tests/unit/test_ed25519.nim` — RFC 8032 §7.1 vectors + §5.1.3 canonicity edges.
+- `tests/unit/test_x25519.nim` — RFC 7748 §5.2/§6.1 vectors (incl. 1000-iteration ladder).
+- `tests/unit/test_wycheproof.nim`, `test_wycheproof_x25519.nim` — Google Wycheproof adversarial vectors (vendored in `tests/vectors/`, from C2SP/wycheproof `testvectors_v1`). These must stay at zero failures.
 
 ### The validation bar (what earns trust without an audit)
 This is the project's whole reason for caution — hold new code to it:
-- Bit-exact pass of **RFC 8032** (ed25519) and **RFC 7748** (X25519) vectors.
-- Pass **Google Wycheproof** adversarial vectors — the verifier must reject every malleable/non-canonical/small-order forgery.
-- A **dudect/ctgrind-style timing harness** (intended `tests/ct/`) for the signer once it exists.
+- Bit-exact pass of **RFC 8032** (ed25519) and **RFC 7748** (X25519) vectors. ✅ enforced in CI-less reality by `nimble test`.
+- Pass **Google Wycheproof** adversarial vectors — the verifier must reject every malleable/non-canonical/small-order forgery. ✅ `test_wycheproof*.nim`.
+- A **dudect/ctgrind-style timing harness** (intended `tests/ct/`) for the signer once it exists. ❌ not yet.
 
 ## Conventions
 - Port from permissively-licensed references (ref10/djb, TweetNaCl, orlp) and **attribute in the module header** as existing files do. Get functional correctness against vectors first, then CT-harden the signer.
-- Secrets (when signing lands): fixed-size stack `array[N, uintXX]`, never `seq`/`string`; zero allocation in the hot path.
+- Secrets (signing, X25519 scalars): fixed-size stack `array[N, uintXX]`, never `seq`/`string`; zero allocation in the hot path.
+- Scratch/diagnostic files from debugging sessions do not get committed — the maintained suite lives in `tests/unit/`, and `build/` catches binaries.

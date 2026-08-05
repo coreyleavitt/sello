@@ -544,5 +544,14 @@ func feCMove*(r: var Fe; a: Fe; b: bool) {.inline.} =
   for i in 0..<10:
     r.limbs[i] = r.limbs[i] xor ((r.limbs[i] xor a.limbs[i]) and mask)
 
+func feCSwap*(a, b: var Fe; swap: bool) {.inline.} =
+  ## Constant-time conditional swap: exchanges a and b iff swap is true.
+  ## Arithmetic masking, no secret-dependent branch.
+  let mask = -int32(swap)
+  for i in 0..<10:
+    let x = (a.limbs[i] xor b.limbs[i]) and mask
+    a.limbs[i] = a.limbs[i] xor x
+    b.limbs[i] = b.limbs[i] xor x
+
 func feCopy*(r: var Fe; a: Fe) {.inline.} =
   r = a

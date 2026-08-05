@@ -21,3 +21,5 @@ task test, "Run test suite":
   exec "nim c -r tests/unit/test_field.nim"
   exec "nim c -r tests/unit/test_ed25519.nim"
   exec "nim c -r tests/unit/test_x25519.nim"
+  exec "nim c -r tests/unit/test_wycheproof.nim"
+  exec "nim c -r tests/unit/test_wycheproof_x25519.nim"
