@@ -1,0 +1,52 @@
+# Containerfile.amox — amoxtli self-dogfood sandbox (build-capable).
+#
+# Adds the Nim toolchain + SQLite/OpenSSL dev headers to the agent runtime
+# image so the agent can compile + test amoxtli inside its own sandbox.
+#
+# Milestone 1 (this file): offline build. The workspace's resolved deps
+# (_deps/ symlinks + nim.cfg + .docker-home/milpa-cache) ride into /workspace
+# via the populate `cp -a`, so the initial compile needs NO network and NO
+# milpa — fully isolated (network=none). LLM calls go through the host daemon,
+# not this container.
+#
+# Milestone 2 (later): the add-a-dep loop — layer milpa + gh + network=bridge
+# + a host ~/.config/gh mount so `milpa fetch` resolves NEW deps in place.
+FROM ghcr.io/coreyleavitt/nim:2.2.10
+
+# The two compile deps the runtime base lacks. gcc/g++/make/glibc-devel/git/
+# curl/tar/xz are already in amoxtli/runtime.
+#   libopenssl-devel        : chronos HTTPS / OpenRouter / MCP-over-SSE compile
+RUN zypper --non-interactive install --no-recommends \
+        libopenssl-devel \
+	bash \
+        coreutils \
+        findutils \
+        tar \
+        xz \
+        gzip \
+        ca-certificates \
+        curl \
+        git \
+        openssh-clients \
+        gcc \
+        gcc-c++ \
+        make \
+        glibc-devel \
+        clang \
+        python3 \
+        python3-pip \
+        nodejs \
+        npm \
+        go \
+        rust \
+        cargo \
+        ripgrep \
+        fd \
+        jq \
+        ncurses-utils \
+    && zypper clean -a \
+    && rm -rf /var/cache/zypp/*
+
+RUN nim --version
+
+WORKDIR /workspace

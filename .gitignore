@@ -1,0 +1,8 @@
+# Nim build outputs
+nimcache/
+build/
+*.o
+*.exe
+
+# agent sandbox state
+.amoxtli/
