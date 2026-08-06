@@ -151,3 +151,8 @@ func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
 
   # Constant-time comparison would be better, but verifier has no CT req.
   return lhsBytes == rhsBytes
+
+func verify*(sig: Signature; msg: string; pk: PublicKey): bool =
+  ## Zero-copy `string` overload, matching `signing.sign`'s: `msg.
+  ## toOpenArrayByte` views the string's existing bytes in place, no copy.
+  verify(sig, msg.toOpenArrayByte(0, msg.len - 1), pk)

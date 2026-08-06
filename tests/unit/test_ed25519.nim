@@ -1,6 +1,17 @@
-import std/[unittest, options]
+import std/[unittest, options, json, strutils]
 import sello          # public facade: verify + key/signature types
 import sello/ed25519  # module internals under test: pointDecode
+
+proc hexToBytes(s: string): seq[byte] =
+  doAssert s.len mod 2 == 0
+  result = newSeq[byte](s.len div 2)
+  for i in 0 ..< result.len:
+    result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+
+proc hexToArray64(s: string): array[64, byte] =
+  let bytes = hexToBytes(s)
+  doAssert bytes.len == 64
+  for i in 0 ..< 64: result[i] = bytes[i]
 
 # RFC 8032 §7.1 Test Vectors
 # Test 1: Secret key + public key + signature + message (known answers)
@@ -55,12 +66,59 @@ const
     0xb0, 0x0d, 0x29, 0x16, 0x12, 0xbb, 0x0c, 0x00
   ]
 
+  # Test vector 3
+  tv3_pk: array[32, byte] = [
+    0xfc'u8, 0x51, 0xcd, 0x8e, 0x62, 0x18, 0xa1, 0xa3,
+    0x8d, 0xa4, 0x7e, 0xd0, 0x02, 0x30, 0xf0, 0x58,
+    0x08, 0x16, 0xed, 0x13, 0xba, 0x33, 0x03, 0xac,
+    0x5d, 0xeb, 0x91, 0x15, 0x48, 0x90, 0x80, 0x25
+  ]
+
+  tv3_msg = [0xaf'u8, 0x82]
+
+  tv3_sig: array[64, byte] = [
+    0x62'u8, 0x91, 0xd6, 0x57, 0xde, 0xec, 0x24, 0x02,
+    0x48, 0x27, 0xe6, 0x9c, 0x3a, 0xbe, 0x01, 0xa3,
+    0x0c, 0xe5, 0x48, 0xa2, 0x84, 0x74, 0x3a, 0x44,
+    0x5e, 0x36, 0x80, 0xd7, 0xdb, 0x5a, 0xc3, 0xac,
+    0x18, 0xff, 0x9b, 0x53, 0x8d, 0x16, 0xf2, 0x90,
+    0xae, 0x67, 0xf7, 0x60, 0x98, 0x4d, 0xc6, 0x59,
+    0x4a, 0x7c, 0x15, 0xe9, 0x71, 0x6e, 0xd2, 0x8d,
+    0xc0, 0x27, 0xbe, 0xce, 0xea, 0x1e, 0xc4, 0x0a
+  ]
+
+  # Test vector TEST-1024: RFC 8032 §7.1's only official multi-block-SHA-512
+  # vector (1023-byte message). Sourced by scripted extraction (never
+  # hand-retyped) from a verbatim paste of the RFC text -- see
+  # tests/vectors/gen_test1024_vector.py for the extraction and
+  # transcription self-checks applied when this JSON was generated.
+  tv1024_pk: array[32, byte] = [
+    0x27'u8, 0x81, 0x17, 0xfc, 0x14, 0x4c, 0x72, 0x34,
+    0x0f, 0x67, 0xd0, 0xf2, 0x31, 0x6e, 0x83, 0x86,
+    0xce, 0xff, 0xbf, 0x2b, 0x24, 0x28, 0xc9, 0xc5,
+    0x1f, 0xef, 0x7c, 0x59, 0x7f, 0x1d, 0x42, 0x6e
+  ]
+
+const rawTest1024Vector = staticRead("../vectors/test1024_vector.json")
+
+let
+  tv1024Vector = parseJson(rawTest1024Vector)
+  tv1024_msg: seq[byte] = hexToBytes(tv1024Vector["message"].getStr)
+  tv1024_sig: array[64, byte] = hexToArray64(tv1024Vector["signature"].getStr)
+
 suite "ed25519 verify - RFC 8032 test vectors":
   test "verify empty message (RFC 8032 §7.1 test 1)":
     check verify(tv1_sig, tv1_msg, tv1_pk)
 
   test "verify 1-byte message (RFC 8032 §7.1 test 2)":
     check verify(tv2_sig, tv2_msg, tv2_pk)
+
+  test "verify 2-byte message (RFC 8032 §7.1 test 3)":
+    check verify(tv3_sig, tv3_msg, tv3_pk)
+
+  test "verify 1023-byte message, multi-block SHA-512 (RFC 8032 §7.1 TEST-1024)":
+    doAssert tv1024_msg.len == 1023  # transcription self-check, belt-and-suspenders
+    check verify(tv1024_sig, tv1024_msg, tv1024_pk)
 
   test "verify rejects wrong public key":
     var wrongPk: array[32, byte]

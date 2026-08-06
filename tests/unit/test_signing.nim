@@ -4,9 +4,30 @@
 ## Keygen vectors: RFC 8032 §7.1 TEST 1, 2, 3, and TEST-1024 (seed ->
 ## public key only; the signatures themselves land with slices 6-7).
 
-import std/[unittest, osproc, os, strutils]
+import std/[unittest, osproc, os, strutils, json]
 import sello/signing
 import sello/ed25519  # PublicKey/Signature types, and verify() for roundtrips
+
+# RFC 8032 §7.1 TEST-1024: the 1023-byte-message vector, sourced by scripted
+# extraction (never hand-retyped) from a verbatim paste of the RFC text --
+# see tests/vectors/gen_test1024_vector.py for the extraction and the
+# transcription self-checks (length, endpoint bytes, and cross-check
+# against the tv1024_sk/tv1024_pk constants above) applied when
+# tests/vectors/test1024_vector.json was generated. It is the only official
+# vector long enough to exercise SHA-512's multi-block compression path --
+# exactly where a fresh signer implementation tends to break.
+const rawTest1024Vector = staticRead("../vectors/test1024_vector.json")
+
+proc hexToBytes(s: string): seq[byte] =
+  doAssert s.len mod 2 == 0
+  result = newSeq[byte](s.len div 2)
+  for i in 0 ..< result.len:
+    result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+
+proc hexToArray64(s: string): array[64, byte] =
+  let bytes = hexToBytes(s)
+  doAssert bytes.len == 64
+  for i in 0 ..< 64: result[i] = bytes[i]
 
 const
   # RFC 8032 §7.1 TEST 1
@@ -51,8 +72,10 @@ const
     0x5d, 0xeb, 0x91, 0x15, 0x48, 0x90, 0x80, 0x25
   ]
 
-  # RFC 8032 §7.1 TEST-1024 (the 1023-byte-message vector; only the
-  # seed/public-key half is needed until slices 6-7 add the signature).
+  # RFC 8032 §7.1 TEST-1024 seed/public key (the message/signature come
+  # from the scripted extraction below -- 1023 bytes is too long to
+  # hand-transcribe without risking exactly the transposed-digit bug this
+  # vector exists to catch).
   tv1024_sk: array[32, byte] = [
     0xf5'u8, 0xe5, 0x76, 0x7c, 0xf1, 0x53, 0x31, 0x95,
     0x17, 0x63, 0x0f, 0x22, 0x68, 0x76, 0xb8, 0x6c,
@@ -65,6 +88,11 @@ const
     0xce, 0xff, 0xbf, 0x2b, 0x24, 0x28, 0xc9, 0xc5,
     0x1f, 0xef, 0x7c, 0x59, 0x7f, 0x1d, 0x42, 0x6e
   ]
+
+let
+  tv1024Vector = parseJson(rawTest1024Vector)
+  tv1024_msg: seq[byte] = hexToBytes(tv1024Vector["message"].getStr)
+  tv1024_sig: Signature = hexToArray64(tv1024Vector["signature"].getStr)
 
   # RFC 8032 §7.1 TEST 1: empty message
   tv1_msg: array[0, byte] = []
@@ -128,6 +156,10 @@ suite "sign - RFC 8032 §7.1 signature vectors (bit-exact)":
   test "TEST 3: 2-byte message":
     check keypair(toSeed(tv3_sk)).sign(tv3_msg) == tv3_sig
 
+  test "TEST-1024: 1023-byte message (exercises SHA-512's multi-block path)":
+    doAssert tv1024_msg.len == 1023  # transcription self-check, belt-and-suspenders
+    check keypair(toSeed(tv1024_sk)).sign(tv1024_msg) == tv1024_sig
+
 suite "sign - roundtrip against the pure verifier":
   test "TEST 1: sello's own signature verifies under sello's own verify()":
     let kp = keypair(toSeed(tv1_sk))
@@ -141,10 +173,44 @@ suite "sign - roundtrip against the pure verifier":
     let kp = keypair(toSeed(tv3_sk))
     check verify(kp.sign(tv3_msg), tv3_msg, kp.public)
 
+  test "TEST-1024: sello's own signature verifies under sello's own verify()":
+    let kp = keypair(toSeed(tv1024_sk))
+    check verify(kp.sign(tv1024_msg), tv1024_msg, kp.public)
+
   test "a tampered message fails verification":
     let kp = keypair(toSeed(tv1_sk))
     let sig = kp.sign(tv2_msg)
     check not verify(sig, tv1_msg, kp.public)
+
+suite "sign/verify - string overload (zero-copy openArray[byte] view)":
+  test "sign(kp, string) matches sign(kp, openArray[byte]) for the same bytes":
+    let kp = keypair(toSeed(tv1_sk))
+    check kp.sign("hello") == kp.sign(@[0x68'u8, 0x65, 0x6c, 0x6c, 0x6f])
+
+  test "sign(kp, string) is deterministic, same as the byte overload":
+    let kp = keypair(toSeed(tv3_sk))
+    check kp.sign("hi") == kp.sign(@[0x68'u8, 0x69])
+
+  test "sign(kp, \"\") matches sign(kp, empty byte array)":
+    let kp = keypair(toSeed(tv1_sk))
+    check kp.sign("") == kp.sign(tv1_msg)
+
+  test "verify(sig, string, pk) matches verify(sig, openArray[byte], pk)":
+    let kp = keypair(toSeed(tv1_sk))
+    let sig = kp.sign("hello")
+    check verify(sig, "hello", kp.public)
+
+  test "verify(sig, \"\", pk) matches the empty-message vector":
+    check verify(tv1_sig, "", tv1_pk)
+
+  test "string round trip: sign then verify via the string overloads":
+    let kp = keypair(toSeed(tv2_sk))
+    check verify(kp.sign("round trip"), "round trip", kp.public)
+
+  test "string overload rejects a tampered message":
+    let kp = keypair(toSeed(tv1_sk))
+    let sig = kp.sign("hello")
+    check not verify(sig, "goodbye", kp.public)
 
 suite "keypair(seed) - invariant":
   test "kp.public == derive(kp.seed): re-deriving from the returned seed matches":

@@ -156,3 +156,11 @@ func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## access — see the module doc comment) and never persists an expanded
   ## key.
   backend.signDetached(kp.seed.bytes, msg)
+
+func sign*(kp: Keypair; msg: string): Signature =
+  ## Zero-copy `string` overload: `openArray[byte]` does not accept
+  ## `string` in Nim, and `kp.sign("hello")` failing to compile flunks the
+  ## ergonomics bar. `msg.toOpenArrayByte` views the string's existing
+  ## bytes in place -- no copy, no allocation. `ed25519.verify` gains the
+  ## matching additive overload in the same slice.
+  kp.sign(msg.toOpenArrayByte(0, msg.len - 1))

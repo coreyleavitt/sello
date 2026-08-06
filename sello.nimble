@@ -17,11 +17,24 @@ requires "nimcrypto >= 0.4.0"
 # Optional libsodium FFI signer adapter (behind -d:selloLibsodium)
 # requires "libsodium"  # conditional, see ed25519.nim
 
+# Single source of truth for "which unit test files make up the suite" --
+# consumed by `test` below and, from RFC-001 slice 10 on, by
+# `testLibsodium` too (same files, extra `-d:` defines). Two
+# hand-maintained lists would silently drift; this is the one list.
+const unitTestFiles = [
+  "tests/unit/test_field.nim",
+  "tests/unit/test_scalar.nim",
+  "tests/unit/test_signing.nim",
+  "tests/unit/test_ed25519.nim",
+  "tests/unit/test_facade.nim",
+  "tests/unit/test_x25519.nim",
+  "tests/unit/test_wycheproof.nim",
+  "tests/unit/test_wycheproof_x25519.nim",
+]
+
+proc runUnitTests(extraDefines = "") =
+  for f in unitTestFiles:
+    exec "nim c " & extraDefines & " -r " & f
+
 task test, "Run test suite":
-  exec "nim c -r tests/unit/test_field.nim"
-  exec "nim c -r tests/unit/test_scalar.nim"
-  exec "nim c -r tests/unit/test_signing.nim"
-  exec "nim c -r tests/unit/test_ed25519.nim"
-  exec "nim c -r tests/unit/test_x25519.nim"
-  exec "nim c -r tests/unit/test_wycheproof.nim"
-  exec "nim c -r tests/unit/test_wycheproof_x25519.nim"
+  runUnitTests()
