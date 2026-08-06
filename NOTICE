@@ -50,12 +50,16 @@ https://tweetnacl.cr.yp.to/
 nimcrypto (Eugene Kabanov / cheatfate)
 https://github.com/cheatfate/nimcrypto
 
-  MIT License. Copyright (c) 2016-2018 Eugene Kabanov.
+  MIT License. Copyright (c) 2018 Eugene Kabanov.
 
-  Vendored in full under vendor/nimcrypto/ (see nim.cfg's `path="vendor"`)
-  and used unmodified as sello's SHA-512 implementation (RFC 8032's
-  internal hash) -- the one primitive sello deliberately does not
-  reimplement. Full MIT license text:
+  Not vendored: resolved as an ordinary dependency and used unmodified as
+  sello's SHA-512 implementation (RFC 8032's internal hash) -- the one
+  primitive sello deliberately does not reimplement. Development pins it
+  via milpa (milpa.kdl/milpa.lock) to tag v0.7.3, commit
+  b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08, content-addressed by milpa.lock's
+  dag-sha256 identity; nimble-ecosystem consumers resolve it via the
+  `requires "nimcrypto >= 0.7.3"` floor in sello.nimble. Full MIT license
+  text (verbatim from upstream LICENSE):
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the

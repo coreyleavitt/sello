@@ -4,5 +4,10 @@ build/
 *.o
 *.exe
 
+# milpa-managed dep symlinks + nim.cfg (regenerated on `milpa fetch`).
+# milpa.kdl and milpa.lock ARE committed.
+_deps/
+nim.cfg
+
 # agent sandbox state
 .amoxtli/
