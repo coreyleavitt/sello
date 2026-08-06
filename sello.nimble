@@ -39,3 +39,18 @@ proc runUnitTests(extraDefines = "") =
 
 task test, "Run test suite":
   runUnitTests()
+
+# RFC-001 slice 9: dudect-style constant-time timing harness. Deliberately
+# a SEPARATE task from `test` -- it is statistical and environment-
+# sensitive (t-statistics, not a fixed pass/fail vector), takes much longer
+# (>= 1e6 samples/class per target), and its honest interpretation belongs
+# in docs/ct-results.md, not in the green/red signal of the main suite.
+task ct, "Run tests/ct dudect constant-time timing harness (not part of `test`)":
+  exec "nim c -d:release --outdir:build tests/ct/ct_main.nim"
+  let bin = "build/ct_main"
+  if findExe("taskset").len > 0:
+    echo "pinning to core 0 via taskset"
+    exec "taskset -c 0 " & bin
+  else:
+    echo "taskset not found -- running WITHOUT CPU pinning (see docs/ct-results.md)"
+    exec bin
