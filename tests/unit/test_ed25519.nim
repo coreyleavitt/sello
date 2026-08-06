@@ -1,6 +1,7 @@
 import std/[unittest, options, json, strutils]
 import sello          # public facade: verify + key/signature types
 import sello/ed25519  # module internals under test: pointDecode
+import sello/scalar   # L, for the S == L backstop test below
 
 proc hexToBytes(s: string): seq[byte] =
   doAssert s.len mod 2 == 0
@@ -171,3 +172,31 @@ suite "ed25519 point decoding - canonicity":
   test "verify rejects non-canonical public key":
     let badPk = fieldEnc(0xEE, 0xFF, 0x7F)
     check not verify(toSignature(tv1_sig), tv1_msg, toPublicKey(badPk))
+
+# RFC-001 ledger finding 21c: local backstop tests, independent of the
+# vendored Wycheproof JSON, for the two most structurally interesting
+# rejection edges verify must hit -- so the vendored vector set going
+# missing or being edited would not be the only thing standing between a
+# regression here and a green suite.
+suite "ed25519 - local backstop tests (RFC-001 ledger finding 21c, Wycheproof-independent)":
+  test "verify rejects a signature with S == L exactly (not canonical, S must be < L)":
+    ## Starts from a genuinely valid signature (TEST 1), then replaces S
+    ## (the signature's second 32 bytes) with L itself, encoded exactly the
+    ## way `scIsCanonical`/`scReduce` expect (little-endian, matching
+    ## `scalar.L`'s own representation) -- RFC 8032 §5.1.7 step 1 requires
+    ## S < L, and L itself is the smallest value that must be rejected as
+    ## the boundary case one-past-canonical.
+    var sig = tv1_sig
+    for i in 0 ..< 32: sig[32 + i] = scalar.L[i]
+    check not verify(toSignature(sig), tv1_msg, toPublicKey(tv1_pk))
+
+  test "pointDecode rejects a canonical y with no square root (u/v is a non-residue)":
+    ## y = 2, canonically encoded (sign bit 0, well under p), is not a
+    ## canonicity or x=0-sign-bit rejection (both already covered above)
+    ## -- it fails RFC 8032 §5.1.3's step 3 recovery because (y^2-1)/
+    ## (d*y^2+1) has no square root mod p. Found by direct computation
+    ## (Legendre symbol check against sello's own curve constants: p =
+    ## 2^255-19, d = -121665/121666 mod p) rather than searched for at test
+    ## run time, so this pins a specific, reproducible non-residue rather
+    ## than depending on a search happening to find one.
+    check pointDecode(fieldEnc(0x02, 0x00, 0x00)).isNone

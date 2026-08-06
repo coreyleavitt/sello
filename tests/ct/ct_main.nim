@@ -13,10 +13,17 @@
 ##     trusted on functions that are supposed to be flat. Expected
 ##     verdict: FAIL (t > 10), and a FAIL here is the *correct*, passing
 ##     outcome for the harness sanity check.
-##   - `signDetached` -- the full RFC 8032 §5.1.6 signing operation
-##     (`sello/private/backend.signDetached`): seed expansion, clamping,
-##     both fixed-base scalarmults, and `scMulAdd` in one call. The
-##     highest-value target -- it is what ships.
+##   - `signDetached` -- the full RFC 8032 §5.1.6 signing operation, via
+##     `sello/private/backend.derivePublic` followed by
+##     `sello/private/backend.signDetached` (RFC-001 ledger finding 13
+##     changed `signDetached`'s contract to take the public key as a
+##     parameter rather than re-deriving it, so timing this target
+##     end-to-end from a fresh seed now means calling both functions in
+##     sequence -- exactly mirroring the real `keypair(seed)` then
+##     `kp.sign(msg)` call sequence in `signing.nim`, just without
+##     `Keypair`'s wrapping): seed expansion, clamping, both fixed-base
+##     scalarmults, and `scMulAdd`. The highest-value target -- it is what
+##     ships.
 ##   - `geScalarmultBase` -- the fixed-base scalarmult in isolation
 ##     (`sello/scalar.geScalarmultBase`), since it is this RFC's new
 ##     secret-facing arithmetic (radix-16 recoding + `cmovCached` select)
@@ -74,7 +81,13 @@ proc leakyOp(secret: array[32, byte]): uint64 =
 # ---------------------------------------------------------------------------
 
 proc opSignDetached(seed: array[32, byte]): uint64 =
-  let sig = backend.signDetached(seed, fixedMsg.toOpenArrayByte(0, fixedMsg.len - 1))
+  ## `derivePublic` then `signDetached` in sequence -- see the module doc
+  ## comment (RFC-001 ledger finding 13): this is what a fresh
+  ## `keypair(seed)` + `kp.sign(msg)` call pair does under the hood, now
+  ## that `signDetached` takes the public key as a parameter instead of
+  ## re-deriving it.
+  let pub = backend.derivePublic(seed)
+  let sig = backend.signDetached(seed, pub, fixedMsg.toOpenArrayByte(0, fixedMsg.len - 1))
   var acc: uint64 = 0
   for b in sig: acc = (acc shl 1) or uint64(b and 1'u8)
   acc

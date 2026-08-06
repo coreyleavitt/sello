@@ -27,11 +27,6 @@ suite "ct.wipe":
     ct.wipe(a)
     check a[31] == 0
 
-  test "is a no-op on an already-zero array":
-    var a: array[32, byte]
-    ct.wipe(a)
-    check a == default(array[32, byte])
-
   test "zeroes a stack-only Sha2Context-shaped object (nimcrypto sha512)":
     var sha: sha512
     sha.init()

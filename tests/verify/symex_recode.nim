@@ -91,15 +91,21 @@ import sello/scalar  # for the cross-check only, not entered by symex (see below
 # available, or (b) re-running the whole-loop attempt with an ever-larger
 # timeout hoping it eventually lands.
 
-proc oneStep(nibble: int32, carryIn: int32): int32 =
+proc oneStep(nibble: int32, carryIn: int32): tuple[digit, carryOut: int32] =
   ## Verbatim body of one non-final loop iteration of
   ## `recodeScalarRadix16` (scalar.nim), with `result[i]` renamed
   ## `nibble` (the pre-carry value) and `carry`/`carryOut` made explicit
   ## parameter/local values instead of loop-carried state. Both
   ## postconditions (digit range AND carry-out range) are asserted here,
   ## in the same symbolic run, so a single `sxUnsat` verdict covers both
-  ## halves of the inductive step at once; the digit is still returned so
-  ## a caller (the cross-check below) can use this as an oracle too.
+  ## halves of the inductive step at once. Returns BOTH `digit` and
+  ## `carryOut` (a tuple, not just `digit`) so the cross-check below can
+  ## call this exact function in a loop, threading `carryOut` into the
+  ## next call's `carryIn` the same way `recodeScalarRadix16`'s own loop
+  ## threads its `carry` local -- `symexFind` only inspects a proc's
+  ## PARAMETERS to build its witness tuple (see `proptest/symex`'s
+  ## `parseProc`/`emitTyAndReader`), so widening the return type from
+  ## `int32` to this tuple changes nothing about what gets proved below.
   symexAssume(nibble >= 0'i32 and nibble <= 15'i32)   # a nibble from `s[i] and 0xF` / `(s[i] shr 4) and 0xF`
   symexAssume(carryIn == 0'i32 or carryIn == 1'i32)   # the loop's own invariant, established by induction (see module doc)
   var digit = nibble + carryIn
@@ -107,46 +113,64 @@ proc oneStep(nibble: int32, carryIn: int32): int32 =
   digit = digit - (carryOut shl 4'i32)
   symexAssert(digit >= -8'i32 and digit <= 7'i32)
   symexAssert(carryOut == 0'i32 or carryOut == 1'i32)
-  digit
+  (digit, carryOut)
 
-proc finalStep(nibble: int32, carryIn: int32) =
+proc finalStep(nibble: int32, carryIn: int32): int32 =
   ## The i == 63 case: `result[63] += carry` with NO subsequent
   ## truncation (the loop that shifts/masks only runs `for i in 0 ..< 63`;
   ## index 63 is folded in afterward as a single `+=`). The nibble bound
   ## is tighter than the general [0,15] case: `s[31] shr 4` is the TOP
   ## nibble of the scalar's last byte, and the bit-255-clear precondition
   ## is exactly "that nibble's own top bit is clear," i.e. the nibble is
-  ## in [0,7], not [0,15].
+  ## in [0,7], not [0,15]. Returns `digit` (previously a bare assertion
+  ## with no return value) so the cross-check below can use this exact
+  ## function to produce `result[63]`, the same way `oneStep` produces
+  ## `result[0..62]`.
   symexAssume(nibble >= 0'i32 and nibble <= 7'i32)
   symexAssume(carryIn == 0'i32 or carryIn == 1'i32)
   let digit = nibble + carryIn
   symexAssert(digit >= -8'i32 and digit <= 8'i32)
+  digit
 
 # -----------------------------------------------------------------------
 # Empirical evidence (not the machine-checked artifact itself): the real,
-# imported `recodeScalarRadix16` and the loop-body arithmetic above agree
-# on concrete vectors. This is ordinary testing, not symbolic execution --
-# it does not extend the proof to the full input domain (that's what the
-# lemmas above are for) -- but it does confirm `oneStep`/`finalStep` are
-# transcribed correctly from the real loop rather than a plausible-looking
-# but subtly wrong rewrite.
+# imported `recodeScalarRadix16` and `oneStep`/`finalStep` -- called
+# directly, in a loop, threading the carry exactly as the real loop does --
+# agree on concrete vectors. This is ordinary testing, not symbolic
+# execution -- it does not extend the proof to the full input domain
+# (that's what the lemmas above are for) -- but it directly exercises the
+# same functions `symexFind` proves below, so a future edit that breaks
+# their agreement with `recodeScalarRadix16` cannot slip past unnoticed
+# (round-2 finding 31: an earlier version of this cross-check compared
+# against a separate `viaSteps` transcription instead of `oneStep`/
+# `finalStep` themselves, so it could not have caught that class of drift).
 proc crossCheckAgainstRealImplementation() =
-  proc viaSteps(s: array[32, byte]): array[64, int32] =
+  ## Calls `oneStep`/`finalStep` -- the EXACT functions `symexFind` proves
+  ## below, not a third transcription of the same arithmetic -- directly,
+  ## in a loop that threads the carry precisely the way
+  ## `recodeScalarRadix16`'s own loop does (`carry` starts at 0, each
+  ## `oneStep` call's `carryOut` becomes the next call's `carryIn`,
+  ## `finalStep` closes out index 63). Round-2 finding 31: the previous
+  ## version of this cross-check instead ran a separate `viaSteps` proc, a
+  ## THIRD hand-transcribed copy of the loop body that happened to also
+  ## match `recodeScalarRadix16` -- meaning this check could pass even if
+  ## `oneStep`/`finalStep` themselves (the functions actually handed to
+  ## `symexFind`) had silently drifted from the real function, since
+  ## nothing here ever called them. Calling them directly closes that
+  ## gap: this cross-check and the `symexFind` calls below now run the
+  ## identical code, so a future edit to either lemma that breaks its
+  ## agreement with `recodeScalarRadix16` fails loudly here before the
+  ## solver ever runs.
+  proc runOneStepFinalStep(s: array[32, byte]): array[64, int32] =
     for i in 0 ..< 32:
       result[2 * i] = int32(s[i] and 0xF)
       result[2 * i + 1] = int32((s[i] shr 4) and 0xF)
     var carry: int32 = 0
-    for i in 0 ..< 62:
-      var digit = result[i] + carry
-      carry = (digit + 8'i32) shr 4'i32
-      digit = digit - (carry shl 4'i32)
+    for i in 0 ..< 63:
+      let (digit, carryOut) = oneStep(result[i], carry)
       result[i] = digit
-    block:
-      var digit = result[62] + carry
-      carry = (digit + 8'i32) shr 4'i32
-      digit = digit - (carry shl 4'i32)
-      result[62] = digit
-    result[63] = result[63] + carry
+      carry = carryOut
+    result[63] = finalStep(result[63], carry)
 
   var vectors: seq[array[32, byte]]
   var allZero: array[32, byte]
@@ -169,13 +193,14 @@ proc crossCheckAgainstRealImplementation() =
 
   for v in vectors:
     let fromReal = recodeScalarRadix16(v)
-    let fromSteps = viaSteps(v)
+    let fromSteps = runOneStepFinalStep(v)
     doAssert fromReal == fromSteps,
       "oneStep/finalStep's arithmetic has drifted from the real " &
       "recodeScalarRadix16 -- the lemmas below would be proving " &
       "something other than this function's actual loop body."
-  echo "cross-check OK: oneStep/finalStep's arithmetic matches the real " &
-       "recodeScalarRadix16 on ", vectors.len, " concrete vectors"
+  echo "cross-check OK: oneStep/finalStep (called directly, carry threaded " &
+       "exactly as the real loop does) match recodeScalarRadix16 on ",
+       vectors.len, " concrete vectors"
 
 crossCheckAgainstRealImplementation()
 

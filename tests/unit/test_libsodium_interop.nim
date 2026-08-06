@@ -52,21 +52,23 @@ when defined(selloLibsodium):
     test "libsodium-produced signature verifies under sello's pure verify":
       let msg = "sello <-> libsodium interop (sodium sign, pure verify)"
       let pk = keypair(toSeed(seedBytes)).public
-      let sodiumSig = backend_sodium.signDetached(seedBytes, msg.toOpenArrayByte(0, msg.len - 1))
+      let sodiumSig = backend_sodium.signDetached(seedBytes, array[32, byte](pk),
+        msg.toOpenArrayByte(0, msg.len - 1))
       check verify(Signature(sodiumSig), msg, pk)
 
     test "identical signatures byte-for-byte for the same (seed, msg) -- deterministic EdDSA":
       let kp = keypair(toSeed(seedBytes))
       let msg = "sello <-> libsodium interop (determinism)"
       let pureSig = kp.sign(msg)
-      let sodiumSig = backend_sodium.signDetached(seedBytes, msg.toOpenArrayByte(0, msg.len - 1))
+      let sodiumSig = backend_sodium.signDetached(seedBytes, array[32, byte](kp.public),
+        msg.toOpenArrayByte(0, msg.len - 1))
       check array[64, byte](pureSig) == sodiumSig
 
     test "empty-message interop (RFC 8032 TEST1's degenerate edge case)":
       let emptyMsg: array[0, byte] = []
       let kp = keypair(toSeed(seedBytes))
       let pureSig = kp.sign(emptyMsg)
-      let sodiumSig = backend_sodium.signDetached(seedBytes, emptyMsg)
+      let sodiumSig = backend_sodium.signDetached(seedBytes, array[32, byte](kp.public), emptyMsg)
       check array[64, byte](pureSig) == sodiumSig
       check backend_sodium.sodiumVerifyDetached(array[64, byte](pureSig), emptyMsg,
         array[32, byte](kp.public))

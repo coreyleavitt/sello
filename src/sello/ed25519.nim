@@ -101,6 +101,20 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
 
 func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
   ## Verify an ed25519 signature. Returns false for invalid inputs.
+  ##
+  ## **Malleability (RFC-001 ledger finding 19):** this checks the RFC
+  ## 8032 §5.1.7 group equation in its cofactorless form (`[S]B == R +
+  ## [k]A`), as the RFC itself specifies -- it does not multiply through by
+  ## the cofactor. That equation admits low-order components: for a given
+  ## valid `(sig, msg, pk)`, adding a small-order point's contribution to
+  ## `R` (and adjusting `S` to compensate) can produce a second, distinct
+  ## signature that this function ALSO accepts for the same `(msg, pk)`.
+  ## This is standard, RFC-conformant ed25519 behavior, not a bug specific
+  ## to this implementation -- but it does mean signature bytes are not a
+  ## unique identifier for a `(msg, pk)` pair. Callers must not build
+  ## dedup/uniqueness/replay-detection logic keyed on the signature bytes
+  ## themselves; key such logic on `(msg, pk)`, or another value chosen for
+  ## that purpose, instead.
   let sigBytes = toBytes(sig)
   let pkBytes = toBytes(pk)
 

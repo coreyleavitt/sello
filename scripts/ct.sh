@@ -15,6 +15,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Lockfile-conformance preflight (RFC-001 ledger finding 30) -- see
+# scripts/lib/milpa-preflight.sh for exactly what this does and does not
+# treat as fatal.
+source "$(dirname "$0")/lib/milpa-preflight.sh"
+milpa_preflight
+
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
 podman run --rm \

@@ -182,6 +182,74 @@ suite "sign - roundtrip against the pure verifier":
     let sig = kp.sign(tv2_msg)
     check not verify(sig, tv1_msg, kp.public)
 
+suite "sign - determinism (RFC-001 ledger finding 21a)":
+  ## `sign`'s doc comment already states determinism as a contract
+  ## ("the same (kp, msg) pair always yields the same signature") but
+  ## nothing directly pinned it as a regression until now -- every other
+  ## test compares against a fixed RFC vector or a roundtrip, neither of
+  ## which would catch a hypothetical accidental source of nonce
+  ## randomness (e.g. an errant `keypair()` call site) producing two
+  ## different, both-individually-valid signatures for the same input.
+  test "signing the same (kp, msg) pair twice yields byte-identical signatures":
+    let kp = keypair(toSeed(tv1_sk))
+    check kp.sign(tv1_msg) == kp.sign(tv1_msg)
+
+  test "signing the same (kp, msg) pair twice yields byte-identical signatures (nonempty message)":
+    let kp = keypair(toSeed(tv3_sk))
+    check kp.sign(tv3_msg) == kp.sign(tv3_msg)
+
+suite "sign/verify - SHA-512 block-boundary message lengths (RFC-001 ledger finding 21b)":
+  ## SHA-512 pads with a 0x80 byte plus a 16-byte length field, so an
+  ## input of N raw bytes fits in exactly one 128-byte block iff N <= 111
+  ## (N=112 spills into a second block) -- RFC 8032's own vectors only
+  ## exercise a single short message plus TEST-1024's 1023 bytes, so
+  ## nothing pins this boundary directly. `signDetached`/`verify` never
+  ## hash `msg` alone, though -- they hash a fixed-size prefix (the
+  ## 32-byte nonce prefix, or the 64-byte R‖A challenge input) concatenated
+  ## with `msg` via multi-part `update()` calls, so the byte offset at
+  ## which a REAL call's total input crosses a block boundary is shifted
+  ## by that prefix length rather than landing exactly at `msg.len` itself.
+  ## Rather than hand-deriving the exact shifted boundary for every call
+  ## site, this suite brackets the whole neighborhood -- 55/56, 64, 111/112
+  ## (the boundary for a bare SHA-512(msg) call), and 127/128 (one full
+  ## block) -- so multi-part hashing at a variety of block-relative offsets
+  ## gets exercised regardless of which prefix length applies at a given
+  ## call site.
+  test "sign/verify roundtrips at every SHA-512 block-boundary length":
+    let kp = keypair(toSeed(tv2_sk))
+    for length in [55, 56, 64, 111, 112, 127, 128]:
+      var msg = newSeq[byte](length)
+      for i in 0 ..< length: msg[i] = byte((i * 37 + 11) mod 256)
+      let sig = kp.sign(msg)
+      check verify(sig, msg, kp.public)
+      # Belt-and-suspenders: determinism holds at every boundary length too.
+      check kp.sign(msg) == sig
+
+suite "Keypair lifecycle (RFC-001 ledger finding 16)":
+  test "wipe(kp) zeroes the secret half; the public key is untouched":
+    ## Same probe methodology as `Seed`'s own destructor smoke tests above:
+    ## a raw pointer captured before the wipe, re-read after. `Keypair`'s
+    ## `seed` field is a `Seed` (itself a one-field object wrapping
+    ## `array[32, byte]`), so aliasing `addr kp` as `ptr Seed` at the right
+    ## offset would be fragile; instead this reads back through the public
+    ## `seed()`/`public()` accessors, which is exactly what an external
+    ## caller of `wipe(var Keypair)` can observe too.
+    var kp = keypair(toSeed(tv1_sk))
+    let publicBefore = kp.public
+    wipe(kp)
+    check kp.public == publicBefore  # untouched -- not secret, not wiped
+    check kp.seed() == toSeed(default(array[32, byte]))
+
+  test "wipe(kp) does not prevent kp's own =destroy from firing safely at scope exit":
+    ## Wiping twice (once explicitly, once via `=destroy` at scope exit)
+    ## must not double-free or otherwise misbehave -- `ct.wipe` on an
+    ## already-zero array is a defined, harmless no-op.
+    block:
+      var kp = keypair(toSeed(tv2_sk))
+      wipe(kp)
+      check kp.seed() == toSeed(default(array[32, byte]))
+    # No crash / defect on scope exit above is itself the assertion here.
+
 suite "sign/verify - string overload (zero-copy openArray[byte] view)":
   test "sign(kp, string) matches sign(kp, openArray[byte]) for the same bytes":
     let kp = keypair(toSeed(tv1_sk))

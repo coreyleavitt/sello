@@ -22,6 +22,17 @@ suite "facade - public surface (sello.nim re-exports)":
     let kp2 = keypair(toSeed(seedBytes))
     check kp1.public == kp2.public
 
+  test "wipe(kp: var Keypair) is reachable through the facade (RFC-001 ledger finding 16)":
+    ## Confirms both halves of the contract: the secret half zeroes (via
+    ## re-deriving through the now-zero seed, same technique as the
+    ## Seed-wipe check just below) and the public half survives untouched.
+    var kp = keypair()
+    let publicBefore = kp.public
+    wipe(kp)
+    check kp.public == publicBefore
+    let zeroKp = keypair(toSeed(default(array[32, byte])))
+    check keypair(kp.seed()).public == zeroKp.public
+
   test "seed() / wipe() are reachable through the facade":
     ## Confirms wipe zeroed `s` by re-deriving through it, rather than via
     ## Seed's `==` -- the facade deliberately does not re-export `==`

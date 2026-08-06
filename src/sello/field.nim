@@ -577,9 +577,6 @@ func feCSwap*(a, b: var Fe; swap: bool) {.noinline.} =
     a.limbs[i] = a.limbs[i] xor x
     b.limbs[i] = b.limbs[i] xor x
 
-func feCopy*(r: var Fe; a: Fe) {.inline.} =
-  r = a
-
 # ---------------------------------------------------------------------------
 # Scalar clamping (RFC 8032 §5.1.5 / RFC 7748 §5): clear the low 3 bits,
 # clear bit 255, and set bit 254. Shared by X25519 (clamps the raw secret

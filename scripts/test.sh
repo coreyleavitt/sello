@@ -48,6 +48,13 @@ extra_defines=("$@")
 # is what makes that claim true).
 source "$(dirname "$0")/lib/unit-test-files.sh"
 
+# Lockfile-conformance preflight (RFC-001 ledger finding 30): fails fast on
+# the host if milpa.lock and _deps/ are genuinely out of sync, before the
+# podman invocation below ever starts. See scripts/lib/milpa-preflight.sh
+# for exactly what this does and does not treat as fatal.
+source "$(dirname "$0")/lib/milpa-preflight.sh"
+milpa_preflight
+
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
 cmd="set -e"

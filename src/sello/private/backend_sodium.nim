@@ -32,8 +32,9 @@
 ##                                  const unsigned char *pk);
 ## ```
 ##
-## `crypto_sign_seed_keypair` + `crypto_sign_detached` back `derivePublic`/
-## `signDetached` below, matching `backend.nim`'s seed-level contract
+## `crypto_sign_seed_keypair` backs `derivePublic`; `signDetached` below
+## does NOT call it (see the RFC-001 ledger finding 13 note on
+## `signDetached` itself) -- both match `backend.nim`'s seed-level contract
 ## exactly (same argument/result shapes, plain `array[32/64, byte]`, no
 ## `PublicKey`/`Signature`/`Keypair` knowledge) so `signing.nim`'s dispatch
 ## is a one-line import swap. `crypto_sign_verify_detached` is exposed too,
@@ -145,22 +146,32 @@ func derivePublic*(seed: array[32, byte]): array[32, byte] =
   result = pk
   ct.wipe(sk)
 
-func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte] =
-  ## Same contract as `backend.signDetached`: RFC 8032 §5.1.6 detached
-  ## signature, via `crypto_sign_seed_keypair` (to rebuild libsodium's
-  ## 64-byte secret key from the seed) followed by `crypto_sign_detached`.
-  ## The rebuilt secret key is wiped via `ct.wipe` before returning.
-  var pk: array[CryptoSignPublicKeyBytes, byte]
+func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
+                    msg: openArray[byte]): array[64, byte] =
+  ## Same contract as `backend.signDetached` (RFC-001 ledger finding 13:
+  ## both backends take the caller-supplied public key as a parameter
+  ## instead of re-deriving it). RFC 8032 §5.1.6 detached signature, via
+  ## `crypto_sign_detached` alone -- NOT `crypto_sign_seed_keypair` --
+  ## because libsodium's 64-byte ed25519 secret key is documented to be
+  ## exactly `seed(32) || publicKey(32)`: the public API's own
+  ## `crypto_sign_ed25519_sk_to_seed`/`crypto_sign_ed25519_sk_to_pk`
+  ## accessor functions extract the seed from `sk[0..31]` and the public
+  ## key from `sk[32..63]` respectively, which only makes sense if that
+  ## layout is a guaranteed contract, not an implementation detail this
+  ## code would otherwise be relying on undocumented behavior for.
+  ## Constructing `sk` by concatenating `seed` and `publicBytes` directly
+  ## therefore reproduces exactly what `crypto_sign_seed_keypair` would
+  ## have written into `sk`, without paying for the FFI round trip (or,
+  ## before RFC-001's finding-13 fix, computing it twice per `Keypair`:
+  ## once in `derivePublic` at construction, again here on every `sign`
+  ## call). The rebuilt secret key is wiped via `ct.wipe` before returning.
   var sk: array[CryptoSignSecretKeyBytes, byte]
+  for i in 0 ..< 32: sk[i] = seed[i]
+  for i in 0 ..< 32: sk[32 + i] = publicBytes[i]
   var sig: array[CryptoSignBytes, byte]
   var siglen: culonglong
   {.cast(noSideEffect).}:
     ensureSodiumInit()
-    let rcKeypair = c_crypto_sign_seed_keypair(
-      cast[ptr UncheckedArray[byte]](addr pk[0]),
-      cast[ptr UncheckedArray[byte]](addr sk[0]),
-      cast[ptr UncheckedArray[byte]](unsafeAddr seed[0]))
-    doAssert rcKeypair == 0, "crypto_sign_seed_keypair failed with rc=" & $rcKeypair
     let rcSign = c_crypto_sign_detached(
       cast[ptr UncheckedArray[byte]](addr sig[0]),
       addr siglen,
@@ -168,6 +179,11 @@ func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte]
       culonglong(msg.len),
       cast[ptr UncheckedArray[byte]](addr sk[0]))
     doAssert rcSign == 0, "crypto_sign_detached failed with rc=" & $rcSign
+  # RFC-001 ledger finding 20: self-checking FFI boundary -- confirm
+  # libsodium actually wrote a full 64-byte signature rather than trusting
+  # rcSign == 0 alone to mean "and siglen was what we expected."
+  doAssert siglen == CryptoSignBytes.culonglong,
+    "crypto_sign_detached returned unexpected siglen=" & $siglen
   result = sig
   ct.wipe(sk)
 

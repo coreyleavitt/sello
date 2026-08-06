@@ -25,7 +25,12 @@ API is built around that split rather than papering over it:
   RFC 8032 SS7.1 vector, and it rejects every one of the 668 adversarial
   cases in Google's [Wycheproof][wycheproof] EdDSA/X25519 vector sets
   (malleable signatures, non-canonical S, small-order points, invalid
-  point encodings). The field/curve primitives both `verify` and `sign`
+  point encodings). Note that RFC 8032's cofactorless verification
+  equation is inherently malleable in a narrower sense Wycheproof's
+  vectors don't (and can't) rule out: a second, distinct signature can
+  exist for the same message and key, so signature bytes must never be
+  used as a uniqueness/dedup key (see `verify`'s doc comment). The
+  field/curve primitives both `verify` and `sign`
   build on (`feAdd`/`feMul`/`feInvert`, `feFromBytes`/`feToBytes`,
   `scReduce`, the fixed-base scalar multiplication table) additionally get
   property-based coverage against ring axioms, near-p boundary encodings,

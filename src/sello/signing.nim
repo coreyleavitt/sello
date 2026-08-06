@@ -155,6 +155,18 @@ proc wipe*(s: var Seed) =
   ## want it sooner.
   zeroizeSeed(s)
 
+proc wipe*(kp: var Keypair) =
+  ## Eager-scrub counterpart to `wipe(var Seed)` (RFC-001 ledger finding
+  ## 16): zeroes `kp`'s secret half (its `Seed`, via the same `ct.wipe`
+  ## path `zeroizeSeed`/`Seed`'s own `=destroy` use) in place, for a caller
+  ## that wants the secret gone before `kp` itself goes out of scope.
+  ## `kp.public` is not secret and is left untouched -- it stays readable
+  ## after this call, unlike the seed. `Keypair`'s own `=destroy` (via its
+  ## `Seed` field's `=destroy`) performs the same wipe automatically at
+  ## scope exit regardless; this exists for the same "sooner, explicitly"
+  ## reason `wipe(var Seed)` does.
+  zeroizeSeed(kp.seed)
+
 func public*(kp: Keypair): PublicKey =
   ## The keypair's public key (cached at construction — never re-derived).
   kp.public
@@ -197,8 +209,12 @@ func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## signing structurally lacks. Dispatches to `backend.signDetached`,
   ## which reaches into `kp.seed`'s private bytes directly (same-module
   ## access — see the module doc comment) and never persists an expanded
-  ## key.
-  toSignature(backend.signDetached(kp.seed.bytes, msg))
+  ## key. Passes `kp.public`'s bytes through too (RFC-001 ledger finding
+  ## 13): `signDetached` uses the already-derived, already-cached public
+  ## key as `A` instead of re-deriving it from the secret scalar on every
+  ## call, which is exactly what the `Keypair` invariant
+  ## (`kp.public == derive(kp.seed)`) exists to make safe.
+  toSignature(backend.signDetached(kp.seed.bytes, toBytes(kp.public), msg))
 
 func sign*(kp: Keypair; msg: string): Signature =
   ## Zero-copy `string` overload: `openArray[byte]` does not accept

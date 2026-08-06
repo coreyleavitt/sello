@@ -29,6 +29,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Lockfile-conformance preflight (RFC-001 ledger finding 30) -- see
+# scripts/lib/milpa-preflight.sh for exactly what this does and does not
+# treat as fatal. This script does not use `set -e` (it inspects `podman
+# run`'s own exit code below to distinguish a kill-timeout from a solver
+# verdict), so the preflight's failure is checked explicitly here instead
+# of relying on shell-level errexit.
+source "$(dirname "$0")/lib/milpa-preflight.sh"
+milpa_preflight || exit 1
+
 timeout_secs="${1:-300}"
 img=localhost/sello-dev:latest
 podman image exists "$img" || podman build -t "$img" -f Containerfile .
