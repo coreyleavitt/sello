@@ -25,7 +25,24 @@ API is built around that split rather than papering over it:
   RFC 8032 SS7.1 vector, and it rejects every one of the 668 adversarial
   cases in Google's [Wycheproof][wycheproof] EdDSA/X25519 vector sets
   (malleable signatures, non-canonical S, small-order points, invalid
-  point encodings).
+  point encodings). The field/curve primitives both `verify` and `sign`
+  build on (`feAdd`/`feMul`/`feInvert`, `feFromBytes`/`feToBytes`,
+  `scReduce`, the fixed-base scalar multiplication table) additionally get
+  property-based coverage against ring axioms, near-p boundary encodings,
+  and an independent bignum reconstruction oracle -- see
+  `tests/unit/test_properties_*.nim`. On top of the curated RFC/Wycheproof
+  vectors, `pointDecode`/`verify`/`x25519` (the attacker-controlled-input
+  surface -- raw bytes nobody proved well-formed before handing them to
+  sello) also get coverage-guided fuzzing for crash/exception freedom
+  (`tests/fuzz/`, run via `scripts/fuzz.sh`) -- unstructured mutation
+  testing the ground the curated vectors don't cover by construction.
+  Separately, `recodeScalarRadix16`'s digit-range invariant (previously
+  only sampled) now has a machine-checked Z3 proof for its per-iteration
+  arithmetic step (`tests/verify/`, run via `scripts/bmc.sh`) -- see that
+  harness's module doc comment for the honest scope: the per-step lemma is
+  exhaustively proved, but the 63-step composition is a manual induction
+  argument, not itself Z3-checked, because the naive whole-function attempt
+  did not complete in this environment's resource budget.
 
 - **`sign`/`keygen` hold the secret scalar.** This is the roll-your-own-
   crypto half, and it carries the trust tax that implies:
@@ -36,7 +53,7 @@ API is built around that split rather than papering over it:
     secret (including intermediate SHA-512 hash state) as soon as it's no
     longer needed.
   - That discipline is backed by a [dudect][dudect]-style statistical
-    timing harness (`tests/ct/`, run via `nimble ct`): 1,000,000
+    timing harness (`tests/ct/`, run via `scripts/ct.sh`): 1,000,000
     interleaved fixed-vs-random-secret samples per target, Welch's t-test
     against dudect's published thresholds. The current run passes cleanly
     on all three secret-holding code paths, with a deliberately-leaky
@@ -59,9 +76,12 @@ API is built around that split rather than papering over it:
 [libsodium]: https://doc.libsodium.org/
 
 **sello has not had an external security audit.** The validation bar above
-(RFC vectors, Wycheproof, a timing harness) is what a project can
-credibly claim without one; it is evidence toward correctness and
-constant-time behavior, not proof. If your threat model requires an
+(RFC vectors, Wycheproof, a timing harness, fuzzing, and a partial machine-
+checked proof) is what a project can credibly claim without one; it is
+evidence toward correctness and constant-time behavior, not proof -- and
+the one place this library does make a machine-checked claim
+(`recodeScalarRadix16`'s digit ranges), it says exactly how far that
+checking goes rather than rounding up. If your threat model requires an
 audited implementation, use the `-d:selloLibsodium` backend for signing,
 and treat `verify`'s Wycheproof-clean record as the strongest claim this
 library makes on its own.
@@ -73,7 +93,10 @@ requires "sello"
 ```
 
 Nim >= 2.2.10. Depends on `nimcrypto` for SHA-512 (the one primitive sello
-deliberately does not reimplement); everything else is pure Nim.
+deliberately does not reimplement); everything else is pure Nim. Development
+resolves and pins `nimcrypto` via milpa (`milpa.kdl`/`milpa.lock`, commit SHA
++ content hash); nimble-ecosystem consumers resolve it normally via
+`sello.nimble`'s `requires` floor.
 
 ## Usage
 
@@ -99,7 +122,10 @@ wrapper with its own wipe-on-scope-exit destructor, not a `distinct` alias,
 so it does not get the built-in type-cast constructor syntax:
 
 ```nim
-var seedBytes: array[32, byte] = ...      # from your own KDF/storage
+import sello
+
+var seedBytes: array[32, byte]
+# fill seedBytes from your own KDF/storage
 let kp = keypair(toSeed(seedBytes))
 ```
 
@@ -121,16 +147,23 @@ deliberate decision (see `sello.nim`'s doc comment), not an oversight.
 import std/options
 import sello
 
-var aSecret, bSecret: array[32, byte]
+var aSecretBytes, bSecretBytes: array[32, byte]
 # ... fill both from a CSPRNG ...
+let aSecret = toX25519Key(aSecretBytes)
+let bSecret = toX25519Key(bSecretBytes)
 
 let aPublic = x25519Base(aSecret)
 let bPublic = x25519Base(bSecret)
 
-let shared = x25519(aSecret, bPublic)     # Option[array[32, byte]]
+let shared = x25519(aSecret, bPublic)     # Option[X25519Key]
 doAssert shared.isSome                    # None only for a small-order peer key
 doAssert shared == x25519(bSecret, aPublic)
 ```
+
+`x25519Base`/`x25519` take the nominal `X25519Key` (RFC-001 finding 9), not a
+bare `array[32, byte]` -- `toX25519Key` converts explicitly from raw bytes
+(e.g. straight out of a CSPRNG call), the same way `toSeed` does for ed25519
+seeds; `toBytes` converts back.
 
 `x25519` returns `none` rather than a shared secret when the peer supplies
 a small-order point (RFC 7748 SS6.1's zero-output check) -- callers need no
@@ -150,36 +183,51 @@ change; code written against the pure-Nim backend recompiles as-is.
 
 ## Building and testing
 
+sello is developed against milpa (Corey's Nim dependency resolver), not
+nimble: `milpa.kdl` declares `nimcrypto` as a pinned git dependency,
+`milpa fetch` clones it into `_deps/` and emits `nim.cfg`, and `milpa.lock`
+records the exact commit SHA + content hash resolved (see
+[`NOTICE`](NOTICE)). Run `milpa fetch` once after cloning.
+
+The property-based tests (`tests/unit/test_properties_*.nim`) need
+[proptest](https://github.com/coreyleavitt/proptest), declared as an
+*optional* milpa dep so plain `milpa fetch` never pulls it in for
+consumers of sello. Enable it once for local development:
+`milpa fetch --features proptest`.
+
 There is no host Nim toolchain requirement beyond the container image used
 in development; the commands below are what CI-less verification looks
 like for this project:
 
 ```sh
-podman run --rm -v "$PWD":/workspace -w /workspace \
-  ghcr.io/coreyleavitt/nim:2.2.10 nimble test
-```
-
-```sh
-nimble test                              # full suite, pure-Nim backend
-nim c -r tests/unit/test_field.nim       # one test module
+scripts/test.sh                          # full suite, pure-Nim backend
+nim c -r tests/unit/test_field.nim       # one test module (after milpa fetch)
 ```
 
 The libsodium backend and the timing harness need extra setup and are
-separate tasks, not part of `nimble test`:
+separate scripts, not part of `scripts/test.sh`:
 
 ```sh
-podman build -t sello-libsodium -f Containerfile .
-podman run --rm -v "$PWD":/workspace -w /workspace \
-  sello-libsodium nimble testLibsodium   # same suite, -d:selloLibsodium
-
-podman run --rm -v "$PWD":/workspace -w /workspace \
-  ghcr.io/coreyleavitt/nim:2.2.10 nimble ct   # dudect harness, ~1e6 samples/class
+scripts/test-libsodium.sh                # same suite, -d:selloLibsodium
+                                          # (builds the sello-dev image if missing)
+scripts/ct.sh                            # dudect harness, ~1e6 samples/class
+scripts/fuzz.sh [seconds-per-target]     # coverage-guided fuzzing, default 60s x 3 targets
+scripts/bmc.sh [timeout_secs]            # Z3-backed symex proof, default 300s hard kill-timeout
+                                          # (needs the sello-dev image, same one as test-libsodium.sh)
 ```
 
-`nimble ct` is deliberately not part of `nimble test`: it is statistical
-and environment-sensitive (a t-statistic, not a fixed pass/fail vector)
-and takes considerably longer to run. See `docs/ct-results.md` for the
-last recorded run and its measurement environment.
+`scripts/ct.sh` is deliberately not part of `scripts/test.sh`: it is
+statistical and environment-sensitive (a t-statistic, not a fixed
+pass/fail vector) and takes considerably longer to run. See
+`docs/ct-results.md` for the last recorded run and its measurement
+environment. `scripts/fuzz.sh` and `scripts/bmc.sh` are likewise separate:
+an open-ended fuzz campaign and a solver run are not fixed-assertion
+suites either. `scripts/bmc.sh` wraps its podman run in a hard external
+kill-timeout (mirroring proptest's own `scripts/dt-bounded.sh`) because Z3
+queries can fail to terminate rather than return a verdict -- see
+`tests/verify/symex_recode.nim`'s module doc comment for what happened
+when this project's own first attempt hit exactly that wall, and what it
+proves instead.
 
 ## What's not here
 
@@ -197,4 +245,4 @@ last recorded run and its measurement environment.
 
 Apache License, Version 2.0 -- see [`LICENSE`](LICENSE). Third-party
 attributions (ref10, orlp/ed25519, and TweetNaCl, all public domain; the
-vendored `nimcrypto` dependency, MIT) are in [`NOTICE`](NOTICE).
+`nimcrypto` dependency, MIT) are in [`NOTICE`](NOTICE).
