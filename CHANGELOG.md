@@ -109,6 +109,24 @@ until 1.0.0.
 
 ### Removed (breaking)
 
+- **`X25519Key` replaced by `X25519Secret`/`X25519Public`/`X25519Shared`.**
+  (RFC-001 ledger #29, revisited on Corey's direction after originally being
+  recorded `wontfix`.) X25519's three roles -- a private scalar, a public
+  u-coordinate, and a completed DH shared secret -- previously shared one
+  nominal type; that closed the cross-algorithm mixup with `ed25519.PublicKey`
+  but left same-role/wrong-argument swaps (`x25519(secret, secret)`) and
+  secret/sendable role confusion (nothing stopped a shared secret from being
+  passed where a public value was expected) uncaught. Three role-typed
+  wrappers close both: `X25519Secret` and `X25519Shared` are one-field
+  objects with a `=destroy` wipe hook and eager `wipe(...)` overloads, the
+  same shape as `Seed`; `X25519Public` is a plain `distinct array[32, byte]`,
+  freely copyable, no destructor. `toX25519Key` is gone; `toX25519Secret`/
+  `toX25519Public`/`toBytes` replace it, plus a new `x25519Secret()` for
+  fresh generation via `std/sysrand` (mirroring `signing.keypair()`). No
+  migration path for `X25519Key` itself -- construct through the new
+  role-specific converters instead. A static/ephemeral secret split
+  (x25519-dalek's consume-on-use `EphemeralSecret`) was considered and
+  deliberately deferred, not built.
 - **`SecretKey` removed from the public facade.** It was an unused,
   never-implemented placeholder type predating the signing design; the
   real signing surface is `Seed`/`Keypair` above. There is no

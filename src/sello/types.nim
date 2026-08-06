@@ -49,13 +49,14 @@
 ##
 ## `wipe*(var array[32, byte])` delegates to the one audited primitive,
 ## `private/ct.wipe`. Previously homed in `x25519.nim` alongside the
-## X25519-specific `wipe*(var X25519Key)` overload, despite covering any
-## 32-byte secret shape, not just X25519 material (e.g. a raw
-## `Seed`-shaped buffer a caller manages by hand outside `signing.Seed`).
-## Living here instead means `x25519.nim` keeps only the X25519-specific
-## overload it actually has business owning, and a future secret-holding
-## module gains the generic primitive from this shared leaf rather than
-## reaching sideways into X25519's module or duplicating the wrapper.
+## X25519-specific `wipe` overloads (`X25519Secret`/`X25519Shared` today,
+## `X25519Key` at the time of this move), despite covering any 32-byte
+## secret shape, not just X25519 material (e.g. a raw `Seed`-shaped buffer
+## a caller manages by hand outside `signing.Seed`). Living here instead
+## means `x25519.nim` keeps only the X25519-specific overloads it actually
+## has business owning, and a future secret-holding module gains the
+## generic primitive from this shared leaf rather than reaching sideways
+## into X25519's module or duplicating the wrapper.
 
 import sello/private/ct
 
@@ -91,7 +92,8 @@ func `$`*(sig: Signature): string {.borrow.}
 proc wipe*(bytes: var array[32, byte]) =
   ## Audited wipe (volatile stores + compiler barrier, see
   ## `private/ct.nim`) of raw 32-byte secret material a caller is holding
-  ## outside of any of sello's own secret-carrying types -- both `Seed`
-  ## (`signing.wipe`) and `X25519Key` (`x25519.wipe`) get their own typed
-  ## overload that delegates to this same audited primitive.
+  ## outside of any of sello's own secret-carrying types -- `Seed`
+  ## (`signing.wipe`) and `X25519Secret`/`X25519Shared` (`x25519.wipe`)
+  ## each get their own typed overload that delegates to this same
+  ## audited primitive.
   ct.wipe(bytes)

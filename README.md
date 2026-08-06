@@ -152,23 +152,27 @@ deliberate decision (see `sello.nim`'s doc comment), not an oversight.
 import std/options
 import sello
 
-var aSecretBytes, bSecretBytes: array[32, byte]
-# ... fill both from a CSPRNG ...
-let aSecret = toX25519Key(aSecretBytes)
-let bSecret = toX25519Key(bSecretBytes)
+let aSecret = x25519Secret()              # fresh, via std/sysrand
+let bSecret = x25519Secret()
 
 let aPublic = x25519Base(aSecret)
 let bPublic = x25519Base(bSecret)
 
-let shared = x25519(aSecret, bPublic)     # Option[X25519Key]
+let shared = x25519(aSecret, bPublic)     # Option[X25519Shared]
 doAssert shared.isSome                    # None only for a small-order peer key
-doAssert shared == x25519(bSecret, aPublic)
+doAssert toBytes(shared.get) == toBytes(x25519(bSecret, aPublic).get)
 ```
 
-`x25519Base`/`x25519` take the nominal `X25519Key` (RFC-001 finding 9), not a
-bare `array[32, byte]` -- `toX25519Key` converts explicitly from raw bytes
-(e.g. straight out of a CSPRNG call), the same way `toSeed` does for ed25519
-seeds; `toBytes` converts back.
+X25519 has three roles, and each gets its own nominal type (RFC-001 ledger
+#29, revisited: this replaces the earlier single `X25519Key` design):
+`X25519Secret` (a private scalar; `x25519Secret()` for a fresh one,
+`toX25519Secret(bytes)` from existing material), `X25519Public` (a public
+u-coordinate; `toX25519Public(bytes)` from a peer's wire value), and
+`X25519Shared` (a completed DH output -- feed it to a KDF, never use it
+directly as a key). `X25519Secret`/`X25519Shared` wipe themselves on scope
+exit and on explicit `wipe(...)`, the same as `Seed`; `toBytes` converts any
+of the three back to raw bytes, e.g. for persistence -- the returned copy is
+caller-owned and not itself wiped.
 
 `x25519` returns `none` rather than a shared secret when the peer supplies
 a small-order point (RFC 7748 SS6.1's zero-output check) -- callers need no

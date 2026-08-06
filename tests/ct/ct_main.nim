@@ -31,7 +31,12 @@
 ##     end-to-end sign timing.
 ##   - `x25519Base` -- the RFC 7748 Montgomery ladder over a secret
 ##     scalar (`sello/x25519.x25519Base`), covering the one secret-
-##     holding code path outside the ed25519 signing stack.
+##     holding code path outside the ed25519 signing stack. Constructs a
+##     fresh `X25519Secret` per sample via `toX25519Secret` (RFC-001
+##     ledger #29 revisited: `X25519Key` replaced by role-typed
+##     `X25519Secret`/`X25519Public`/`X25519Shared`) -- identical
+##     construction cost for both classes, so it does not perturb the
+##     measurement.
 ##
 ## For every real target, only the SECRET varies between classes (fixed
 ## vs. per-sample random); any public input (message, peer point) is
@@ -111,9 +116,9 @@ proc opGeScalarmultBase(s: array[32, byte]): uint64 =
 # ---------------------------------------------------------------------------
 
 proc opX25519Base(secret: array[32, byte]): uint64 =
-  let pk = x25519Base(X25519Key(secret))
+  let pk = x25519Base(toX25519Secret(secret))
   var acc: uint64 = 0
-  for b in array[32, byte](pk): acc = (acc shl 1) or uint64(b and 1'u8)
+  for b in toBytes(pk): acc = (acc shl 1) or uint64(b and 1'u8)
   acc
 
 # ---------------------------------------------------------------------------

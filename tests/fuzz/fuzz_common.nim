@@ -112,19 +112,23 @@ proc coveredVerify*(inp: VerifyInput) {.cover.} =
   else:
     discard
 
-const localSecretForFuzzing = X25519Key([
+let localSecretForFuzzing = toX25519Secret([
   1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
   17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32])
-  ## Fixed, non-secret placeholder scalar. The fuzz target is the PEER's
-  ## public u-coordinate only -- the attacker-controlled surface named in
-  ## the mission -- so the local scalar is a constant unstructured mutation
-  ## never touches. This is not a timing-sensitive use (no measurement is
-  ## taken here; dudect owns that), so a fixed non-random value is fine.
+  ## Fixed, non-secret placeholder scalar (RFC-001 ledger #29 revisited:
+  ## `X25519Key` replaced by role-typed `X25519Secret`/`X25519Public`/
+  ## `X25519Shared`). The fuzz target is the PEER's public u-coordinate
+  ## only -- the attacker-controlled surface named in the mission -- so
+  ## the local scalar is a constant unstructured mutation never touches.
+  ## This is not a timing-sensitive use (no measurement is taken here;
+  ## dudect owns that), so a fixed non-random value is fine. `let`, not
+  ## `const`: `X25519Secret` carries a `=destroy` hook, which a compile-time
+  ## `const` cannot (no destructor evaluation in the VM).
 
 proc coveredX25519*(peerPublic: array[32, byte]) {.cover.} =
-  let r = x25519(localSecretForFuzzing, X25519Key(peerPublic))
+  let r = x25519(localSecretForFuzzing, toX25519Public(peerPublic))
   if r.isSome:
-    let shared = array[32, byte](r.get())
+    let shared = toBytes(r.get())
     var acc: byte = 0
     for b in shared: acc = acc or b
     doAssert acc != 0'u8,

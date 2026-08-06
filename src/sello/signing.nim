@@ -17,7 +17,7 @@
 ##   `PublicKey`.** Both are 32 raw bytes underneath, and even now that
 ##   `PublicKey` is `distinct` in its own right (RFC-001 finding 9, see
 ##   `sello/types`), that only stops a *bare* `array[32, byte]` (or a
-##   different distinct type, like X25519's `X25519Key`) from being
+##   different distinct type, like X25519's `X25519Public`) from being
 ##   accepted where a `PublicKey` belongs — it does nothing to stop a
 ##   `PublicKey` and a `Seed` from being confused for each other, since
 ##   they are two independently-defined nominal types with no relation.

@@ -24,8 +24,8 @@ suite "Wycheproof X25519":
     for g in root["testGroups"]:
       for t in g["tests"]:
         let tcId = t["tcId"].getInt
-        let pub = X25519Key(fromHex32(t["public"].getStr))
-        let priv = X25519Key(fromHex32(t["private"].getStr))
+        let pub = toX25519Public(fromHex32(t["public"].getStr))
+        let priv = toX25519Secret(fromHex32(t["private"].getStr))
         var zeroExpected = false
         for f in t["flags"]:
           if f.getStr == "ZeroSharedSecret": zeroExpected = true
@@ -35,7 +35,7 @@ suite "Wycheproof X25519":
         if zeroExpected:
           ok = got.isNone
         else:
-          ok = got.isSome and array[32, byte](got.get) == fromHex32(t["shared"].getStr)
+          ok = got.isSome and toBytes(got.get) == fromHex32(t["shared"].getStr)
 
         if not ok:
           inc failures
