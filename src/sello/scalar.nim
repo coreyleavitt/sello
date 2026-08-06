@@ -444,6 +444,286 @@ func scIsCanonical*(s: array[32, byte]): bool =
     if s[i] > L[i]: return false
   return false
 
+func scMulAdd*(a, b, c: array[32, byte]): array[32, byte] =
+  ## s = (a*b + c) mod L. Ported from ref10 sc_muladd (public domain;
+  ## also shipped as libsodium's sc25519_muladd). Same radix-2^21,
+  ## 12-limb decomposition as scReduce, but here the limbs come straight
+  ## from 32-byte inputs (not a 64-byte hash) and are combined via a full
+  ## schoolbook multiply before the same carry-propagation/reduction tail.
+  ## a, b are secret in the sign path (the nonce r and clamped scalar a);
+  ## this function indexes fixed-size arrays at compile-time-constant
+  ## offsets only, so checks-off carries no additional CT burden here.
+  let a0  = 0x1FFFFF'i64 and load3(a, 0)
+  let a1  = 0x1FFFFF'i64 and (load4(a, 2) shr 5)
+  let a2  = 0x1FFFFF'i64 and (load3(a, 5) shr 2)
+  let a3  = 0x1FFFFF'i64 and (load4(a, 7) shr 7)
+  let a4  = 0x1FFFFF'i64 and (load4(a, 10) shr 4)
+  let a5  = 0x1FFFFF'i64 and (load3(a, 13) shr 1)
+  let a6  = 0x1FFFFF'i64 and (load4(a, 15) shr 6)
+  let a7  = 0x1FFFFF'i64 and (load3(a, 18) shr 3)
+  let a8  = 0x1FFFFF'i64 and load3(a, 21)
+  let a9  = 0x1FFFFF'i64 and (load4(a, 23) shr 5)
+  let a10 = 0x1FFFFF'i64 and (load3(a, 26) shr 2)
+  let a11 = load4(a, 28) shr 7
+
+  let b0  = 0x1FFFFF'i64 and load3(b, 0)
+  let b1  = 0x1FFFFF'i64 and (load4(b, 2) shr 5)
+  let b2  = 0x1FFFFF'i64 and (load3(b, 5) shr 2)
+  let b3  = 0x1FFFFF'i64 and (load4(b, 7) shr 7)
+  let b4  = 0x1FFFFF'i64 and (load4(b, 10) shr 4)
+  let b5  = 0x1FFFFF'i64 and (load3(b, 13) shr 1)
+  let b6  = 0x1FFFFF'i64 and (load4(b, 15) shr 6)
+  let b7  = 0x1FFFFF'i64 and (load3(b, 18) shr 3)
+  let b8  = 0x1FFFFF'i64 and load3(b, 21)
+  let b9  = 0x1FFFFF'i64 and (load4(b, 23) shr 5)
+  let b10 = 0x1FFFFF'i64 and (load3(b, 26) shr 2)
+  let b11 = load4(b, 28) shr 7
+
+  let c0  = 0x1FFFFF'i64 and load3(c, 0)
+  let c1  = 0x1FFFFF'i64 and (load4(c, 2) shr 5)
+  let c2  = 0x1FFFFF'i64 and (load3(c, 5) shr 2)
+  let c3  = 0x1FFFFF'i64 and (load4(c, 7) shr 7)
+  let c4  = 0x1FFFFF'i64 and (load4(c, 10) shr 4)
+  let c5  = 0x1FFFFF'i64 and (load3(c, 13) shr 1)
+  let c6  = 0x1FFFFF'i64 and (load4(c, 15) shr 6)
+  let c7  = 0x1FFFFF'i64 and (load3(c, 18) shr 3)
+  let c8  = 0x1FFFFF'i64 and load3(c, 21)
+  let c9  = 0x1FFFFF'i64 and (load4(c, 23) shr 5)
+  let c10 = 0x1FFFFF'i64 and (load3(c, 26) shr 2)
+  let c11 = load4(c, 28) shr 7
+
+  var s0  = c0 + a0*b0
+  var s1  = c1 + a0*b1 + a1*b0
+  var s2  = c2 + a0*b2 + a1*b1 + a2*b0
+  var s3  = c3 + a0*b3 + a1*b2 + a2*b1 + a3*b0
+  var s4  = c4 + a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0
+  var s5  = c5 + a0*b5 + a1*b4 + a2*b3 + a3*b2 + a4*b1 + a5*b0
+  var s6  = c6 + a0*b6 + a1*b5 + a2*b4 + a3*b3 + a4*b2 + a5*b1 + a6*b0
+  var s7  = c7 + a0*b7 + a1*b6 + a2*b5 + a3*b4 + a4*b3 + a5*b2 + a6*b1 + a7*b0
+  var s8  = c8 + a0*b8 + a1*b7 + a2*b6 + a3*b5 + a4*b4 + a5*b3 + a6*b2 +
+            a7*b1 + a8*b0
+  var s9  = c9 + a0*b9 + a1*b8 + a2*b7 + a3*b6 + a4*b5 + a5*b4 + a6*b3 +
+            a7*b2 + a8*b1 + a9*b0
+  var s10 = c10 + a0*b10 + a1*b9 + a2*b8 + a3*b7 + a4*b6 + a5*b5 + a6*b4 +
+            a7*b3 + a8*b2 + a9*b1 + a10*b0
+  var s11 = c11 + a0*b11 + a1*b10 + a2*b9 + a3*b8 + a4*b7 + a5*b6 + a6*b5 +
+            a7*b4 + a8*b3 + a9*b2 + a10*b1 + a11*b0
+  var s12 = a1*b11 + a2*b10 + a3*b9 + a4*b8 + a5*b7 + a6*b6 + a7*b5 +
+            a8*b4 + a9*b3 + a10*b2 + a11*b1
+  var s13 = a2*b11 + a3*b10 + a4*b9 + a5*b8 + a6*b7 + a7*b6 + a8*b5 +
+            a9*b4 + a10*b3 + a11*b2
+  var s14 = a3*b11 + a4*b10 + a5*b9 + a6*b8 + a7*b7 + a8*b6 + a9*b5 +
+            a10*b4 + a11*b3
+  var s15 = a4*b11 + a5*b10 + a6*b9 + a7*b8 + a8*b7 + a9*b6 + a10*b5 + a11*b4
+  var s16 = a5*b11 + a6*b10 + a7*b9 + a8*b8 + a9*b7 + a10*b6 + a11*b5
+  var s17 = a6*b11 + a7*b10 + a8*b9 + a9*b8 + a10*b7 + a11*b6
+  var s18 = a7*b11 + a8*b10 + a9*b9 + a10*b8 + a11*b7
+  var s19 = a8*b11 + a9*b10 + a10*b9 + a11*b8
+  var s20 = a9*b11 + a10*b10 + a11*b9
+  var s21 = a10*b11 + a11*b10
+  var s22 = a11*b11
+  var s23 = 0'i64
+
+  var carry0  = (s0  + (1'i64 shl 20)) shr 21; s1  += carry0;  s0  -= carry0 shl 21
+  var carry2  = (s2  + (1'i64 shl 20)) shr 21; s3  += carry2;  s2  -= carry2 shl 21
+  var carry4  = (s4  + (1'i64 shl 20)) shr 21; s5  += carry4;  s4  -= carry4 shl 21
+  var carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
+  var carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
+  var carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
+  var carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
+  var carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
+  var carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
+  var carry18 = (s18 + (1'i64 shl 20)) shr 21; s19 += carry18; s18 -= carry18 shl 21
+  var carry20 = (s20 + (1'i64 shl 20)) shr 21; s21 += carry20; s20 -= carry20 shl 21
+  var carry22 = (s22 + (1'i64 shl 20)) shr 21; s23 += carry22; s22 -= carry22 shl 21
+
+  var carry1  = (s1  + (1'i64 shl 20)) shr 21; s2  += carry1;  s1  -= carry1 shl 21
+  var carry3  = (s3  + (1'i64 shl 20)) shr 21; s4  += carry3;  s3  -= carry3 shl 21
+  var carry5  = (s5  + (1'i64 shl 20)) shr 21; s6  += carry5;  s5  -= carry5 shl 21
+  var carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
+  var carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
+  var carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
+  var carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
+  var carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
+  var carry17 = (s17 + (1'i64 shl 20)) shr 21; s18 += carry17; s17 -= carry17 shl 21
+  var carry19 = (s19 + (1'i64 shl 20)) shr 21; s20 += carry19; s19 -= carry19 shl 21
+  var carry21 = (s21 + (1'i64 shl 20)) shr 21; s22 += carry21; s21 -= carry21 shl 21
+
+  s11 += s23 * 666643
+  s12 += s23 * 470296
+  s13 += s23 * 654183
+  s14 -= s23 * 997805
+  s15 += s23 * 136657
+  s16 -= s23 * 683901
+  s23 = 0
+
+  s10 += s22 * 666643
+  s11 += s22 * 470296
+  s12 += s22 * 654183
+  s13 -= s22 * 997805
+  s14 += s22 * 136657
+  s15 -= s22 * 683901
+  s22 = 0
+
+  s9 += s21 * 666643
+  s10 += s21 * 470296
+  s11 += s21 * 654183
+  s12 -= s21 * 997805
+  s13 += s21 * 136657
+  s14 -= s21 * 683901
+  s21 = 0
+
+  s8 += s20 * 666643
+  s9 += s20 * 470296
+  s10 += s20 * 654183
+  s11 -= s20 * 997805
+  s12 += s20 * 136657
+  s13 -= s20 * 683901
+  s20 = 0
+
+  s7 += s19 * 666643
+  s8 += s19 * 470296
+  s9 += s19 * 654183
+  s10 -= s19 * 997805
+  s11 += s19 * 136657
+  s12 -= s19 * 683901
+  s19 = 0
+
+  s6 += s18 * 666643
+  s7 += s18 * 470296
+  s8 += s18 * 654183
+  s9 -= s18 * 997805
+  s10 += s18 * 136657
+  s11 -= s18 * 683901
+  s18 = 0
+
+  carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
+  carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
+  carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
+  carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
+  carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
+  carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
+
+  carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
+  carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
+  carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
+  carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
+  carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
+
+  s5 += s17 * 666643
+  s6 += s17 * 470296
+  s7 += s17 * 654183
+  s8 -= s17 * 997805
+  s9 += s17 * 136657
+  s10 -= s17 * 683901
+  s17 = 0
+
+  s4 += s16 * 666643
+  s5 += s16 * 470296
+  s6 += s16 * 654183
+  s7 -= s16 * 997805
+  s8 += s16 * 136657
+  s9 -= s16 * 683901
+  s16 = 0
+
+  s3 += s15 * 666643
+  s4 += s15 * 470296
+  s5 += s15 * 654183
+  s6 -= s15 * 997805
+  s7 += s15 * 136657
+  s8 -= s15 * 683901
+  s15 = 0
+
+  s2 += s14 * 666643
+  s3 += s14 * 470296
+  s4 += s14 * 654183
+  s5 -= s14 * 997805
+  s6 += s14 * 136657
+  s7 -= s14 * 683901
+  s14 = 0
+
+  s1 += s13 * 666643
+  s2 += s13 * 470296
+  s3 += s13 * 654183
+  s4 -= s13 * 997805
+  s5 += s13 * 136657
+  s6 -= s13 * 683901
+  s13 = 0
+
+  s0 += s12 * 666643
+  s1 += s12 * 470296
+  s2 += s12 * 654183
+  s3 -= s12 * 997805
+  s4 += s12 * 136657
+  s5 -= s12 * 683901
+  s12 = 0
+
+  carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
+  carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
+  carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
+  carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
+  carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
+  carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
+  carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
+  carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
+  carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
+  carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
+  carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
+  carry11 = s11 shr 21; s12 += carry11; s11 -= carry11 shl 21
+
+  s0 += s12 * 666643
+  s1 += s12 * 470296
+  s2 += s12 * 654183
+  s3 -= s12 * 997805
+  s4 += s12 * 136657
+  s5 -= s12 * 683901
+  s12 = 0
+
+  carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
+  carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
+  carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
+  carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
+  carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
+  carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
+  carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
+  carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
+  carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
+  carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
+  carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
+
+  result[ 0] = byte(s0 shr 0)
+  result[ 1] = byte(s0 shr 8)
+  result[ 2] = byte((s0 shr 16) or (s1 shl 5))
+  result[ 3] = byte(s1 shr 3)
+  result[ 4] = byte(s1 shr 11)
+  result[ 5] = byte((s1 shr 19) or (s2 shl 2))
+  result[ 6] = byte(s2 shr 6)
+  result[ 7] = byte((s2 shr 14) or (s3 shl 7))
+  result[ 8] = byte(s3 shr 1)
+  result[ 9] = byte(s3 shr 9)
+  result[10] = byte((s3 shr 17) or (s4 shl 4))
+  result[11] = byte(s4 shr 4)
+  result[12] = byte(s4 shr 12)
+  result[13] = byte((s4 shr 20) or (s5 shl 1))
+  result[14] = byte(s5 shr 7)
+  result[15] = byte((s5 shr 15) or (s6 shl 6))
+  result[16] = byte(s6 shr 2)
+  result[17] = byte(s6 shr 10)
+  result[18] = byte((s6 shr 18) or (s7 shl 3))
+  result[19] = byte(s7 shr 5)
+  result[20] = byte(s7 shr 13)
+  result[21] = byte(s8 shr 0)
+  result[22] = byte(s8 shr 8)
+  result[23] = byte((s8 shr 16) or (s9 shl 5))
+  result[24] = byte(s9 shr 3)
+  result[25] = byte(s9 shr 11)
+  result[26] = byte((s9 shr 19) or (s10 shl 2))
+  result[27] = byte(s10 shr 6)
+  result[28] = byte((s10 shr 14) or (s11 shl 7))
+  result[29] = byte(s11 shr 1)
+  result[30] = byte(s11 shr 9)
+  result[31] = byte(s11 shr 17)
+
 func challenge*(R, A: array[32, byte]; msg: openArray[byte]): array[32, byte] =
   ## k = SHA-512(R || A || msg) mod L (RFC 8032 §5.1.6 step 4 / §5.1.7 step
   ## 2) — the challenge hash shared by verify and (once implemented)
