@@ -1,9 +1,9 @@
 # sello.nimble — package manifest for sello
 # Pure-Nim Curve25519 cryptographic library (ed25519 + X25519)
 
-version       = "0.1.0"
+version       = "0.2.0"
 author        = "corey"
-description   = "Pure-Nim ed25519 + X25519 (Curve25519). No FFI. RFC 8032, RFC 7748."
+description   = "Pure-Nim ed25519 + X25519 (Curve25519). No FFI in the core; optional libsodium signer adapter. RFC 8032, RFC 7748."
 license        = "Apache-2.0"
 srcDir         = "src"
 backend        = "c"

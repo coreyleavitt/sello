@@ -1,0 +1,87 @@
+sello
+Copyright 2026 Corey Leavitt
+
+This product is licensed under the Apache License, Version 2.0 (see
+LICENSE). It incorporates material from the following third-party
+sources, each under its own permissive terms. These notices are
+informational and do not modify the Apache License under which sello
+itself is distributed.
+
+------------------------------------------------------------------------
+
+ref10 (Daniel J. Bernstein, Niels Duif, Tanja Lange, Peter Schwabe,
+Bo-Yin Yang et al. -- the SUPERCOP / NaCl "ref10" ed25519 implementation)
+
+  Public domain.
+
+  sello's field arithmetic (src/sello/field.nim), Edwards curve group
+  operations and scalar multiplication (src/sello/scalar.nim), and the
+  RFC 8032 encode/decode and scalar-reduction layer (src/sello/ed25519.nim,
+  src/sello/scalar.nim) are direct ports of ref10's algorithms and, in
+  several routines, its exact arithmetic structure. Individual functions
+  carry a "ported from ref10 (public domain)" attribution in their doc
+  comments at the point of use.
+
+------------------------------------------------------------------------
+
+orlp/ed25519 (Orson Peters)
+https://github.com/orlp/ed25519
+
+  Public domain (CC0 / Unlicense dual release, per the upstream README).
+
+  Consulted alongside ref10 as a second reference for the field and
+  curve arithmetic ports named above; sello exists specifically to
+  provide a pure-Nim alternative to wrapping this project's C.
+
+------------------------------------------------------------------------
+
+TweetNaCl (Daniel J. Bernstein, Bernard van Gastel, Wesley Janssen,
+Tanja Lange, Peter Schwabe, Sjaak Smetsers)
+https://tweetnacl.cr.yp.to/
+
+  Public domain.
+
+  Consulted for the Edwards point addition/subtraction formulas
+  (Hisil-Wong-Carter-Dawson, "Twisted Edwards Curves Revisited," 2008)
+  as implemented in src/sello/scalar.nim, alongside ref10.
+
+------------------------------------------------------------------------
+
+nimcrypto (Eugene Kabanov / cheatfate)
+https://github.com/cheatfate/nimcrypto
+
+  MIT License. Copyright (c) 2016-2018 Eugene Kabanov.
+
+  Vendored in full under vendor/nimcrypto/ (see nim.cfg's `path="vendor"`)
+  and used unmodified as sello's SHA-512 implementation (RFC 8032's
+  internal hash) -- the one primitive sello deliberately does not
+  reimplement. Full MIT license text:
+
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be
+  included in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+  CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+  TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+  SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
+
+Test vectors
+
+  tests/vectors/ vendors Google's Wycheproof adversarial test vectors
+  (testvectors_v1, project C2SP/wycheproof), Apache License 2.0,
+  Copyright Google LLC -- used only to run sello's own test suite against
+  them and not redistributed as part of the library's source or binary
+  distribution beyond the checked-in JSON fixtures.
