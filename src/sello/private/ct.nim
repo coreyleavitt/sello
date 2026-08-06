@@ -1,0 +1,73 @@
+## sello/private/ct.nim — constant-time secret-hygiene primitives (RFC-001
+## slice 8).
+##
+## DANGER: same social-contract treatment as `sello/private/backend.nim` —
+## this module exists to be called FROM the secret-handling code
+## (`backend.nim`, `x25519.nim`, `signing.nim`), not imported by
+## application code. It has no `Keypair`/`Seed` knowledge of its own.
+##
+## ## Why a volatile store, not a plain loop
+##
+## A plain `for i in 0 ..< n: a[i] = 0` loop over memory that is dead after
+## the loop (the secret has already been used for its one job) is exactly
+## the pattern a C compiler is entitled to delete as a dead store once it
+## can prove nothing reads `a` again — and it does: confirmed by
+## disassembly at `-d:release` for `x25519.nim`'s ladder scrub (RFC-001
+## slice 8 finding), the scrub loop is entirely absent from the emitted
+## machine code. `volatileStoreByte` below compiles to a store through a
+## `volatile`-qualified C pointer (the same idiom the standard library's
+## own `std/volatile` uses), which the C standard forbids the compiler from
+## proving dead — there is no "nothing reads this again" argument available
+## against a volatile access. `wipe` additionally emits an
+## `asm volatile("" ::: "memory")` compiler barrier immediately after the
+## store loop, so the optimizer also can't reorder the wipe to before the
+## secret's last real use, or otherwise hoist/reschedule it across that
+## boundary. Confirmed by disassembly that this shape survives `-d:release`
+## as literal store instructions (see the handoff doc for the exact check).
+##
+## `volatileStoreByte`'s body is a raw `{.emit.}` block, which Nim's effect
+## analyzer does not look inside (verified empirically in the architect
+## rounds: `{.emit.}` asm barriers compile fine inside `func` with no
+## effect-checker complaint) — so `wipe` can be a `func`, matching the
+## `func`-only shape of the rest of the secret-handling call sites
+## (`backend.nim`, nimcrypto's own SHA-512 API) with no `{.noSideEffect.}`
+## friction, despite doing a raw pointer write under the hood.
+##
+## `wipe` is generic over any stack-only value type `T`, not just
+## `array[N, byte]`: it wipes `sizeof(T)` bytes by raw reinterpretation, so
+## the same audited primitive covers fixed secret byte arrays (`h`, `a`,
+## `prefix`, `r` in `backend.nim`; `e` in `x25519.nim`; `Seed.bytes` in
+## `signing.nim`) AND stack-only secret-bearing objects such as
+## nimcrypto's `Sha2Context` (verified free of `seq`/`ref`/`string` —
+## fixed arrays, scalars, and a proc pointer only), which buffers a
+## secret-containing block internally and must be wiped after `finish()`
+## at every call site that hashes secret input. Do not call `wipe` on a
+## type containing a `seq`/`ref`/`string` field — it would zero the
+## pointer/length header, not the heap payload, silently leaving the real
+## secret bytes alive on the heap.
+
+{.push checks: off.}
+
+func volatileStoreByte(dest: ptr byte; val: byte) {.inline.} =
+  ## Store `val` through `dest` as a volatile write, so the C compiler
+  ## cannot prove the store dead and elide it (see module doc). Same emit
+  ## shape as the standard library's `std/volatile.volatileStore`,
+  ## specialized to `byte` and reimplemented here (rather than imported)
+  ## so it is a `func` — `std/volatile`'s version is a `proc`, which a
+  ## `func` caller may not invoke directly.
+  {.emit: ["*((volatile unsigned char*)(", dest, ")) = ", val, ";"].}
+
+func wipe*[T](data: var T) {.noinline.} =
+  ## Zero every byte of `data` via `volatileStoreByte`, then a compiler
+  ## memory barrier (`asm volatile("" ::: "memory")`). `{.noinline.}` so
+  ## the call site itself can't be inlined away in a context where the
+  ## optimizer decides the (apparently unobserved) result is dead —
+  ## belt-and-suspenders alongside the per-byte volatile stores. One
+  ## audited wipe primitive for every secret shape in the codebase, in
+  ## place of a hand-rolled scrub loop at each call site.
+  let base = cast[ptr UncheckedArray[byte]](addr data)
+  for i in 0 ..< sizeof(T):
+    volatileStoreByte(addr base[i], 0'u8)
+  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+
+{.pop.}

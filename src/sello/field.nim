@@ -539,14 +539,22 @@ func fePow22523*(r: var Fe; a: Fe) {.inline.} =
   feSq(t0, t0)
   feMul(r, t0, a)
 
-func feCMove*(r: var Fe; a: Fe; b: bool) {.inline.} =
+func feCMove*(r: var Fe; a: Fe; b: bool) {.noinline.} =
+  ## Constant-time conditional move: `r := a` iff `b`. Arithmetic masking,
+  ## no secret-dependent branch. `{.noinline.}` (RFC-001 slice 8) rather
+  ## than the previous `{.inline.}`: this is a masking helper in the CT
+  ## sense (used only on secret data, by `x25519.nim`'s ladder and
+  ## `scalar.nim`'s `cmovCached`), and inlining it into a call site can let
+  ## the C compiler see through the mask arithmetic and "optimize" it back
+  ## into a branch -- exactly the outcome the mask exists to prevent.
   let mask = -int32(b)
   for i in 0..<10:
     r.limbs[i] = r.limbs[i] xor ((r.limbs[i] xor a.limbs[i]) and mask)
 
-func feCSwap*(a, b: var Fe; swap: bool) {.inline.} =
+func feCSwap*(a, b: var Fe; swap: bool) {.noinline.} =
   ## Constant-time conditional swap: exchanges a and b iff swap is true.
-  ## Arithmetic masking, no secret-dependent branch.
+  ## Arithmetic masking, no secret-dependent branch. `{.noinline.}`
+  ## (RFC-001 slice 8) for the same reason as `feCMove` above.
   let mask = -int32(swap)
   for i in 0..<10:
     let x = (a.limbs[i] xor b.limbs[i]) and mask

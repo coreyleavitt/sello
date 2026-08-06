@@ -231,6 +231,50 @@ suite "Seed lifecycle":
     check a != b
     check a == aAgain
 
+suite "Seed destructor smoke tests (RFC-001 slice 8)":
+  ## `=destroy` is the whole point of `Seed` existing as its own type
+  ## rather than a bare `array[32, byte]` -- these tests observe it firing
+  ## via a raw pointer captured before destruction, per RFC-001's stated
+  ## methodology. Best-effort, explicitly: reading memory through a pointer
+  ## whose pointee has gone out of scope is not something the language
+  ## guarantees stays untouched, under a managed allocator (ORC) or
+  ## otherwise -- it only works here because nothing else runs between the
+  ## destructor firing and the check. `Seed` is a one-field object
+  ## (`bytes: array[32, byte]`, see the module doc comment for why), so
+  ## reinterpreting `addr s` as `ptr array[32, byte]` aliases the exact
+  ## same memory as the private `bytes` field without needing access to
+  ## it -- deterministic and independent of `Seed`'s field being private.
+  test "=destroy wipes the seed's memory at scope exit":
+    var probe: ptr array[32, byte]
+    block:
+      var s = toSeed(tv1_sk)
+      probe = cast[ptr array[32, byte]](addr s)
+      check probe[] == tv1_sk # sanity: the probe aliases the real bytes
+    # `s` is out of scope; `=destroy` must have fired and wiped it in place.
+    check probe[] == default(array[32, byte])
+
+  test "reassignment destroys (wipes) the old value, and =destroy still fires on scope exit afterward":
+    var probe: ptr array[32, byte]
+    block:
+      var s = toSeed(tv1_sk)
+      probe = cast[ptr array[32, byte]](addr s)
+      check probe[] == tv1_sk
+      s = toSeed(tv2_sk) # reassignment: the old (tv1_sk) value is torn
+                          # down via `=destroy` before the new value lands
+                          # in the same storage -- Nim's default `=sink`
+                          # for a type with a custom `=destroy` and no
+                          # custom `=copy`/`=sink` of its own destroys the
+                          # old value first, then blits the new one in, all
+                          # within this one statement, so the intermediate
+                          # all-zero state is not independently observable
+                          # from outside; what IS observable and checked
+                          # here is that (a) the new value lands correctly
+                          # and (b) `=destroy` is not somehow "used up" by
+                          # firing once already -- it fires again, correctly,
+                          # for tv2_sk below.
+      check probe[] == tv2_sk
+    check probe[] == default(array[32, byte])
+
 suite "keypair() - fresh randomness":
   test "two calls produce different seeds":
     let kp1 = keypair()

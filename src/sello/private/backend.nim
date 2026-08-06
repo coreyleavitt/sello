@@ -21,6 +21,7 @@
 import nimcrypto/sha2
 import sello/field
 import sello/scalar
+import sello/private/ct
 
 {.push checks: off.}
 
@@ -28,15 +29,15 @@ func derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## RFC 8032 §5.1.5 public-key derivation: A = clamp(SHA-512(seed)[0..31])
   ## * B, canonically encoded. `seed` and the intermediate hash/scalar are
   ## secret; both live in fixed-size stack arrays with zero heap
-  ## allocation. The volatile-barriered wipe of `h`/`a` below (matching
-  ## x25519.nim's ladder) lands with the CT-hardening milestone
-  ## (RFC-001 slice 8) — the plain scrub here is best-effort only, exactly
-  ## as x25519.nim's is today.
+  ## allocation and are wiped via `ct.wipe` (volatile stores + compiler
+  ## barrier — RFC-001 slice 8) once no longer needed, including the
+  ## `Sha2Context` itself, which buffers the secret seed internally.
   var h: array[64, byte]
   var sha: sha512
   sha.init()
   sha.update(seed)
   sha.finish(h)
+  ct.wipe(sha)
 
   var a: array[32, byte]
   for i in 0 ..< 32: a[i] = h[i]
@@ -44,9 +45,8 @@ func derivePublic*(seed: array[32, byte]): array[32, byte] =
 
   result = pointEncode(geScalarmultBase(a))
 
-  # Best-effort scrub of the expanded hash and clamped scalar.
-  for i in 0 ..< 64: h[i] = 0
-  for i in 0 ..< 32: a[i] = 0
+  ct.wipe(h)
+  ct.wipe(a)
 
 func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte] =
   ## RFC 8032 §5.1.6 detached signature (Ed25519: no context, no prehash):
@@ -62,16 +62,17 @@ func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte]
   ## from `a` directly (one extra fixed-base scalarmult), not by a second
   ## SHA-512(seed) call — `signDetached` carries no `Keypair` knowledge (per
   ## the module doc comment) and the seed is re-expanded exactly once per
-  ## call, matching RFC-001's "no persistent expanded-key API" design. The
-  ## volatile-barriered wipe of every intermediate below lands with the
-  ## CT-hardening milestone (RFC-001 slice 8); the plain scrub here is
-  ## best-effort only, exactly as `derivePublic` and x25519.nim's ladder are
-  ## today.
+  ## call, matching RFC-001's "no persistent expanded-key API" design. Every
+  ## secret intermediate below, including both `Sha2Context`s (each buffers
+  ## a secret-containing block internally: `sha` the seed, `nonceSha` the
+  ## prefix), is wiped via `ct.wipe` (volatile stores + compiler barrier —
+  ## RFC-001 slice 8) once no longer needed.
   var h: array[64, byte]
   var sha: sha512
   sha.init()
   sha.update(seed)
   sha.finish(h)
+  ct.wipe(sha)
 
   var a: array[32, byte]
   for i in 0 ..< 32: a[i] = h[i]
@@ -79,6 +80,7 @@ func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte]
 
   var prefix: array[32, byte]
   for i in 0 ..< 32: prefix[i] = h[32 + i]
+  ct.wipe(h)
 
   let A = pointEncode(geScalarmultBase(a))
 
@@ -88,9 +90,12 @@ func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte]
   nonceSha.update(prefix)
   nonceSha.update(msg)
   nonceSha.finish(nonceHash)
+  ct.wipe(nonceSha)
+  ct.wipe(prefix)
 
   var r: array[32, byte]
   scReduce(r, nonceHash)
+  ct.wipe(nonceHash)
 
   let R = pointEncode(geScalarmultBase(r))
   let k = challenge(R, A, msg)
@@ -99,11 +104,7 @@ func signDetached*(seed: array[32, byte]; msg: openArray[byte]): array[64, byte]
   for i in 0 ..< 32: result[i] = R[i]
   for i in 0 ..< 32: result[32 + i] = S[i]
 
-  # Best-effort scrub of every secret intermediate.
-  for i in 0 ..< 64: h[i] = 0
-  for i in 0 ..< 32: a[i] = 0
-  for i in 0 ..< 32: prefix[i] = 0
-  for i in 0 ..< 64: nonceHash[i] = 0
-  for i in 0 ..< 32: r[i] = 0
+  ct.wipe(a)
+  ct.wipe(r)
 
 {.pop.}

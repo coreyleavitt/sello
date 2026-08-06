@@ -6,13 +6,17 @@
 ##
 ## The scalar is a SECRET (the caller's private key), so the ladder is
 ## branchless on secret data: bit selection and lane swaps use arithmetic
-## masking (feCSwap), secrets live in fixed-size stack arrays, and Nim's
-## runtime checks are disabled in the core. The remaining constant-time
-## toolkit items (volatile wipe, dudect harness) are tracked with the
-## ed25519 signing milestone.
+## masking (feCSwap, marked `{.noinline.}` so the C compiler can't
+## re-introduce a branch by inlining it into a context where the masking
+## simplifies away), secrets live in fixed-size stack arrays, Nim's runtime
+## checks are disabled in the core, and the clamped secret copy is wiped
+## via `ct.wipe` (volatile stores + compiler barrier — RFC-001 slice 8)
+## once the ladder is done with it. The remaining constant-time toolkit
+## item (the dudect harness) is tracked with the ed25519 signing milestone.
 
 import std/options
 import sello/field
+import sello/private/ct
 
 const
   X25519BasePoint*: array[32, byte] = [
@@ -72,8 +76,13 @@ func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
   feMul(x2, x2, zInv)
   result = feToBytes(x2)
 
-  # Best-effort scrub of the clamped secret copy.
-  for i in 0 ..< 32: e[i] = 0
+  # RFC-001 slice 8: this was previously a plain `for i in 0 ..< 32:
+  # e[i] = 0` loop -- confirmed by disassembly at -d:release to be an
+  # unbarriered dead store, entirely absent from the emitted machine code,
+  # because nothing reads `e` again after this point. `ct.wipe` survives
+  # (re-verified by disassembly after this fix): volatile per-byte stores
+  # plus the memory barrier compile to literal store instructions.
+  ct.wipe(e)
 
 {.pop.}
 

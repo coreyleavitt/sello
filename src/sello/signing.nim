@@ -71,6 +71,7 @@
 import std/sysrand
 import sello/ed25519
 import sello/private/backend
+import sello/private/ct
 
 type
   Seed* = object
@@ -95,7 +96,12 @@ type
 ## explicit one declared later with "cannot bind another '=destroy'".
 
 func zeroizeSeed(s: var Seed) {.inline.} =
-  for i in 0 ..< 32: s.bytes[i] = 0
+  ## RFC-001 slice 8: routed through `ct.wipe` (volatile stores + compiler
+  ## barrier) rather than a plain loop -- the whole point of `Seed`'s
+  ## `=destroy` hook is to guarantee the wipe actually happens, which a
+  ## compiler-eliminable dead store would silently defeat (see
+  ## `sello/private/ct` and the x25519.nim ladder fix in this same slice).
+  ct.wipe(s.bytes)
 
 proc `=destroy`(s: var Seed) =
   zeroizeSeed(s)

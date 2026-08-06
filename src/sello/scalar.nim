@@ -236,7 +236,7 @@ func buildBaseTable(): array[32, array[8, GeCached]] =
 
 const GeBaseTable*: array[32, array[8, GeCached]] = buildBaseTable()
 
-func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) =
+func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) {.noinline.} =
   ## Constant-time select of the `digit`-th multiple of a base-table row
   ## (a row of GeBaseTable, or any array of 8 GeCached entries holding
   ## 1*P..8*P), with conditional negation for negative digits. `digit`
@@ -246,7 +246,9 @@ func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) =
   ## count, no early exit — with `r` identity-initialized first, so digit 0
   ## selects the identity with no special case. Selection and negation
   ## masks are derived arithmetically from `digit` (the feCMove/feCSwap
-  ## family); nothing here branches on `digit`'s value or sign.
+  ## family); nothing here branches on `digit`'s value or sign. `{.noinline.}`
+  ## (RFC-001 slice 8): this is itself a masking helper built on
+  ## `feCMove`/`feCSwap`, same rationale as those two (see `field.nim`).
   r.yPlusX = FeOne
   r.yMinusX = FeOne
   r.z = FeOne
