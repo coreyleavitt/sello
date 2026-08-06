@@ -4,8 +4,12 @@
 ##
 ## Addition formulas from Hisil-Wong-Carter-Dawson "Twisted Edwards Curves
 ## Revisited" (2008), as implemented in ref10 / TweetNaCl (public domain).
+##
+## Pure field-plus-curve-math leaf as of RFC-002 slice 2: the one thing
+## that used to pull nimcrypto's SHA-512 into this file, the shared
+## `challenge` hash, moved out to `sello/challenge.nim` (which imports
+## this module back for `scReduce`). No nimcrypto import here any more.
 
-import nimcrypto/sha2
 import sello/field
 
 # ---------------------------------------------------------------------------
@@ -60,8 +64,8 @@ const
 # elsewhere in the codebase disabling checks (x25519.nim, backend.nim) does
 # NOT cover these callees, and left as `checks: on` every one of them would
 # compile in a bounds/overflow branch on secret-derived limb values --
-# exactly the branch-on-secret-data the CT discipline forbids. geAdd/geSub/
-# the P1P1-to-P2/P3 conversions/geP2Dbl are also the verify-only
+# exactly the branch-on-secret-data the CT discipline forbids. geAdd/the
+# P1P1-to-P2/P3 conversions/geP2Dbl are also the verify-only
 # `scalarmultVartime`'s callees (below); that function has no CT
 # requirement of its own, but shares these functions with the
 # secret-facing path, so it picks up checks-off too as an accepted side
@@ -132,22 +136,6 @@ func geAdd*(r: var GeP1P1; p: GeP3; q: GeCached) {.inline.} =
   feAdd(r.z, D, C)          # Z = 2*Z*Zq + C
   feSub(r.t, D, C)          # T = 2*Z*Zq - C
 
-func geSub*(r: var GeP1P1; p: GeP3; q: GeCached) {.inline.} =
-  ## Group subtraction: p - q  (swaps Yq+Xq and Yq-Xq, and the Z/T signs).
-  ## Verbatim ref10 ge_sub (public domain).
-  var A, B, C, D: Fe
-  feAdd(A, p.y, p.x)        # Y+X
-  feSub(B, p.y, p.x)        # Y-X
-  feMul(A, A, q.yMinusX)    # (Y+X)(Yq-Xq)
-  feMul(B, B, q.yPlusX)     # (Y-X)(Yq+Xq)
-  feMul(C, q.t2d, p.t)      # 2d*Tq*T
-  feMul(D, p.z, q.z)        # Z*Zq
-  feAdd(D, D, D)            # 2*Z*Zq
-  feSub(r.x, A, B)          # X = (Y+X)(Yq-Xq) - (Y-X)(Yq+Xq)
-  feAdd(r.y, A, B)          # Y = (Y+X)(Yq-Xq) + (Y-X)(Yq+Xq)
-  feSub(r.z, D, C)          # Z = 2*Z*Zq - C
-  feAdd(r.t, D, C)          # T = 2*Z*Zq + C
-
 # ---------------------------------------------------------------------------
 # Scalar multiplication: variable-base, unsigned 4-bit windows
 # ---------------------------------------------------------------------------
@@ -213,8 +201,8 @@ func scalarmultVartime*(r: var GeP3; s: array[32, byte]; p: GeP3) =
 # Fixed-base scalar multiplication: compile-time table + constant-time select
 #
 # Table layout (ref10 ge_scalarmult_base structure; GeCached deviation is a
-# round-1 RFC-001 decision — no ge_precomp/ge_madd port, since geAdd/geSub
-# already handle a GeCached operand): GeBaseTable[i][j] caches the point
+# round-1 RFC-001 decision — no ge_precomp/ge_madd port, since geAdd
+# already handles a GeCached operand): GeBaseTable[i][j] caches the point
 # (j+1) * 16^(2*i) * B for i in 0..31, j in 0..7 — row i holds the 8 nonzero
 # multiples of B scaled by 256^i. geScalarmultBase (below) recodes a scalar
 # into 64 signed radix-16 digits and consumes this same table twice: once
@@ -317,7 +305,7 @@ func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) {.noi
 #
 # Both functions are secret-facing (the scalar recoded here is `a` or `r`
 # in the eventual sign path), so checks are pushed off as elsewhere in this
-# file's sc*/challenge group.
+# file's sc* group.
 # ---------------------------------------------------------------------------
 
 {.push checks: off.}
@@ -356,6 +344,33 @@ func geScalarmultBase*(s: array[32, byte]): GeP3 =
   ## comment; do not additionally require clamped shape. Branchless on
   ## `s`: recoding is carry-propagation arithmetic and every table lookup
   ## goes through cmovCached's full 8-entry scan.
+  # Debug-only precondition check (RFC-002 slice 2 item 3a): plain
+  # `assert`, meant to be absent from the dudect-measured `-d:release`
+  # build (and every downstream consumer's release build) entirely, so it
+  # never touches this function's constant-time shape there.
+  #
+  # Deviation from the RFC's literal mechanism, forced by empirical Nim
+  # 2.2.10 behavior (verified with isolated scratch probes, not assumed):
+  # the RFC's stated rationale, "plain assert -- stripped by -d:release",
+  # does NOT hold in this toolchain -- `-d:release` alone leaves
+  # `assertions` on; only `-d:danger` disables them by default. Worse,
+  # this whole function already sits under the file's `checks: off`
+  # region, and Nim's `checks` umbrella bundles `assertions` together with
+  # bounds/overflow/nil checks, so a bare `assert` written directly here
+  # would be silently compiled out UNCONDITIONALLY (debug and release
+  # alike) rather than tracking any release/debug split at all. `when not
+  # defined(release)` sidesteps both problems at once: under `-d:release`
+  # the whole block is omitted from compilation, full stop, matching the
+  # RFC's actual intent more literally than its stated mechanism did;
+  # under a plain debug build, `{.push assertions: on.}` locally overrides
+  # the surrounding `checks: off` region just for this statement, so the
+  # assert can actually fire. (Same empirical-deviation register as
+  # `signing.Seed`'s `distinct array` fallback -- see that module's doc
+  # comment.)
+  when not defined(release):
+    {.push assertions: on.}
+    assert (s[31] and 0x80'u8) == 0, "geScalarmultBase: bit 255 of s must be 0"
+    {.pop.}
   let digits = recodeScalarRadix16(s)
 
   var acc: GeP3
@@ -382,8 +397,11 @@ func geScalarmultBase*(s: array[32, byte]): GeP3 =
 {.pop.}
 
 # ---------------------------------------------------------------------------
-# Point encoding, scalar reduction/canonicity, and the shared challenge hash
-# (RFC 8032 §5.1) — relocated from ed25519.nim / extracted from its verify.
+# Point encoding and scalar reduction/canonicity (RFC 8032 §5.1) —
+# relocated from ed25519.nim / extracted from its verify. (The shared
+# `challenge` hash that used to live at the end of this group moved out to
+# `sello/challenge.nim` in RFC-002 slice 2, taking this file's only
+# nimcrypto import with it.)
 #
 # RFC 8032 signing must run scReduce over secret-derived values (the nonce
 # hash) and needs pointEncode for R and A, but ed25519.nim's whole identity
@@ -923,22 +941,5 @@ func scMulAdd*(a, b, c: array[32, byte]): array[32, byte] =
   result[29] = byte(s11 shr 1)
   result[30] = byte(s11 shr 9)
   result[31] = byte(s11 shr 17)
-
-func challenge*(R, A: array[32, byte]; msg: openArray[byte]): array[32, byte] =
-  ## k = SHA-512(R || A || msg) mod L (RFC 8032 §5.1.6 step 4 / §5.1.7 step
-  ## 2) — the challenge hash shared by verify and (once implemented)
-  ## signDetached. One audited copy of the formula: two hand-maintained
-  ## copies would be a latent sign/verify self-consistency break with no
-  ## compiler signal. R, A, msg, and k are all public in both protocols, so
-  ## this carries no CT requirement of its own despite living beside
-  ## scReduce.
-  var sha: sha512
-  sha.init()
-  sha.update(R)
-  sha.update(A)
-  sha.update(msg)
-  var k64: array[64, byte]
-  sha.finish(k64)
-  scReduce(result, k64)
 
 {.pop.}

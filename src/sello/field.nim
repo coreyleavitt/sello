@@ -5,6 +5,20 @@
 ## Coeffs: [0..2^26), [0..2^25), [0..2^26), [0..2^25), [0..2^26),
 ##          [0..2^25), [0..2^26), [0..2^25), [0..2^26), [0..2^25).
 ##
+## These per-limb ranges are a constructor-level invariant, not merely a
+## description of what a properly-decoded value happens to look like: every
+## `fe*` primitive below is only correct (no silent overflow into the next
+## limb's bit position, no wrong result) when its `Fe` inputs already
+## satisfy them. `feFromBytes` and the arithmetic ops that consume/produce
+## `Fe` values (`feAdd`, `feMul`, `feSq`, ...) all maintain the invariant
+## for you -- but `Fe.limbs` is a public field (`import sello/field` gives
+## direct read/write access), so a direct `sello/field` consumer that
+## builds or mutates an `Fe` by hand, bypassing those primitives, is
+## responsible for upholding these ranges itself. Checks are off for this
+## whole file (see below), so a violation is not caught at runtime; it
+## surfaces later as a wrong arithmetic result with no diagnostic pointing
+## back here.
+##
 ## Checks off for the whole arithmetic core below (RFC-001 finding 1):
 ## every `fe*` primitive, `feCMove`/`feCSwap`, and `clampScalar` run on the
 ## signer's secret scalar and the X25519 ladder's secret coordinate, and

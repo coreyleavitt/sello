@@ -1,6 +1,8 @@
 import std/[unittest, options, strutils, osproc, os]
 import sello/x25519
-import sello/types  # generic array wipe (round-2 finding 28 -- see below)
+import sello/wipe  # generic array wipe (round-2 finding 28, split from
+                    # types.nim into its own leaf by RFC-002 slice 2 -- see
+                    # below)
 
 proc fromHex(s: string): array[32, byte] =
   doAssert s.len == 64
@@ -350,17 +352,18 @@ suite "X25519 - ephemeral secret hygiene (probe pattern)":
     wipe(eph)
     check probe[] == default(array[32, byte])
 
-suite "X25519 - generic array wipe (sello/types, RFC-001 finding 11/28)":
+suite "X25519 - generic array wipe (sello/wipe, RFC-001 finding 11/28)":
   ## Before finding 11, `private/ct.wipe` -- the one audited volatile-store
   ## primitive -- was reachable only by importing a `private/` module
   ## directly; `sello.wipe` covered `Seed` only. This probe-pattern test
   ## (same methodology as test_signing.nim's Seed destructor suite: a raw
   ## pointer captured before the wipe, memory re-read after) confirms the
   ## generic `array[32, byte]` overload (moved to `sello/types` by round-2
-  ## finding 28 -- it wipes any 32-byte secret, not just X25519 material)
+  ## finding 28, then split into its own leaf `sello/wipe` by RFC-002 slice
+  ## 2 item 5 -- it wipes any 32-byte secret, not just X25519 material)
   ## actually reaches it. The `X25519StaticSecret`/`X25519Shared`-typed overloads
   ## are covered by the "secret hygiene" suite above.
-  test "wipe(var array[32, byte]) [sello/types] zeroes the array in place":
+  test "wipe(var array[32, byte]) [sello/wipe] zeroes the array in place":
     var raw = fromHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
     let probe = addr raw
     doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe

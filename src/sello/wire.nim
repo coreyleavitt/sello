@@ -1,21 +1,26 @@
-## sello/types.nim — nominal public wire types (RFC-001 findings 9/11,
-## relocated here by round-2 findings 27/28).
+## sello/wire.nim — nominal public wire types (RFC-001 findings 9/11,
+## relocated here by round-2 findings 27/28, split out of the combined
+## `types.nim` by RFC-002 slice 2 item 5).
 ##
-## Leaf module: nominal wire types, their conversions, and the one audited
-## generic secret-wipe wrapper -- no crypto logic. Sits below both
-## `ed25519.nim` (verify) and `signing.nim` (sign) so they can share these
-## definitions on a common downward dependency instead of one importing
-## the other's module just to borrow two type names. May import
-## `sello/private/ct` (a leaf itself, no crypto logic of its own either)
-## for `wipe`; nothing here reaches into `field.nim`/`scalar.nim` group-ops
-## machinery -- these types never touch that arithmetic, which is exactly
-## why they no longer live in `scalar.nim` (finding 27: `scalar.nim`'s
-## mandate is Curve25519 group operations, not wire-format bookkeeping).
+## Leaf module: `PublicKey`/`Signature`, their conversions, and `==`/`$`/
+## `hash` -- no crypto logic, and (unlike the generic secret wipe that used
+## to share this module as `types.nim`) no `private/ct` import either, since
+## these types hold no secret to wipe. Sits below both `ed25519.nim`
+## (verify) and `signing.nim` (sign) so they can share these definitions on
+## a common downward dependency instead of one importing the other's
+## module just to borrow two type names.
 ##
-## Honesty note on cohesion: the wire types and the generic wipe share
-## this module for import-graph position (both must sit on a leaf below
-## every consumer), not for a common purpose — the wipe never operates on
-## this module's own PUBLIC types. Two leftover leaf concerns, one roof.
+## `types.nim` used to hold this module's contents plus the unrelated
+## generic `wipe*(var array[32, byte])` -- sharing a roof for import-graph
+## position only, a "two leftover leaf concerns, one roof" cohesion gap its
+## own doc comment admitted. RFC-002 slice 2 resolves that by splitting the
+## roof itself: this module keeps the wire types (and needs no
+## `private/ct` import at all, since it never did), `sello/wipe` gets the
+## generic wipe. Both are leaves; nothing here reaches into
+## `field.nim`/`scalar.nim` group-ops machinery -- these types never touch
+## that arithmetic, which is exactly why they don't live in `scalar.nim`
+## (finding 27: `scalar.nim`'s mandate is Curve25519 group operations, not
+## wire-format bookkeeping).
 ##
 ## ---------------------------------------------------------------------
 ## PublicKey, Signature (RFC-001 finding 9)
@@ -42,24 +47,8 @@
 ## values (public keys, signatures) carries no constant-time requirement,
 ## so plain equality is correct here. Contrast `signing.Seed`, which holds
 ## secret material and (RFC-002 slice 1) has no `==` at all.
-##
-## ---------------------------------------------------------------------
-## Generic array wipe (RFC-001 finding 11, relocated here by finding 28)
-## ---------------------------------------------------------------------
-##
-## `wipe*(var array[32, byte])` delegates to the one audited primitive,
-## `private/ct.wipe`. Previously homed in `x25519.nim` alongside the
-## X25519-specific `wipe` overloads (`X25519StaticSecret`/`X25519Shared`
-## today, `X25519Key` at the time of this move), despite covering any 32-byte
-## secret shape, not just X25519 material (e.g. a raw `Seed`-shaped buffer
-## a caller manages by hand outside `signing.Seed`). Living here instead
-## means `x25519.nim` keeps only the X25519-specific overloads it actually
-## has business owning, and a future secret-holding module gains the
-## generic primitive from this shared leaf rather than reaching sideways
-## into X25519's module or duplicating the wrapper.
 
 import std/hashes
-import sello/private/ct
 
 type
   PublicKey* = distinct array[32, byte]
@@ -100,12 +89,3 @@ func hash*(sig: Signature): Hash {.inline.} =
   ## Hash of the underlying bytes (RFC-002 slice 1). No constant-time
   ## requirement, same reasoning as `==` above.
   hash(array[64, byte](sig))
-
-proc wipe*(bytes: var array[32, byte]) =
-  ## Audited wipe (volatile stores + compiler barrier, see
-  ## `private/ct.nim`) of raw 32-byte secret material a caller is holding
-  ## outside of any of sello's own secret-carrying types -- `Seed`
-  ## (`signing.wipe`) and `X25519StaticSecret`/`X25519Shared` (`x25519.wipe`)
-  ## each get their own typed overload that delegates to this same
-  ## audited primitive.
-  ct.wipe(bytes)

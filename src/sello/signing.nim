@@ -16,13 +16,13 @@
 ## - **`Seed` is its own nominal type, never interchangeable with
 ##   `PublicKey`.** Both are 32 raw bytes underneath, and even now that
 ##   `PublicKey` is `distinct` in its own right (RFC-001 finding 9, see
-##   `sello/types`), that only stops a *bare* `array[32, byte]` (or a
+##   `sello/wire`), that only stops a *bare* `array[32, byte]` (or a
 ##   different distinct type, like X25519's `X25519Public`) from being
 ##   accepted where a `PublicKey` belongs — it does nothing to stop a
 ##   `PublicKey` and a `Seed` from being confused for each other, since
 ##   they are two independently-defined nominal types with no relation.
 ##   `Seed`'s own distinctness (and its `=destroy` wipe hook, which
-##   `PublicKey` has no need of — see `sello/types`'s doc comment on why
+##   `PublicKey` has no need of — see `sello/wire`'s doc comment on why
 ##   not) is what closes that specific gap. Construction is the explicit,
 ##   greppable `toSeed(bytes)` at exactly the point where bytes become
 ##   secret. `wipe` remains for explicit early wiping.
@@ -90,7 +90,7 @@
 ##   `keypairFromSeed`.
 
 import std/sysrand
-import sello/types  # PublicKey/Signature nominal types (RFC-001 finding 9)
+import sello/wire  # PublicKey/Signature nominal types (RFC-001 finding 9)
 import sello/private/ct
 
 when defined(selloLibsodium):
@@ -180,7 +180,7 @@ func toBytes*(kp: Keypair): array[32, byte] {.inline.} =
   ## slice 1 -- replaces the old `seed()` accessor, which returned a
   ## `Seed` the public API provided no way to extract bytes from). The
   ## returned copy is caller-owned and NOT wiped by this call -- wipe it
-  ## yourself (e.g. `sello/types.wipe`) once you are done with it, the
+  ## yourself (e.g. `sello/wipe.wipe`) once you are done with it, the
   ## same register as `X25519StaticSecret.toBytes` (`sello/x25519`).
   kp.seed.bytes
 

@@ -6,19 +6,22 @@
 import std/options
 import sello/field
 import sello/scalar
-import sello/types
+import sello/challenge
+import sello/wire
 
-# `PublicKey`/`Signature` are defined in `sello/types` (RFC-001 finding 9;
-# relocated out of `sello/scalar` by round-2 finding 27, which was purely
-# a wire-type/group-ops homing fix -- see `types.nim`'s module doc for the
-# rationale), not here: both the verify path (this module) and the signing
-# path (`signing.nim`) need them, so they live on a shared leaf module both
-# depend on downward, rather than `signing.nim` importing this verify-only
-# module just to borrow two type aliases. Re-exported here so
-# `import sello/ed25519` alone (the pre-existing habit) still finds them.
-export types.PublicKey, types.Signature
-export types.toPublicKey, types.toSignature, types.toBytes
-export types.`==`, types.`$`
+# `PublicKey`/`Signature` are defined in `sello/wire` (RFC-001 finding 9;
+# relocated out of `sello/scalar` by round-2 finding 27, then out of the
+# combined `types.nim` by RFC-002 slice 2 item 5, which split it into
+# `wire.nim` (these types) and `wipe.nim` (the unrelated generic secret
+# wipe) -- see `wire.nim`'s module doc for the rationale), not here: both
+# the verify path (this module) and the signing path (`signing.nim`) need
+# them, so they live on a shared leaf module both depend on downward,
+# rather than `signing.nim` importing this verify-only module just to
+# borrow two type aliases. Re-exported here so `import sello/ed25519`
+# alone (the pre-existing habit) still finds them.
+export wire.PublicKey, wire.Signature
+export wire.toPublicKey, wire.toSignature, wire.toBytes
+export wire.`==`, wire.`$`
 
 # ---------------------------------------------------------------------------
 # Point decoding (RFC 8032 §5.1.3)
@@ -141,8 +144,8 @@ func verify*(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool =
   let A = aOpt.get
 
   # 4. k = SHA-512(R || PK || msg) mod L — the same audited formula
-  #    signDetached will call once signing lands (sign/verify
-  #    self-consistency; see sello/scalar.challenge).
+  #    signDetached also calls, for sign/verify self-consistency (see
+  #    sello/challenge.challenge).
   let kRed = challenge(rArr, pkBytes, msg)
 
   # 5. Check the group equation [S]B == R + [k]A (RFC 8032 §5.1.7 step 3,

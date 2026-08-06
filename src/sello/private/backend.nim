@@ -8,12 +8,13 @@
 ## treatment `ct.nim` gets.
 ##
 ## Seed-level primitives only, no `Keypair` knowledge. Builds strictly on
-## `sello/field` + `sello/scalar` + nimcrypto's SHA-512 — deliberately
+## `sello/field` + `sello/scalar` + `sello/challenge` (the shared
+## `challenge` hash, RFC-002 slice 2) + nimcrypto's SHA-512 — deliberately
 ## never `sello/ed25519`, which stays a verify-only module that never
 ## touches a secret. `derivePublic`/`signDetached` below return raw
 ## `array[32/64, byte]`, not `PublicKey`/`Signature` (RFC-001 finding 9):
 ## even though those nominal types are one leaf import away
-## (`sello/types`), the public wrapping is deliberately NOT applied here. This module is `private/`
+## (`sello/wire`), the public wrapping is deliberately NOT applied here. This module is `private/`
 ## precisely because its seed-level contract bypasses every `Keypair`
 ## guarantee; adding the public nominal types here would blur that
 ## boundary rather than sharpen it. `signing.nim` is where seed bytes
@@ -40,6 +41,7 @@
 import nimcrypto/sha2
 import sello/field
 import sello/scalar
+import sello/challenge
 import sello/private/ct
 
 {.push checks: off.}
@@ -138,6 +140,36 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
     ct.wipe(h)
 
     let A = publicBytes
+
+    # Debug-only consistency check (RFC-002 slice 2 item 3b): plain
+    # `assert`, meant to be entirely absent from the dudect-measured
+    # `-d:release` build (and every downstream consumer's release build).
+    # Expensive ON PURPOSE -- a second secret-scalar fixed-base scalarmult
+    # purely to confirm the caller's `publicBytes` really is
+    # `derivePublic`'s output for this `seed` (the `Keypair` invariant
+    # `signing.nim` relies on to skip re-deriving `A` on every call, see
+    # this function's own doc comment) -- so it must only run where cost
+    # doesn't matter: debug-build tests, never release, and NEVER inside
+    # the timing-sensitive path dudect measures.
+    #
+    # `when not defined(release)`, not a bare `assert` (RFC-002 slice 2
+    # deviation from the RFC's literal mechanism, forced by empirical Nim
+    # 2.2.10 behavior -- see `scalar.geScalarmultBase`'s matching assert
+    # for the full writeup): the RFC's stated rationale ("plain assert --
+    # stripped by -d:release") does not hold in this toolchain, and this
+    # function already sits under `checks: off`, whose `checks` umbrella
+    # bundles `assertions` off unconditionally -- so a bare `assert` here
+    # would neither fire in debug builds NOR reliably disappear from
+    # release ones. The `when` guard removes this whole block, including
+    # the extra `geScalarmultBase` call, from `-d:release` compilation
+    # entirely; the inner `{.push assertions: on.}` locally overrides the
+    # surrounding checks-off region so the assert can actually fire in a
+    # plain debug build.
+    when not defined(release):
+      {.push assertions: on.}
+      assert A == pointEncode(geScalarmultBase(a)),
+        "signDetached: publicBytes does not match derivePublic(seed)"
+      {.pop.}
 
     nonceSha.init()
     nonceSha.update(prefix)

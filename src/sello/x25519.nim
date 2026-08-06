@@ -60,12 +60,12 @@
 ## specifically need a reusable/static identity.
 ##
 ## `toX25519StaticSecret`/`toX25519Public`/`toBytes` are the named conversions
-## to/from raw bytes (symmetry with `sello/types`'s `toPublicKey`/
+## to/from raw bytes (symmetry with `sello/wire`'s `toPublicKey`/
 ## `toSignature` and `signing.toSeed`); `x25519StaticSecret()`/
 ## `x25519EphemeralSecret()` generate a fresh secret from `std/sysrand`.
 ## `wipe` (`X25519StaticSecret`-, `X25519EphemeralSecret`-, and
 ## `X25519Shared`-typed here; the generic `array[32, byte]` overload lives
-## in `sello/types`) is the public, audited route to `private/ct.wipe` for
+## in `sello/wipe`) is the public, audited route to `private/ct.wipe` for
 ## X25519 secret material a caller holds directly, alongside the automatic
 ## `=destroy` wipe every secret-holding type here already carries.
 
@@ -195,7 +195,7 @@ proc x25519StaticSecret*(): X25519StaticSecret =
 func toBytes*(s: X25519StaticSecret): array[32, byte] {.inline.} =
   ## Deliberate export for persistence/interop. The returned copy is
   ## caller-owned and NOT wiped by this call -- wipe it yourself (e.g.
-  ## `sello/types.wipe`) once you are done with it.
+  ## `sello/wipe.wipe`) once you are done with it.
   s.bytes
 
 proc x25519EphemeralSecret*(): X25519EphemeralSecret =
@@ -217,7 +217,7 @@ func toBytes*(p: X25519Public): array[32, byte] {.inline.} =
 
 func `==`*(a, b: X25519Public): bool {.borrow.}
   ## Comparing two PUBLIC values carries no constant-time requirement --
-  ## same reasoning as `PublicKey`/`Signature` (`sello/types`).
+  ## same reasoning as `PublicKey`/`Signature` (`sello/wire`).
 func `$`*(p: X25519Public): string {.borrow.}
 
 func hash*(p: X25519Public): Hash {.inline.} =
@@ -229,7 +229,7 @@ func hash*(p: X25519Public): Hash {.inline.} =
 func toBytes*(sh: X25519Shared): array[32, byte] {.inline.} =
   ## Raw DH output. Feed it to a KDF -- never use it directly as a key.
   ## The returned copy is caller-owned and NOT wiped by this call -- wipe
-  ## it yourself (e.g. `sello/types.wipe`) once you are done with it.
+  ## it yourself (e.g. `sello/wipe.wipe`) once you are done with it.
   sh.bytes
 
 const
@@ -418,7 +418,7 @@ func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25
 # kind of gap that pushes a caller toward a hand-rolled scrub loop the
 # compiler is free to delete as a dead store (the precise bug class
 # RFC-001 slice 8 fixed internally; see `private/ct.nim`'s module doc
-# comment). The generic `array[32, byte]` overload lives in `sello/types`
+# comment). The generic `array[32, byte]` overload lives in `sello/wipe`
 # (any 32-byte secret shape); the overloads below are specific to this
 # module's own secret-holding types.
 # ---------------------------------------------------------------------------

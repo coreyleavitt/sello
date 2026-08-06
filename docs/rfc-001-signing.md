@@ -22,6 +22,9 @@ Non-goals (explicit, so silence isn't ambiguity):
 - Key-container formats (PKCS#8/RFC 8410 DER, OpenSSH, JWK OKP) — sello
   speaks raw 32-byte seeds only; extracting a seed from a container is the
   caller's responsibility.
+- Batch verification — considered; deferred to a future RFC — random-weight
+  batch verify is vartime-tier but has real small-order/cofactor
+  subtleties.
 
 ## Context
 

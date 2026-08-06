@@ -50,23 +50,25 @@
 ## `x25519.nim`'s doc comment on the type). `wipe` is overloaded over
 ## `Seed` (signing.nim), `X25519StaticSecret`/`X25519EphemeralSecret`/
 ## `X25519Shared` (x25519.nim), and a generic raw `array[32, byte]`
-## (sello/types) -- the same audited volatile-store primitive for every
+## (sello/wipe) -- the same audited volatile-store primitive for every
 ## secret shape the public API hands back to a caller (RFC-001 finding
 ## 11).
 ##
-## The submodules (`sello/field`, `sello/scalar`, `sello/types`,
-## `sello/ed25519`) are implementation layers; importing them directly
-## works but carries no API-stability promise.
+## The submodules (`sello/field`, `sello/scalar`, `sello/wire`,
+## `sello/wipe`, `sello/challenge`, `sello/ed25519`) are implementation
+## layers; importing them directly works but carries no API-stability
+## promise.
 
-import sello/types
+import sello/wire
+import sello/wipe
 import sello/ed25519
 import sello/x25519
 import sello/signing
 
-export types.PublicKey, types.Signature, verify
-export types.toPublicKey, types.toSignature, types.toBytes
-export types.`==`, types.`$`, types.hash
-export types.wipe
+export wire.PublicKey, wire.Signature, verify
+export wire.toPublicKey, wire.toSignature, wire.toBytes
+export wire.`==`, wire.`$`, wire.hash
+export wipe.wipe
 export x25519.x25519, x25519Base, X25519BasePoint
 export x25519.toBytes
 export x25519.`==`, x25519.`$`, x25519.hash

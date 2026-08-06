@@ -309,6 +309,9 @@ proves instead.
 - **Nonce hedging / fault-injection hardening** -- RFC 8032's deterministic
   nonce is implemented exactly as specified, with no additional
   randomization.
+- **Batch verification** -- considered; deferred to a future RFC --
+  random-weight batch verify is vartime-tier but has real
+  small-order/cofactor subtleties.
 
 ## License
 
