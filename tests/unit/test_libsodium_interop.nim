@@ -1,16 +1,16 @@
 ## tests/unit/test_libsodium_interop.nim — bidirectional pure-Nim <->
 ## libsodium interop (RFC-001 slice 10).
 ##
-## This file is a permanent member of `sello.nimble`'s shared
-## `unitTestFiles` list, compiled by BOTH `nimble test` and
-## `nimble testLibsodium` (anti-drift requirement) -- but its actual body
-## only exists `when defined(selloLibsodium)`. Under plain `nimble test`
-## (no flag), `sello/private/backend_sodium` is never imported and this
-## file contributes a single no-op "skipped" test, so the suite still
-## reports green without ever touching libsodium or requiring it to be
-## installed. Under `-d:selloLibsodium` (`nimble testLibsodium`, run
-## inside the sello-owned libsodium image), the real bidirectional interop
-## checks run.
+## This file is a permanent member of the shared `unit_test_files` array
+## (`scripts/lib/unit-test-files.sh`, `source`d by both `scripts/test.sh`
+## and `scripts/test-libsodium.sh` -- round-2 finding 25) -- but its actual
+## body only exists `when defined(selloLibsodium)`. Under plain
+## `scripts/test.sh` (no flag),
+## `sello/private/backend_sodium` is never imported and this file
+## contributes a single no-op "skipped" test, so the suite still reports
+## green without ever touching libsodium or requiring it to be installed.
+## Under `-d:selloLibsodium` (`scripts/test-libsodium.sh`, run inside the
+## sello-owned libsodium image), the real bidirectional interop checks run.
 ##
 ## Interop is strictly stronger evidence than both backends separately
 ## passing the same fixed RFC/Wycheproof vectors: it proves sello's
@@ -46,7 +46,8 @@ when defined(selloLibsodium):
       let kp = keypair(toSeed(seedBytes))
       let msg = "sello <-> libsodium interop (pure sign, sodium verify)"
       let sig = kp.sign(msg)
-      check backend_sodium.sodiumVerifyDetached(sig, msg.toOpenArrayByte(0, msg.len - 1), kp.public)
+      check backend_sodium.sodiumVerifyDetached(array[64, byte](sig),
+        msg.toOpenArrayByte(0, msg.len - 1), array[32, byte](kp.public))
 
     test "libsodium-produced signature verifies under sello's pure verify":
       let msg = "sello <-> libsodium interop (sodium sign, pure verify)"
@@ -67,9 +68,10 @@ when defined(selloLibsodium):
       let pureSig = kp.sign(emptyMsg)
       let sodiumSig = backend_sodium.signDetached(seedBytes, emptyMsg)
       check array[64, byte](pureSig) == sodiumSig
-      check backend_sodium.sodiumVerifyDetached(pureSig, emptyMsg, kp.public)
+      check backend_sodium.sodiumVerifyDetached(array[64, byte](pureSig), emptyMsg,
+        array[32, byte](kp.public))
       check verify(Signature(sodiumSig), emptyMsg, kp.public)
 else:
   suite "libsodium interop (skipped)":
-    test "skipped: build with -d:selloLibsodium (nimble testLibsodium) to run this suite":
+    test "skipped: build with -d:selloLibsodium (scripts/test-libsodium.sh) to run this suite":
       skip()

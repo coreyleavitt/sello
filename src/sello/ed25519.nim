@@ -6,14 +6,19 @@
 import std/options
 import sello/field
 import sello/scalar
+import sello/types
 
-# ---------------------------------------------------------------------------
-# Public types
-# ---------------------------------------------------------------------------
-
-type
-  PublicKey* = array[32, byte]
-  Signature* = array[64, byte]
+# `PublicKey`/`Signature` are defined in `sello/types` (RFC-001 finding 9;
+# relocated out of `sello/scalar` by round-2 finding 27, which was purely
+# a wire-type/group-ops homing fix -- see `types.nim`'s module doc for the
+# rationale), not here: both the verify path (this module) and the signing
+# path (`signing.nim`) need them, so they live on a shared leaf module both
+# depend on downward, rather than `signing.nim` importing this verify-only
+# module just to borrow two type aliases. Re-exported here so
+# `import sello/ed25519` alone (the pre-existing habit) still finds them.
+export types.PublicKey, types.Signature
+export types.toPublicKey, types.toSignature, types.toBytes
+export types.`==`, types.`$`
 
 # ---------------------------------------------------------------------------
 # Point decoding (RFC 8032 §5.1.3)
@@ -96,20 +101,22 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
 
 func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
   ## Verify an ed25519 signature. Returns false for invalid inputs.
+  let sigBytes = toBytes(sig)
+  let pkBytes = toBytes(pk)
 
   # 1. Decode R
   var rArr: array[32, byte]
-  for i in 0..<32: rArr[i] = sig[i]
+  for i in 0..<32: rArr[i] = sigBytes[i]
   let rOpt = pointDecode(rArr)
   if rOpt.isNone: return false
 
   # 2. Decode A (public key)
-  let aOpt = pointDecode(pk)
+  let aOpt = pointDecode(pkBytes)
   if aOpt.isNone: return false
 
   # 3. Check S < L
   var sArr: array[32, byte]
-  for i in 0..<32: sArr[i] = sig[32 + i]
+  for i in 0..<32: sArr[i] = sigBytes[32 + i]
   if not scIsCanonical(sArr): return false
 
   let R = rOpt.get
@@ -118,7 +125,7 @@ func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
   # 4. k = SHA-512(R || PK || msg) mod L — the same audited formula
   #    signDetached will call once signing lands (sign/verify
   #    self-consistency; see sello/scalar.challenge).
-  let kRed = challenge(rArr, pk, msg)
+  let kRed = challenge(rArr, pkBytes, msg)
 
   # 5. Check the group equation [S]B == R + [k]A (RFC 8032 §5.1.7 step 3,
   #    cofactorless form): compare canonical encodings of both sides.
@@ -132,11 +139,11 @@ func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
 
   # [S]B
   var SB: GeP3
-  scalarmult(SB, sArr, B)
+  scalarmultVartime(SB, sArr, B)
 
   # [k]A
   var kA: GeP3
-  scalarmult(kA, kRed, A)
+  scalarmultVartime(kA, kRed, A)
 
   # R + [k]A
   var cachedR: GeCached

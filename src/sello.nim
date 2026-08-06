@@ -17,16 +17,43 @@
 ## on -- a known, deliberate asymmetry, not an oversight (see RFC-001's
 ## non-goals).
 ##
-## The submodules (`sello/field`, `sello/scalar`, `sello/ed25519`) are
-## implementation layers; importing them directly works but carries no
-## API-stability promise.
+## `PublicKey`, `Signature`, and X25519's `X25519Key` are nominal
+## (`distinct array`) wire types, not interchangeable aliases: a
+## `PublicKey` cannot be passed where an `X25519Key` is expected or vice
+## versa, even though both are 32 raw bytes underneath (RFC-001 finding
+## 9). `toPublicKey`/`toSignature`/`toX25519Key`/`toBytes` convert to/from
+## raw bytes at the point a value crosses the wire (decoding,
+## serialization; RFC-001 findings 9/26); the bare `Type(bytes)` cast
+## works too (distinct types get that spelling free). `wipe` is
+## overloaded over `Seed` (signing.nim), `X25519Key` (x25519.nim), and a
+## generic raw `array[32, byte]` (sello/types) -- the same audited
+## volatile-store primitive for every secret shape the public API hands
+## back to a caller (RFC-001 finding 11).
+##
+## The submodules (`sello/field`, `sello/scalar`, `sello/types`,
+## `sello/ed25519`) are implementation layers; importing them directly
+## works but carries no API-stability promise.
 
+import sello/types
 import sello/ed25519
 import sello/x25519
 import sello/signing
 
-export PublicKey, Signature, verify
-export x25519.x25519, x25519Base, X25519BasePoint
+export types.PublicKey, types.Signature, verify
+export types.toPublicKey, types.toSignature, types.toBytes
+export types.`==`, types.`$`
+export types.wipe
+export x25519.X25519Key, x25519.x25519, x25519Base, X25519BasePoint
+export x25519.toX25519Key, x25519.toBytes
+export x25519.`==`, x25519.`$`
+export x25519.wipe
 export signing.Seed, signing.Keypair, signing.toSeed
-export signing.keypair, signing.sign, signing.wipe
+export signing.keypair, signing.sign
+export signing.wipe
 export signing.public, signing.seed
+# `Seed`'s own `==` is deliberately NOT re-exported here (see
+# sello/signing: vartime, tests/tooling only) -- unlike `PublicKey`/
+# `Signature`/`X25519Key`, whose `==` is exported above because comparing
+# two PUBLIC values (or two X25519 shared secrets a caller has already
+# computed, e.g. confirming both DH parties agree) is a normal, expected
+# operation with no CT requirement of its own.

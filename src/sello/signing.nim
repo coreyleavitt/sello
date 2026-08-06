@@ -14,16 +14,21 @@
 ##   fields are private and `keypair(seed)` is the only constructor, so a
 ##   mismatched pair is unconstructible.
 ## - **`Seed` is its own nominal type, never interchangeable with
-##   `PublicKey`.** `PublicKey` has the identical raw shape
-##   (`array[32, byte]`); with a plain alias the compiler would accept a
-##   public key anywhere a seed belongs (including transposed fields
-##   inside this module) and no `=destroy` could attach to `Seed`
-##   specifically. Construction is the explicit, greppable `toSeed(bytes)`
-##   at exactly the point where bytes become secret, and `Seed` carries
-##   its own wipe hook, so the copy `seed()` returns — and any
-##   caller-held `Seed` — zeroes itself at scope exit instead of relying
-##   on a doc comment. `wipe` remains for explicit early wiping. `==` is
-##   for tests/tooling only and is vartime.
+##   `PublicKey`.** Both are 32 raw bytes underneath, and even now that
+##   `PublicKey` is `distinct` in its own right (RFC-001 finding 9, see
+##   `sello/types`), that only stops a *bare* `array[32, byte]` (or a
+##   different distinct type, like X25519's `X25519Key`) from being
+##   accepted where a `PublicKey` belongs — it does nothing to stop a
+##   `PublicKey` and a `Seed` from being confused for each other, since
+##   they are two independently-defined nominal types with no relation.
+##   `Seed`'s own distinctness (and its `=destroy` wipe hook, which
+##   `PublicKey` has no need of — see `sello/types`'s doc comment on why
+##   not) is what closes that specific gap. Construction is the explicit,
+##   greppable `toSeed(bytes)` at exactly the point where bytes become
+##   secret, and `Seed` carries its own wipe hook, so the copy `seed()`
+##   returns — and any caller-held `Seed` — zeroes itself at scope exit
+##   instead of relying on a doc comment. `wipe` remains for explicit
+##   early wiping. `==` is for tests/tooling only and is vartime.
 ##
 ##   Two deviations from RFC-001's literal §"Public API" text, both
 ##   forced by empirical Nim 2.2.10 behavior rather than a judgment call,
@@ -74,7 +79,7 @@
 ##   `keypairFromSeed`.
 
 import std/sysrand
-import sello/ed25519
+import sello/types  # PublicKey/Signature nominal types (RFC-001 finding 9)
 import sello/private/ct
 
 when defined(selloLibsodium):
@@ -93,6 +98,18 @@ type
     ## Construct via `toSeed(bytes)`. One-field object — see the module
     ## doc comment for why the RFC's first-choice `distinct
     ## array[32, byte]` is not used here.
+    ##
+    ## **Deliberately copyable, unlike `Keypair`.** `Seed` has no `=copy`
+    ## override, so `var b = a` compiles. This is a considered contrast
+    ## with `Keypair`'s move-only `=copy {.error.}`, not an oversight:
+    ## `Keypair` pairs a secret with the public key derived from it, and a
+    ## second live copy would defeat the single-owner invariant that pair
+    ## depends on, whereas a `Seed` is just 32 bytes with a wipe-on-exit
+    ## destructor attached — every copy carries its own `=destroy` and
+    ## self-wipes independently at its own scope exit, so duplication
+    ## costs nothing beyond the copy itself. This is also load-bearing:
+    ## `seed()` returns a copy of a `Keypair`-borrowed `Seed`, which is
+    ## only possible because a copy is allowed to exist.
     bytes: array[32, byte]
 
   Keypair* = object
@@ -151,7 +168,7 @@ func keypair*(seed: Seed): Keypair =
   ## The only constructor: derives the public key per RFC 8032 §5.1.5
   ## (`A = clamp(SHA-512(seed))[0..31]) * B`). Deterministic: the same
   ## seed always yields the same `Keypair`.
-  result.public = PublicKey(backend.derivePublic(seed.bytes))
+  result.public = toPublicKey(backend.derivePublic(seed.bytes))
   result.seed = seed
 
 proc keypair*(): Keypair =
@@ -159,10 +176,18 @@ proc keypair*(): Keypair =
   ## `OSError` if the OS CSPRNG call fails — the only function in sello's
   ## public surface that can raise; callers let it propagate uncaught
   ## (fail-fast on a broken CSPRNG is correct). Never `std/random`.
-  var bytes: array[32, byte]
-  if not urandom(bytes):
+  ##
+  ## RFC-001's "Seed sourcing" contract requires filling the stack `Seed`
+  ## directly via `urandom`'s in-place `openArray[byte]` overload — never a
+  ## bare local `array[32, byte]` that gets wrapped afterward, which would
+  ## leave the raw seed sitting unwiped in a dead stack slot once `toSeed`
+  ## copies it into the `Seed` that actually gets destroyed. Same-module
+  ## access to `Seed.bytes` (see the module doc comment) is what makes
+  ## filling in place possible.
+  var s: Seed
+  if not urandom(s.bytes):
     raise newException(OSError, "sello.keypair: sysrand.urandom failed")
-  result = keypair(toSeed(bytes))
+  result = keypair(s)
 
 func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## RFC 8032 §5.1.6 detached signature over `msg`. Deterministic and
@@ -173,7 +198,7 @@ func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## which reaches into `kp.seed`'s private bytes directly (same-module
   ## access — see the module doc comment) and never persists an expanded
   ## key.
-  backend.signDetached(kp.seed.bytes, msg)
+  toSignature(backend.signDetached(kp.seed.bytes, msg))
 
 func sign*(kp: Keypair; msg: string): Signature =
   ## Zero-copy `string` overload: `openArray[byte]` does not accept

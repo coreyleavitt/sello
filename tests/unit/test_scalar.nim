@@ -23,7 +23,7 @@ proc cachedEncode(c: GeCached; invTwo: Fe): array[32, byte] =
   ## pointEncode (which only reads x/y/z, never t) to normalize away the
   ## projective Z-scaling. Needed because two different computational
   ## paths to the same point (this table's incremental doubling/addition
-  ## vs. scalarmult's 4-bit-window algorithm) generally land on different,
+  ## vs. scalarmultVartime's 4-bit-window algorithm) generally land on different,
   ## equally-valid (X:Y:Z:T) representatives — raw limb/struct equality
   ## between them would be a false negative, not a real correctness check.
   var p: GeP3
@@ -77,13 +77,31 @@ suite "GeBaseTable (RFC-001 slice 3)":
     check GeBaseTable[0][0] == expected
 
   test "every entry equals the runtime-computed multiple of B (standing guard)":
-    ## GeBaseTable[i][j] must equal (j+1) * 16^(2*i) * B = (j+1) * 256^i * B,
-    ## checked independently against the vartime scalarmult already proven
-    ## against RFC 8032 + Wycheproof. This repo has no CI, so this assertion
-    ## re-verifies the compile-time table on every `nimble test` run rather
-    ## than trusting the const-eval once. Compared via canonical point
-    ## encoding (cachedEncode), not raw struct equality — see its doc
-    ## comment for why.
+    ## GeBaseTable[i][j] must equal (j+1) * 16^(2*i) * B = (j+1) * 256^i * B.
+    ##
+    ## What this guard actually pins (review finding 10 flagged an earlier
+    ## version of this comment for overstating its independence from
+    ## scalarmultVartime — both sides ultimately bottom out in the same
+    ## geAdd/geP2Dbl group-law primitives, so this is NOT an
+    ## independent proof of the group law itself): (1) table-construction
+    ## bookkeeping — buildBaseTable's per-row doubling/addition loop lands
+    ## on the exact (j+1)*256^i*B the table's own indexing contract
+    ## promises, not an off-by-one row/column or a wrong power of 256; (2)
+    ## compile-time VM arithmetic agrees with the identical runtime
+    ## arithmetic — buildBaseTable runs at compile time via Nim's VM, and a
+    ## VM/runtime float-like divergence in the underlying int32/int64 limb
+    ## ops would show up here as a mismatch; (3) cmovCached's constant-time
+    ## select recovers the same table entries the compile-time build wrote,
+    ## once decoded back to affine coordinates. The group-law correctness
+    ## burden itself (that geAdd/geP2Dbl/scalarmultVartime compute the
+    ## right curve arithmetic at all) is carried by the external RFC 8032 +
+    ## Wycheproof vectors (test_ed25519.nim, test_wycheproof.nim) and, for
+    ## geScalarmultBase specifically, the property-based agreement checks
+    ## in test_properties_scalar.nim — not by this test. This repo has no
+    ## CI, so this assertion re-verifies the compile-time table on every
+    ## `scripts/test.sh` run rather than trusting the const-eval once.
+    ## Compared via canonical point encoding (cachedEncode), not raw struct
+    ## equality — see its doc comment for why.
     let b = geBasePoint()
     var two = Fe(limbs: [2'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0])
     var invTwo: Fe
@@ -94,7 +112,7 @@ suite "GeBaseTable (RFC-001 slice 3)":
         var scalarBytes: array[32, byte]
         scalarBytes[i] = byte(j)  # little-endian encoding of j * 256^i
         var refP3: GeP3
-        scalarmult(refP3, scalarBytes, b)
+        scalarmultVartime(refP3, scalarBytes, b)
         check cachedEncode(GeBaseTable[i][j - 1], invTwo) == pointEncode(refP3)
         inc checked
     check checked == 32 * 8
@@ -159,7 +177,7 @@ suite "cmovCached (RFC-001 slice 3)":
 #   - r-shaped nonces (reduced mod L, top three bits always clear since
 #     L < 2^253): random reduced values and values just below L (the
 #     bit-252 boundary region, L's own highest set bit).
-# Every case is checked against the existing vartime `scalarmult` on the
+# Every case is checked against the existing `scalarmultVartime` on the
 # base point via pointEncode, not raw GeP3/GeCached equality — two
 # algorithms reaching the same point generally land on different, equally
 # valid projective representatives (same false-negative trap noted on the
@@ -168,7 +186,7 @@ suite "cmovCached (RFC-001 slice 3)":
 
 proc refBaseMultEncoded(s: array[32, byte]): array[32, byte] =
   var p: GeP3
-  scalarmult(p, s, geBasePoint())
+  scalarmultVartime(p, s, geBasePoint())
   pointEncode(p)
 
 proc prngScalar32(counter: uint64): array[32, byte] =
@@ -239,7 +257,7 @@ suite "geScalarmultBase (RFC-001 slice 4)":
     clampScalar(a)
     check pointEncode(geScalarmultBase(a)) == refBaseMultEncoded(a)
 
-  test "clamped domain: 100 random clamped scalars match vartime scalarmult":
+  test "clamped domain: 100 random clamped scalars match scalarmultVartime":
     var checked = 0
     for i in 0'u64 ..< 100:
       var s = prngScalar32(i)
@@ -256,7 +274,7 @@ suite "geScalarmultBase (RFC-001 slice 4)":
     check s[31] == 0x7F
     check pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
 
-  test "r-shaped domain: 100 random reduced-mod-L scalars match vartime scalarmult":
+  test "r-shaped domain: 100 random reduced-mod-L scalars match scalarmultVartime":
     var checked = 0
     for i in 0'u64 ..< 100:
       let r = prngReducedScalar32(i)

@@ -108,32 +108,32 @@ let
 
 suite "ed25519 verify - RFC 8032 test vectors":
   test "verify empty message (RFC 8032 §7.1 test 1)":
-    check verify(tv1_sig, tv1_msg, tv1_pk)
+    check verify(toSignature(tv1_sig), tv1_msg, toPublicKey(tv1_pk))
 
   test "verify 1-byte message (RFC 8032 §7.1 test 2)":
-    check verify(tv2_sig, tv2_msg, tv2_pk)
+    check verify(toSignature(tv2_sig), tv2_msg, toPublicKey(tv2_pk))
 
   test "verify 2-byte message (RFC 8032 §7.1 test 3)":
-    check verify(tv3_sig, tv3_msg, tv3_pk)
+    check verify(toSignature(tv3_sig), tv3_msg, toPublicKey(tv3_pk))
 
   test "verify 1023-byte message, multi-block SHA-512 (RFC 8032 §7.1 TEST-1024)":
     doAssert tv1024_msg.len == 1023  # transcription self-check, belt-and-suspenders
-    check verify(tv1024_sig, tv1024_msg, tv1024_pk)
+    check verify(toSignature(tv1024_sig), tv1024_msg, toPublicKey(tv1024_pk))
 
   test "verify rejects wrong public key":
     var wrongPk: array[32, byte]
     copyMem(addr wrongPk[0], addr tv1_pk[0], 32)
     wrongPk[0] = wrongPk[0] xor 1
-    check not verify(tv1_sig, tv1_msg, wrongPk)
+    check not verify(toSignature(tv1_sig), tv1_msg, toPublicKey(wrongPk))
 
   test "verify rejects wrong message":
     var wrongMsg = [0x01'u8]
-    check not verify(tv1_sig, wrongMsg, tv1_pk)
+    check not verify(toSignature(tv1_sig), wrongMsg, toPublicKey(tv1_pk))
 
   test "verify rejects tampered signature":
     var wrongSig = tv1_sig
     wrongSig[0] = wrongSig[0] xor 1
-    check not verify(wrongSig, tv1_msg, tv1_pk)
+    check not verify(toSignature(wrongSig), tv1_msg, toPublicKey(tv1_pk))
 
 # Canonicity: RFC 8032 §5.1.3 requires rejecting y >= p and (x=0, sign=1).
 # These are the encodings Wycheproof uses for malleable-point forgeries.
@@ -166,8 +166,8 @@ suite "ed25519 point decoding - canonicity":
     var sig = tv1_sig
     let badR = fieldEnc(0xEE, 0xFF, 0x7F)
     for i in 0 ..< 32: sig[i] = badR[i]
-    check not verify(sig, tv1_msg, tv1_pk)
+    check not verify(toSignature(sig), tv1_msg, toPublicKey(tv1_pk))
 
   test "verify rejects non-canonical public key":
     let badPk = fieldEnc(0xEE, 0xFF, 0x7F)
-    check not verify(tv1_sig, tv1_msg, badPk)
+    check not verify(toSignature(tv1_sig), tv1_msg, toPublicKey(badPk))

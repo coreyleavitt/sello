@@ -1,13 +1,16 @@
 import std/[unittest, options, strutils]
 import sello/x25519
+import sello/types  # generic array wipe (round-2 finding 28 -- see below)
 
-proc fromHex(s: string): array[32, byte] =
+proc fromHex(s: string): X25519Key =
   doAssert s.len == 64
+  var bytes: array[32, byte]
   for i in 0 ..< 32:
-    result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+    bytes[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+  X25519Key(bytes)
 
-proc toHex(a: array[32, byte]): string =
-  for b in a: result.add b.toHex(2).toLowerAscii
+proc toHex(k: X25519Key): string =
+  for b in array[32, byte](k): result.add b.toHex(2).toLowerAscii
 
 suite "X25519 - RFC 7748 test vectors":
   test "5.2 vector 1":
@@ -51,9 +54,40 @@ suite "X25519 - RFC 7748 test vectors":
     check sharedA.get.toHex == "4a5d9d5ba4ce2de1728e3bf480350f25e07e21c947d19e3376f09b3c1e161742"
 
   test "rejects small-order peer point (zero shared secret)":
-    var zero: array[32, byte]           # u = 0, order 1... produces 0
+    let zero = X25519Key(default(array[32, byte]))  # u = 0, order 1... produces 0
     let k = fromHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
     check x25519(k, zero).isNone
-    var one: array[32, byte]
-    one[0] = 1                          # u = 1, order-4 point
-    check x25519(k, one).isNone
+    var oneArr: array[32, byte]
+    oneArr[0] = 1                       # u = 1, order-4 point
+    check x25519(k, X25519Key(oneArr)).isNone
+
+suite "X25519 - public wipe (RFC-001 finding 11)":
+  ## Before this, `private/ct.wipe` -- the one audited volatile-store
+  ## primitive -- was reachable only by importing a `private/` module
+  ## directly; `sello.wipe` covered `Seed` only. These probe-pattern tests
+  ## (same methodology as test_signing.nim's Seed destructor suite: a raw
+  ## pointer captured before the wipe, memory re-read after) confirm both
+  ## public overloads actually reach it, for a caller holding X25519
+  ## secret material outside of a Keypair/Seed.
+  ##
+  ## Round-2 finding 28: the `array[32, byte]` overload exercised by the
+  ## first test below now lives in `sello/types` (it wipes any 32-byte
+  ## secret, not just X25519 material), not in `sello/x25519` alongside
+  ## the `X25519Key`-typed overload the second test covers. Both stay in
+  ## this suite because both are exactly what a caller peeling an
+  ## `X25519Key` down to raw bytes (or not) reaches for.
+  test "wipe(var array[32, byte]) [sello/types] zeroes the array in place":
+    var secret = fromHex("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+    var raw = array[32, byte](secret)
+    let probe = addr raw
+    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe
+    wipe(raw)
+    check probe[] == default(array[32, byte])
+
+  test "wipe(var X25519Key) zeroes the underlying bytes in place":
+    var secret = fromHex("5dab087e624a8a4b79e17f8b83800ee66f3bb1292618b6fd1c2f8b27ff88e0eb")
+    let probe = cast[ptr array[32, byte]](addr secret)
+    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe
+    wipe(secret)
+    check probe[] == default(array[32, byte])
+    check secret == X25519Key(default(array[32, byte]))

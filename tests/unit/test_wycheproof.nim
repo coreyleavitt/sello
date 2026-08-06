@@ -25,8 +25,9 @@ suite "Wycheproof ed25519 verify":
     for g in root["testGroups"]:
       let pkBytes = hexToBytes(g["publicKey"]["pk"].getStr)
       doAssert pkBytes.len == 32
-      var pk: PublicKey
-      for i in 0 ..< 32: pk[i] = pkBytes[i]
+      var pkArr: array[32, byte]
+      for i in 0 ..< 32: pkArr[i] = pkBytes[i]
+      let pk = toPublicKey(pkArr)
 
       for t in g["tests"]:
         let msg = hexToBytes(t["msg"].getStr)
@@ -37,9 +38,9 @@ suite "Wycheproof ed25519 verify":
         # rejected before it can reach verify's fixed-size API.
         var got = false
         if sigBytes.len == 64:
-          var sig: Signature
-          for i in 0 ..< 64: sig[i] = sigBytes[i]
-          got = verify(sig, msg, pk)
+          var sigArr: array[64, byte]
+          for i in 0 ..< 64: sigArr[i] = sigBytes[i]
+          got = verify(toSignature(sigArr), msg, pk)
 
         if got != expected:
           inc failures

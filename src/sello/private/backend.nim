@@ -10,10 +10,15 @@
 ## Seed-level primitives only, no `Keypair` knowledge. Builds strictly on
 ## `sello/field` + `sello/scalar` + nimcrypto's SHA-512 — deliberately
 ## never `sello/ed25519`, which stays a verify-only module that never
-## touches a secret. `derivePublic` below returns `array[32, byte]`
-## (not the `PublicKey` name) purely to avoid that import: `PublicKey` is
-## a plain (non-distinct) alias for the same type, so the two are
-## interchangeable at every call site without conversion.
+## touches a secret. `derivePublic`/`signDetached` below return raw
+## `array[32/64, byte]`, not `PublicKey`/`Signature` (RFC-001 finding 9):
+## even though those nominal types are one leaf import away
+## (`sello/types`), the public wrapping is deliberately NOT applied here. This module is `private/`
+## precisely because its seed-level contract bypasses every `Keypair`
+## guarantee; adding the public nominal types here would blur that
+## boundary rather than sharpen it. `signing.nim` is where seed bytes
+## cross into the public API, so that is where `toPublicKey`/`toSignature`
+## get called (one call site each, not sprinkled through this file).
 ##
 ## The libsodium adapter is the sibling `private/backend_sodium.nim`
 ## (RFC-001 slice 10); `signing.nim` dispatches between the two.

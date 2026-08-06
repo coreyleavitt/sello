@@ -51,8 +51,25 @@ const
   ]
 
 # ---------------------------------------------------------------------------
-# Conversions
+# Conversions, group operations, and fixed-base scalarmult's table build +
+# constant-time select (RFC-001 finding 1): this whole region, through
+# cmovCached below, is the point-arithmetic core reachable from
+# geScalarmultBase, which runs on secret scalars (the signer's `a` and
+# nonce `r` -- see backend.nim). Pushed checks-off for the same CT reason
+# as this file's other two regions: Nim's push/pop is lexical, so a caller
+# elsewhere in the codebase disabling checks (x25519.nim, backend.nim) does
+# NOT cover these callees, and left as `checks: on` every one of them would
+# compile in a bounds/overflow branch on secret-derived limb values --
+# exactly the branch-on-secret-data the CT discipline forbids. geAdd/geSub/
+# the P1P1-to-P2/P3 conversions/geP2Dbl are also the verify-only
+# `scalarmultVartime`'s callees (below); that function has no CT
+# requirement of its own, but shares these functions with the
+# secret-facing path, so it picks up checks-off too as an accepted side
+# effect (same precedent as `verify`'s calls into the scReduce/pointEncode
+# group further down this file).
 # ---------------------------------------------------------------------------
+
+{.push checks: off.}
 
 func geP3ToCached*(r: var GeCached; p: GeP3) {.inline.} =
   feAdd(r.yPlusX, p.y, p.x)
@@ -135,9 +152,20 @@ func geSub*(r: var GeP1P1; p: GeP3; q: GeCached) {.inline.} =
 # Scalar multiplication: variable-base, unsigned 4-bit windows
 # ---------------------------------------------------------------------------
 
-func scalarmult*(r: var GeP3; s: array[32, byte]; p: GeP3) =
+func scalarmultVartime*(r: var GeP3; s: array[32, byte]; p: GeP3) =
   ## r = [s]p — variable-base scalar multiplication.
   ## Uses unsigned 4-bit windows (nibbles 0..15), high-first.
+  ##
+  ## RFC-001 finding 8: named `*Vartime` (not plain `scalarmult`) so every
+  ## call site self-flags — this function has no constant-time requirement
+  ## and never runs on a secret scalar (verify-only: `ed25519.verify`'s
+  ## [S]B and [k]A, plus this file's own base-table-vs-runtime standing-
+  ## guard test). Before this rename, it was distinguishable from the CT
+  ## signer code sharing this file (`geScalarmultBase`/`cmovCached`) only
+  ## by a doc comment — the same mistake class the project already
+  ## eliminated at the ed25519.nim/private/backend.nim boundary (verify
+  ## vs. sign, one import away from each other, no naming cue). Do NOT add
+  ## the signer's secret scalar to this function.
   var pts: array[16, GeP3]
   var cch: array[16, GeCached]
   var tmp2: GeP2
@@ -218,9 +246,9 @@ func buildBaseTable(): array[32, array[8, GeCached]] =
   ## Computes GeBaseTable at compile time: 31*8 = 248 doublings step each
   ## row's base point to the next (256 = 16^2 per row), plus 7 additions per
   ## row to build multiples 2..8 from 1 — verified in-container (~1s,
-  ## byte-exact against runtime scalarmult; see the standing-guard test in
-  ## tests/unit/test_scalar.nim, which re-checks this every `nimble test`
-  ## run since this repo has no CI to rely on instead).
+  ## byte-exact against runtime scalarmultVartime; see the standing-guard
+  ## test in tests/unit/test_scalar.nim, which re-checks this every
+  ## `scripts/test.sh` run since this repo has no CI to rely on instead).
   var rowBase = geBasePoint()
   for i in 0..<32:
     if i > 0:
@@ -271,6 +299,8 @@ func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) {.noi
   var negT2d: Fe
   feNeg(negT2d, r.t2d)
   feCMove(r.t2d, negT2d, isNeg)
+
+{.pop.}
 
 # ---------------------------------------------------------------------------
 # Fixed-base scalar multiplication: signed radix-16 recoding + table consume

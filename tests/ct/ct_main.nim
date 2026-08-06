@@ -1,8 +1,8 @@
 ## tests/ct/ct_main.nim — dudect harness driver (RFC-001 slice 9).
 ##
-## Run via `nimble ct` (see sello.nimble), never as part of `nimble test`
-## -- this is a statistical, environment-sensitive measurement, not a
-## pass/fail correctness check on the usual bar.
+## Run via `scripts/ct.sh`, never as part of `scripts/test.sh` -- this is a
+## statistical, environment-sensitive measurement, not a pass/fail
+## correctness check on the usual bar.
 ##
 ## Targets, chosen to cover every secret-touching entry point named in
 ## RFC-001's constant-time discipline section:
@@ -98,9 +98,9 @@ proc opGeScalarmultBase(s: array[32, byte]): uint64 =
 # ---------------------------------------------------------------------------
 
 proc opX25519Base(secret: array[32, byte]): uint64 =
-  let pk = x25519Base(secret)
+  let pk = x25519Base(X25519Key(secret))
   var acc: uint64 = 0
-  for b in pk: acc = (acc shl 1) or uint64(b and 1'u8)
+  for b in array[32, byte](pk): acc = (acc shl 1) or uint64(b and 1'u8)
   acc
 
 # ---------------------------------------------------------------------------
