@@ -1,6 +1,6 @@
 # Constant-time timing evidence (RFC-001 slice 9)
 
-Results of the `tests/ct/` dudect-style harness, run via `nimble ct`. This
+Results of the `tests/ct/` dudect-style harness, run via `scripts/ct.sh`. This
 document is the honest record the RFC requires: the harness measures, it
 does not prove. It is evidence toward the constant-time discipline applied
 in slices 1-8, not a substitute for an audit. Consumers who need an audited
@@ -10,12 +10,12 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
 ## Measurement environment
 
 - **Container image:** `ghcr.io/coreyleavitt/nim:2.2.10` (the same image
-  `nimble test`/`nimble ct` run in per CLAUDE.md; no bare-metal run was
-  performed).
+  `scripts/test.sh`/`scripts/ct.sh` run in per CLAUDE.md; no bare-metal run
+  was performed).
 - **Host CPU:** Intel(R) Pentium(R) Gold 8505, 6 logical CPUs.
 - **CPU pinning:** the harness process was pinned to core 0 via
-  `taskset -c 0` (available inside the container; `nimble ct` detects and
-  uses it automatically, and warns if it is absent).
+  `taskset -c 0` (available inside the container; `scripts/ct.sh` detects
+  and uses it automatically, and warns if it is absent).
 - **Frequency governor:** the host runs `powersave`. Switching to
   `performance` was attempted and requires root
   (`/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`); this sandbox
@@ -32,6 +32,19 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
   pairing was chosen over the textbook `cpuid`-based serialization (cpuid
   clobbers `%rbx`, which some `-fPIC` toolchains reserve for the GOT
   base).
+- **Build config:** this run compiles `tests/ct/ct_main.nim` at
+  `-d:release`, per `scripts/ct.sh` — not the plain debug build
+  `scripts/test.sh` uses. As of RFC-001 finding 1 (the checks-off coverage
+  fix: `field.nim`'s whole arithmetic core and the rest of `scalar.nim`'s
+  point-arithmetic
+  core reachable from `geScalarmultBase` now sit under
+  `{.push checks: off.}`, closing a gap where those callees compiled with
+  bounds/overflow checks on regardless of the caller's own pragma), the
+  debug build's secret paths are branch-equivalent to this release build
+  at the source level — the checks that used to differ between the two
+  configs are gone from both. That is a source-level statement only; the
+  debug build's timing was not itself measured, and this run's numbers
+  below remain `-d:release`-only evidence.
 - **No bare-metal comparison run** was performed; all numbers below are
   container-only.
 
@@ -145,12 +158,12 @@ about this harness's reach.
 ## Reproducing this run
 
 ```sh
-podman run --rm -v "$PWD":/workspace -w /workspace ghcr.io/coreyleavitt/nim:2.2.10 nimble ct
+scripts/ct.sh
 ```
 
-`nimble ct` compiles `tests/ct/ct_main.nim` at `-d:release`, pins to core 0
-via `taskset` if available (warns and runs unpinned otherwise), and runs
-with the default 1,000,000 samples/class. Pass a different sample count as
-the sole argument to the compiled binary (`build/ct_main 20000`) for a
-faster pilot run; the RFC's stated floor is 1,000,000 samples/class for a
-result to be reported as final.
+`scripts/ct.sh` compiles `tests/ct/ct_main.nim` at `-d:release`, pins to
+core 0 via `taskset` if available (warns and runs unpinned otherwise), and
+runs with the default 1,000,000 samples/class. Pass a different sample
+count as the sole argument to the compiled binary (`build/ct_main 20000`)
+for a faster pilot run; the RFC's stated floor is 1,000,000 samples/class
+for a result to be reported as final.

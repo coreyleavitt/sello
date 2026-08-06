@@ -4,6 +4,20 @@
 ## Radix 2^25.5: 10 limbs, each in int32 range.
 ## Coeffs: [0..2^26), [0..2^25), [0..2^26), [0..2^25), [0..2^26),
 ##          [0..2^25), [0..2^26), [0..2^25), [0..2^26), [0..2^25).
+##
+## Checks off for the whole arithmetic core below (RFC-001 finding 1):
+## every `fe*` primitive, `feCMove`/`feCSwap`, and `clampScalar` run on the
+## signer's secret scalar and the X25519 ladder's secret coordinate, and
+## Nim's `{.push/pop.}` is lexical -- a caller module disabling checks
+## (`x25519.nim`, `backend.nim`, `scalar.nim`'s secret-facing regions) does
+## NOT reach back into these callees. Left at the default `checks: on`,
+## every limb operation here would compile in a bounds/overflow check --
+## i.e. a branch -- on secret-derived data, which is exactly what the CT
+## discipline forbids. Safe to disable: this is a direct ref10/orlp port
+## whose limb bounds (see the coefficient ranges in the module doc comment
+## above) are proven by that reference implementation's own analysis, not
+## something this file computes at runtime and might overflow
+## unpredictably.
 
 type
   Fe* = object
@@ -12,6 +26,8 @@ type
 const
   FeZero* = Fe(limbs: [0'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0])
   FeOne*  = Fe(limbs: [1'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+{.push checks: off.}
 
 # ---------------------------------------------------------------------------
 # Decode / Encode
@@ -575,3 +591,5 @@ func feCopy*(r: var Fe; a: Fe) {.inline.} =
 func clampScalar*(s: var array[32, byte]) {.inline.} =
   s[0] = s[0] and 248
   s[31] = (s[31] and 127) or 64
+
+{.pop.}
