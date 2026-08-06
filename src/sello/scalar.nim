@@ -182,6 +182,95 @@ func scalarmult*(r: var GeP3; s: array[32, byte]; p: GeP3) =
         geP1P1ToP3(r, dbl)
 
 # ---------------------------------------------------------------------------
+# Fixed-base scalar multiplication: compile-time table + constant-time select
+#
+# Table layout (ref10 ge_scalarmult_base structure; GeCached deviation is a
+# round-1 RFC-001 decision — no ge_precomp/ge_madd port, since geAdd/geSub
+# already handle a GeCached operand): GeBaseTable[i][j] caches the point
+# (j+1) * 16^(2*i) * B for i in 0..31, j in 0..7 — row i holds the 8 nonzero
+# multiples of B scaled by 256^i. geScalarmultBase (slice 4) recodes a
+# scalar into 64 signed radix-16 digits and consumes this same table twice,
+# once for the odd digit positions (after an extra factor-of-16 scaling via
+# four doublings) and once for the even ones, exactly as ref10 does;
+# building that consumer is out of scope for this slice.
+# ---------------------------------------------------------------------------
+
+func geBasePoint*(): GeP3 =
+  ## The RFC 8032 base point B, in extended coordinates.
+  result.x.limbs = Ed25519Gx_Raw
+  result.y.limbs = Ed25519Gy_Raw
+  result.z = FeOne
+  feMul(result.t, result.x, result.y)
+
+func geP3Double(p: GeP3): GeP3 =
+  var p2: GeP2
+  geP3ToP2(p2, p)
+  var d: GeP1P1
+  geP2Dbl(d, p2)
+  geP1P1ToP3(result, d)
+
+func geP3AddCached(p: GeP3; q: GeCached): GeP3 =
+  var d: GeP1P1
+  geAdd(d, p, q)
+  geP1P1ToP3(result, d)
+
+func buildBaseTable(): array[32, array[8, GeCached]] =
+  ## Computes GeBaseTable at compile time: 31*8 = 248 doublings step each
+  ## row's base point to the next (256 = 16^2 per row), plus 7 additions per
+  ## row to build multiples 2..8 from 1 — verified in-container (~1s,
+  ## byte-exact against runtime scalarmult; see the standing-guard test in
+  ## tests/unit/test_scalar.nim, which re-checks this every `nimble test`
+  ## run since this repo has no CI to rely on instead).
+  var rowBase = geBasePoint()
+  for i in 0..<32:
+    if i > 0:
+      for _ in 0..<8:
+        rowBase = geP3Double(rowBase)
+    var rowBaseCached: GeCached
+    geP3ToCached(rowBaseCached, rowBase)
+    geP3ToCached(result[i][0], rowBase)
+    var acc = rowBase
+    for j in 1..<8:
+      acc = geP3AddCached(acc, rowBaseCached)
+      geP3ToCached(result[i][j], acc)
+
+const GeBaseTable*: array[32, array[8, GeCached]] = buildBaseTable()
+
+func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) =
+  ## Constant-time select of the `digit`-th multiple of a base-table row
+  ## (a row of GeBaseTable, or any array of 8 GeCached entries holding
+  ## 1*P..8*P), with conditional negation for negative digits. `digit`
+  ## ranges over [-8, 8] (see geScalarmultBase's recoding, slice 4).
+  ##
+  ## Full 8-entry scan on every call — fixed, secret-independent iteration
+  ## count, no early exit — with `r` identity-initialized first, so digit 0
+  ## selects the identity with no special case. Selection and negation
+  ## masks are derived arithmetically from `digit` (the feCMove/feCSwap
+  ## family); nothing here branches on `digit`'s value or sign.
+  r.yPlusX = FeOne
+  r.yMinusX = FeOne
+  r.z = FeOne
+  r.t2d = FeZero
+
+  let isNeg = digit < 0
+  let signMask = -int32(isNeg)
+  let absDigit = (digit xor signMask) - signMask  # branchless abs
+
+  for i in 1..8:
+    let match = absDigit == int32(i)
+    feCMove(r.yPlusX, table[i - 1].yPlusX, match)
+    feCMove(r.yMinusX, table[i - 1].yMinusX, match)
+    feCMove(r.z, table[i - 1].z, match)
+    feCMove(r.t2d, table[i - 1].t2d, match)
+
+  # Conditional negation of a GeCached entry (RFC-001): swap(yPlusX,
+  # yMinusX); t2d = -t2d; z unchanged.
+  feCSwap(r.yPlusX, r.yMinusX, isNeg)
+  var negT2d: Fe
+  feNeg(negT2d, r.t2d)
+  feCMove(r.t2d, negT2d, isNeg)
+
+# ---------------------------------------------------------------------------
 # Point encoding, scalar reduction/canonicity, and the shared challenge hash
 # (RFC 8032 §5.1) — relocated from ed25519.nim / extracted from its verify.
 #

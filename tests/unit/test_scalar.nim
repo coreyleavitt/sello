@@ -7,6 +7,7 @@
 
 import std/[unittest, json, strutils]
 import sello/scalar
+import sello/field
 
 const rawVectors = staticRead("../vectors/scmuladd_test.json")
 
@@ -14,6 +15,24 @@ proc hexToArray32(s: string): array[32, byte] =
   doAssert s.len == 64
   for i in 0 ..< 32:
     result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+
+proc cachedEncode(c: GeCached; invTwo: Fe): array[32, byte] =
+  ## Canonical compressed encoding of the point cached in `c`, recovering
+  ## affine X = (yPlusX - yMinusX)/2, Y = (yPlusX + yMinusX)/2 and reusing
+  ## pointEncode (which only reads x/y/z, never t) to normalize away the
+  ## projective Z-scaling. Needed because two different computational
+  ## paths to the same point (this table's incremental doubling/addition
+  ## vs. scalarmult's 4-bit-window algorithm) generally land on different,
+  ## equally-valid (X:Y:Z:T) representatives — raw limb/struct equality
+  ## between them would be a false negative, not a real correctness check.
+  var p: GeP3
+  var sum, diff: Fe
+  feAdd(sum, c.yPlusX, c.yMinusX)
+  feSub(diff, c.yPlusX, c.yMinusX)
+  feMul(p.y, sum, invTwo)
+  feMul(p.x, diff, invTwo)
+  p.z = c.z
+  pointEncode(p)
 
 suite "scMulAdd":
   test "1*1 + 0 = 1 (RED anchor vector)":
@@ -48,3 +67,81 @@ suite "scMulAdd":
       inc checked
     check checked == randomGroup["count"].getInt
     check checked >= 1000
+
+suite "GeBaseTable (RFC-001 slice 3)":
+  test "row 0, column 0 is the base point B itself (RED anchor vector)":
+    let b = geBasePoint()
+    var expected: GeCached
+    geP3ToCached(expected, b)
+    check GeBaseTable[0][0] == expected
+
+  test "every entry equals the runtime-computed multiple of B (standing guard)":
+    ## GeBaseTable[i][j] must equal (j+1) * 16^(2*i) * B = (j+1) * 256^i * B,
+    ## checked independently against the vartime scalarmult already proven
+    ## against RFC 8032 + Wycheproof. This repo has no CI, so this assertion
+    ## re-verifies the compile-time table on every `nimble test` run rather
+    ## than trusting the const-eval once. Compared via canonical point
+    ## encoding (cachedEncode), not raw struct equality — see its doc
+    ## comment for why.
+    let b = geBasePoint()
+    var two = Fe(limbs: [2'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    var invTwo: Fe
+    feInvert(invTwo, two)
+    var checked = 0
+    for i in 0..<32:
+      for j in 1..8:
+        var scalarBytes: array[32, byte]
+        scalarBytes[i] = byte(j)  # little-endian encoding of j * 256^i
+        var refP3: GeP3
+        scalarmult(refP3, scalarBytes, b)
+        check cachedEncode(GeBaseTable[i][j - 1], invTwo) == pointEncode(refP3)
+        inc checked
+    check checked == 32 * 8
+
+suite "cmovCached (RFC-001 slice 3)":
+  test "digit 0 selects the identity, with no special case":
+    var r: GeCached
+    cmovCached(r, GeBaseTable[0], 0)
+    check r.yPlusX == FeOne
+    check r.yMinusX == FeOne
+    check r.z == FeOne
+    check r.t2d == FeZero
+
+  test "positive digits 1..8 select the matching table entry unchanged":
+    for digit in 1..8:
+      var r: GeCached
+      cmovCached(r, GeBaseTable[0], int32(digit))
+      check r == GeBaseTable[0][digit - 1]
+
+  test "negative digits -1..-8 select the matching entry, negated":
+    for digit in -8 .. -1:
+      var r: GeCached
+      cmovCached(r, GeBaseTable[0], int32(digit))
+      let src = GeBaseTable[0][(-digit) - 1]
+      var expectedT2d: Fe
+      feNeg(expectedT2d, src.t2d)
+      check r.yPlusX == src.yMinusX
+      check r.yMinusX == src.yPlusX
+      check r.z == src.z
+      check r.t2d == expectedT2d
+
+  test "every row of GeBaseTable agrees with cmovCached across all digits -8..8":
+    for row in 0..<32:
+      for digit in -8 .. 8:
+        var r: GeCached
+        cmovCached(r, GeBaseTable[row], int32(digit))
+        if digit == 0:
+          check r.yPlusX == FeOne
+          check r.yMinusX == FeOne
+          check r.z == FeOne
+          check r.t2d == FeZero
+        elif digit > 0:
+          check r == GeBaseTable[row][digit - 1]
+        else:
+          let src = GeBaseTable[row][(-digit) - 1]
+          var expectedT2d: Fe
+          feNeg(expectedT2d, src.t2d)
+          check r.yPlusX == src.yMinusX
+          check r.yMinusX == src.yPlusX
+          check r.z == src.z
+          check r.t2d == expectedT2d
