@@ -20,6 +20,7 @@ requires "nimcrypto >= 0.4.0"
 task test, "Run test suite":
   exec "nim c -r tests/unit/test_field.nim"
   exec "nim c -r tests/unit/test_scalar.nim"
+  exec "nim c -r tests/unit/test_signing.nim"
   exec "nim c -r tests/unit/test_ed25519.nim"
   exec "nim c -r tests/unit/test_x25519.nim"
   exec "nim c -r tests/unit/test_wycheproof.nim"
