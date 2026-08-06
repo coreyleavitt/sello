@@ -145,3 +145,14 @@ proc keypair*(): Keypair =
   if not urandom(bytes):
     raise newException(OSError, "sello.keypair: sysrand.urandom failed")
   result = keypair(toSeed(bytes))
+
+func sign*(kp: Keypair; msg: openArray[byte]): Signature =
+  ## RFC 8032 §5.1.6 detached signature over `msg`. Deterministic and
+  ## total: the same `(kp, msg)` pair always yields the same signature, and
+  ## it cannot fail for any seed/message — unlike `x25519`, whose `Option`
+  ## exists only because of the small-order degenerate input class, which
+  ## signing structurally lacks. Dispatches to `backend.signDetached`,
+  ## which reaches into `kp.seed`'s private bytes directly (same-module
+  ## access — see the module doc comment) and never persists an expanded
+  ## key.
+  backend.signDetached(kp.seed.bytes, msg)
