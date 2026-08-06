@@ -26,8 +26,7 @@ func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
   ## RFC 7748 §5: X25519(k, u) with scalar clamping. The u input's top
   ## bit is masked by feFromBytes, as the RFC requires.
   var e = k
-  e[0] = e[0] and 248
-  e[31] = (e[31] and 127) or 64
+  clampScalar(e)
 
   let x1 = feFromBytes(u)
   var x2 = FeOne

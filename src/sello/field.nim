@@ -555,3 +555,15 @@ func feCSwap*(a, b: var Fe; swap: bool) {.inline.} =
 
 func feCopy*(r: var Fe; a: Fe) {.inline.} =
   r = a
+
+# ---------------------------------------------------------------------------
+# Scalar clamping (RFC 8032 §5.1.5 / RFC 7748 §5): clear the low 3 bits,
+# clear bit 255, and set bit 254. Shared by X25519 (clamps the raw secret
+# scalar directly) and ed25519 signing (clamps SHA-512(seed)[0..31]) — one
+# audited copy of the formula. Lives here, not in scalar.nim: the clamp
+# touches only bytes, and x25519.nim must remain a field.nim-only consumer.
+# ---------------------------------------------------------------------------
+
+func clampScalar*(s: var array[32, byte]) {.inline.} =
+  s[0] = s[0] and 248
+  s[31] = (s[31] and 127) or 64

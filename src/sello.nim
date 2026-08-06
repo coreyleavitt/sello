@@ -15,5 +15,5 @@
 import sello/ed25519
 import sello/x25519
 
-export PublicKey, SecretKey, Signature, verify
+export PublicKey, Signature, verify
 export x25519.x25519, x25519Base, X25519BasePoint
