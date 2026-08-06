@@ -6,6 +6,7 @@
 ## of sello's own arithmetic) into tests/vectors/scmuladd_test.json.
 
 import std/[unittest, json, strutils]
+import nimcrypto/sha2
 import sello/scalar
 import sello/field
 
@@ -145,3 +146,159 @@ suite "cmovCached (RFC-001 slice 3)":
           check r.yMinusX == src.yPlusX
           check r.z == src.z
           check r.t2d == expectedT2d
+
+# ---------------------------------------------------------------------------
+# geScalarmultBase (RFC-001 slice 4)
+#
+# Precondition under test throughout: bit 255 of the scalar clear — the
+# WHOLE precondition (see scalar.nim's doc comment on recodeScalarRadix16).
+# Both scalar domains that real signing exercises are covered:
+#   - clamped secret-scalar shape (bit 255 clear, bit 254 set): RFC seed,
+#     random clamped scalars, and the maximal clamped scalar (top byte
+#     0x7F, the final-carry boundary).
+#   - r-shaped nonces (reduced mod L, top three bits always clear since
+#     L < 2^253): random reduced values and values just below L (the
+#     bit-252 boundary region, L's own highest set bit).
+# Every case is checked against the existing vartime `scalarmult` on the
+# base point via pointEncode, not raw GeP3/GeCached equality — two
+# algorithms reaching the same point generally land on different, equally
+# valid projective representatives (same false-negative trap noted on the
+# GeBaseTable standing-guard test above).
+# ---------------------------------------------------------------------------
+
+proc refBaseMultEncoded(s: array[32, byte]): array[32, byte] =
+  var p: GeP3
+  scalarmult(p, s, geBasePoint())
+  pointEncode(p)
+
+proc prngScalar32(counter: uint64): array[32, byte] =
+  ## Deterministic pseudorandom 32 bytes for test-vector generation only —
+  ## not used for anything security-sensitive. SHA-512 counter mode so a
+  ## failing case reproduces exactly from the printed counter.
+  var counterBytes: array[8, byte]
+  for i in 0 ..< 8:
+    counterBytes[i] = byte((counter shr (8 * i)) and 0xFF'u64)
+  var sha: sha512
+  sha.init()
+  sha.update(counterBytes)
+  var digest: array[64, byte]
+  sha.finish(digest)
+  for i in 0 ..< 32: result[i] = digest[i]
+
+proc prngReducedScalar32(counter: uint64): array[32, byte] =
+  ## A random-looking scalar strictly < L, exactly the shape a real nonce
+  ## r = scReduce(SHA-512(...)) has: top three bits always clear.
+  var wide: array[64, byte]
+  let lo = prngScalar32(2 * counter)
+  let hi = prngScalar32(2 * counter + 1)
+  for i in 0 ..< 32: wide[i] = lo[i]
+  for i in 0 ..< 32: wide[32 + i] = hi[i]
+  scReduce(result, wide)
+
+proc decrementLE(b: array[32, byte]; amount: int): array[32, byte] =
+  ## b - amount, treating b as little-endian; amount is small enough
+  ## (< 256) that at most one borrow ever propagates past the first limb
+  ## in the vectors this file constructs from L.
+  result = b
+  var borrow = amount
+  var i = 0
+  while borrow > 0:
+    doAssert i < 32
+    let cur = int(result[i]) - borrow
+    if cur < 0:
+      result[i] = byte(cur + 256)
+      borrow = 1
+    else:
+      result[i] = byte(cur)
+      borrow = 0
+    inc i
+
+suite "geScalarmultBase (RFC-001 slice 4)":
+  test "[1]B equals the base point itself (RED anchor vector)":
+    var s: array[32, byte]
+    s[0] = 1
+    check pointEncode(geScalarmultBase(s)) == pointEncode(geBasePoint())
+
+  test "clamped domain: RFC 8032 test-vector-1 seed, expanded and clamped":
+    # RFC 8032 Section 7.1 TEST 1 secret key seed (also tv1_sk in
+    # test_ed25519.nim) — a real clamped scalar `a` as `sign` will derive
+    # it: a = clampScalar(SHA-512(seed)[0..31]).
+    let seed: array[32, byte] = [
+      0x9d'u8, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+      0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+      0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
+      0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
+    ]
+    var sha: sha512
+    sha.init()
+    sha.update(seed)
+    var expanded: array[64, byte]
+    sha.finish(expanded)
+    var a: array[32, byte]
+    for i in 0 ..< 32: a[i] = expanded[i]
+    clampScalar(a)
+    check pointEncode(geScalarmultBase(a)) == refBaseMultEncoded(a)
+
+  test "clamped domain: 100 random clamped scalars match vartime scalarmult":
+    var checked = 0
+    for i in 0'u64 ..< 100:
+      var s = prngScalar32(i)
+      clampScalar(s)
+      check pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+      inc checked
+    check checked == 100
+
+  test "clamped domain: maximal clamped scalar (top byte 0x7F, final-carry boundary)":
+    var s: array[32, byte]
+    for i in 0 ..< 32: s[i] = 0xFF
+    clampScalar(s)
+    check s[0] == 0xF8
+    check s[31] == 0x7F
+    check pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+
+  test "r-shaped domain: 100 random reduced-mod-L scalars match vartime scalarmult":
+    var checked = 0
+    for i in 0'u64 ..< 100:
+      let r = prngReducedScalar32(i)
+      check scIsCanonical(r)
+      check pointEncode(geScalarmultBase(r)) == refBaseMultEncoded(r)
+      inc checked
+    check checked == 100
+
+  test "r-shaped domain: values just below L (bit-252 boundary region)":
+    for amount in [1, 2, 3, 17, 255]:
+      let r = decrementLE(L, amount)
+      check scIsCanonical(r)
+      check pointEncode(geScalarmultBase(r)) == refBaseMultEncoded(r)
+
+suite "recodeScalarRadix16 (RFC-001 slice 4, white-box)":
+  test "digit range is asymmetric: [-8,7] for positions 0..62, [-8,8] for 63":
+    ## The black-box point-comparison tests above can pass on compensating
+    ## recoding errors (a wrong digit paired with a wrong table entry that
+    ## happens to land on the right point); this test inspects the digits
+    ## directly, over random scalars from both domains geScalarmultBase
+    ## must serve.
+    var checked = 0
+
+    for i in 0'u64 ..< 100:
+      var s = prngScalar32(i)
+      clampScalar(s)
+      let digits = recodeScalarRadix16(s)
+      for j in 0 ..< 63:
+        check digits[j] >= -8
+        check digits[j] <= 7
+      check digits[63] >= -8
+      check digits[63] <= 8
+      inc checked
+
+    for i in 0'u64 ..< 100:
+      let r = prngReducedScalar32(i)
+      let digits = recodeScalarRadix16(r)
+      for j in 0 ..< 63:
+        check digits[j] >= -8
+        check digits[j] <= 7
+      check digits[63] >= -8
+      check digits[63] <= 8
+      inc checked
+
+    check checked == 200

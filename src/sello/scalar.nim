@@ -188,11 +188,11 @@ func scalarmult*(r: var GeP3; s: array[32, byte]; p: GeP3) =
 # round-1 RFC-001 decision — no ge_precomp/ge_madd port, since geAdd/geSub
 # already handle a GeCached operand): GeBaseTable[i][j] caches the point
 # (j+1) * 16^(2*i) * B for i in 0..31, j in 0..7 — row i holds the 8 nonzero
-# multiples of B scaled by 256^i. geScalarmultBase (slice 4) recodes a
-# scalar into 64 signed radix-16 digits and consumes this same table twice,
-# once for the odd digit positions (after an extra factor-of-16 scaling via
-# four doublings) and once for the even ones, exactly as ref10 does;
-# building that consumer is out of scope for this slice.
+# multiples of B scaled by 256^i. geScalarmultBase (below) recodes a scalar
+# into 64 signed radix-16 digits and consumes this same table twice: once
+# for the odd digit positions summed directly, then the accumulator is
+# scaled by 16 (four doublings), then the even digit positions, exactly as
+# ref10 does.
 # ---------------------------------------------------------------------------
 
 func geBasePoint*(): GeP3 =
@@ -269,6 +269,85 @@ func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) =
   var negT2d: Fe
   feNeg(negT2d, r.t2d)
   feCMove(r.t2d, negT2d, isNeg)
+
+# ---------------------------------------------------------------------------
+# Fixed-base scalar multiplication: signed radix-16 recoding + table consume
+# (RFC-001 slice 4). Ports ref10 ge_scalarmult_base's digit/consumption
+# structure (public domain).
+#
+# Precondition — the WHOLE precondition, stated here and repeated on
+# geScalarmultBase's doc comment because it is easy to over-tighten: bit
+# 255 of the scalar is 0. This function serves two scalar domains: clamped
+# secret scalars (bit 255 clear, bit 254 set) and reduced nonces
+# r = scReduce(...) < L (top three bits always clear, since L < 2^253). Do
+# NOT assert clamped shape (bit 254 set) — that would reject every real
+# r-shaped scalar `sign` computes R = [r]B with.
+#
+# Both functions are secret-facing (the scalar recoded here is `a` or `r`
+# in the eventual sign path), so checks are pushed off as elsewhere in this
+# file's sc*/challenge group.
+# ---------------------------------------------------------------------------
+
+{.push checks: off.}
+
+func recodeScalarRadix16*(s: array[32, byte]): array[64, int32] =
+  ## 64 nibbles of `s` -> 64 signed digits via carry propagation (ref10's
+  ## e[] step, public domain). Range is asymmetric: digits[0..62] land in
+  ## [-8, 7]; only digit[63] can reach +8 (bit 255 clear bounds its
+  ## pre-carry nibble to at most 7, and only the incoming final carry can
+  ## push it to 8 — a mid-position 8 would be a carry bug, not valid
+  ## output). No data-dependent branches: every step runs on a fixed
+  ## 64-iteration schedule regardless of the digit values produced.
+  for i in 0 ..< 32:
+    result[2 * i] = int32(s[i] and 0xF)
+    result[2 * i + 1] = int32((s[i] shr 4) and 0xF)
+
+  var carry: int32 = 0
+  for i in 0 ..< 63:
+    result[i] += carry
+    carry = (result[i] + 8) shr 4
+    result[i] -= carry shl 4
+  result[63] += carry
+
+func geScalarmultBase*(s: array[32, byte]): GeP3 =
+  ## r = [s]B — fixed-base scalar multiplication via the compile-time
+  ## GeBaseTable and cmovCached's constant-time select. Ports ref10's
+  ## ge_scalarmult_base structure (public domain): recode into signed
+  ## radix-16 digits, consume the table for the 32 odd digit positions,
+  ## scale the accumulator by 16 (four doublings), then consume it again
+  ## for the 32 even positions. Uses plain geAdd throughout — no
+  ## ge_madd/ge_msub port — because cmovCached's conditional negation
+  ## already produces the correctly-signed cached point for negative
+  ## digits (the GeCached-table deviation carried over from slice 3).
+  ##
+  ## Precondition: bit 255 of `s` is 0 — see recodeScalarRadix16's doc
+  ## comment; do not additionally require clamped shape. Branchless on
+  ## `s`: recoding is carry-propagation arithmetic and every table lookup
+  ## goes through cmovCached's full 8-entry scan.
+  let digits = recodeScalarRadix16(s)
+
+  var acc: GeP3
+  acc.x = FeZero; acc.y = FeOne; acc.z = FeOne; acc.t = FeZero
+
+  var u: GeCached
+  var step: GeP1P1
+
+  for i in countup(1, 63, 2):
+    cmovCached(u, GeBaseTable[i div 2], digits[i])
+    geAdd(step, acc, u)
+    geP1P1ToP3(acc, step)
+
+  for _ in 0 ..< 4:
+    acc = geP3Double(acc)
+
+  for i in countup(0, 62, 2):
+    cmovCached(u, GeBaseTable[i div 2], digits[i])
+    geAdd(step, acc, u)
+    geP1P1ToP3(acc, step)
+
+  result = acc
+
+{.pop.}
 
 # ---------------------------------------------------------------------------
 # Point encoding, scalar reduction/canonicity, and the shared challenge hash
