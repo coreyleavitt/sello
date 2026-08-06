@@ -22,7 +22,7 @@
 ## ---------------------------------------------------------------------
 ##
 ## `distinct array[N, byte]`, not a plain alias: a plain alias let
-## `verify(sig, msg, x25519Key)` or transposed same-size arguments compile
+## `verify(x25519Key, msg, sig)` or transposed same-size arguments compile
 ## silently, since every 32/64-byte value in the codebase was structurally
 ## the same type. Contrast with `Seed` (signing.nim): `Seed` also went
 ## nominal, but for a different reason (attaching a wipe-on-destroy hook to
@@ -40,8 +40,8 @@
 ## needs a wrapper to work); `toBytes` is the reverse, for serialization.
 ## `==`/`$` are borrowed from the underlying array — comparing two PUBLIC
 ## values (public keys, signatures) carries no constant-time requirement,
-## so plain equality is correct here, the same reasoning `signing.Seed.==`
-## already documents for the same reason on a different type.
+## so plain equality is correct here. Contrast `signing.Seed`, which holds
+## secret material and (RFC-002 slice 1) has no `==` at all.
 ##
 ## ---------------------------------------------------------------------
 ## Generic array wipe (RFC-001 finding 11, relocated here by finding 28)
@@ -58,6 +58,7 @@
 ## generic primitive from this shared leaf rather than reaching sideways
 ## into X25519's module or duplicating the wrapper.
 
+import std/hashes
 import sello/private/ct
 
 type
@@ -88,6 +89,17 @@ func `==`*(a, b: Signature): bool {.borrow.}
   ## Comparing two PUBLIC values — no constant-time requirement.
 func `$`*(pk: PublicKey): string {.borrow.}
 func `$`*(sig: Signature): string {.borrow.}
+
+func hash*(pk: PublicKey): Hash {.inline.} =
+  ## Hash of the underlying bytes (RFC-002 slice 1) -- unblocks
+  ## Table/HashSet keying (peer registries, session caches). No
+  ## constant-time requirement, same reasoning as `==` above.
+  hash(array[32, byte](pk))
+
+func hash*(sig: Signature): Hash {.inline.} =
+  ## Hash of the underlying bytes (RFC-002 slice 1). No constant-time
+  ## requirement, same reasoning as `==` above.
+  hash(array[64, byte](sig))
 
 proc wipe*(bytes: var array[32, byte]) =
   ## Audited wipe (volatile stores + compiler barrier, see

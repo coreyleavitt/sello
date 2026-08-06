@@ -10,6 +10,22 @@ proc fromHex(s: string): array[32, byte] =
 proc toHex(bytes: array[32, byte]): string =
   for b in bytes: result.add b.toHex(2).toLowerAscii
 
+proc ephemeralPairConsumesWithoutMove(peer: X25519Public): bool =
+  ## RFC-002 slice 1's whole point, proven for real: this is a plain
+  ## top-level proc, NOT wrapped in `unittest`'s `test` template (whose
+  ## implicit try/finally forces `move()` even for a sole sink-consuming
+  ## use -- see the ephemeral-secret suite above and
+  ## `x25519(sink X25519EphemeralSecret, ...)`'s doc comment). If
+  ## `x25519EphemeralPair`'s public derivation happened OUTSIDE the
+  ## constructor (i.e. the old `x25519EphemeralSecret()` +
+  ## `x25519Base(eph)` shape), `eph` would carry an earlier reference and
+  ## `x25519(eph, peer)` below would fail to compile without an explicit
+  ## `move(eph)`. It compiling here, unaided, at ordinary top-level scope,
+  ## is the actual regression this test protects.
+  let (eph, pub) = x25519EphemeralPair()
+  let shared = x25519(eph, peer)
+  result = shared.isSome and toBytes(pub) != default(array[32, byte])
+
 suite "X25519 - RFC 7748 test vectors":
   ## Constructed through the role-typed API (RFC-001 ledger #29 revisited:
   ## `X25519StaticSecret`/`X25519Public`/`X25519Shared` replace `X25519Key`).
@@ -195,6 +211,40 @@ suite "X25519 - ephemeral secret (static/ephemeral split)":
     let sharedB = x25519(move(ephB), pubA)
     check sharedA.isSome and sharedB.isSome
     check toBytes(sharedA.get) == toBytes(sharedB.get)
+
+suite "X25519 - ephemeral pair constructor (RFC-002 slice 1)":
+  ## `x25519EphemeralPair()` derives the public value INSIDE the
+  ## constructor so the caller's secret binding is referenced exactly
+  ## once (the consuming `x25519` call) and the natural flow compiles
+  ## without `move()` -- see `ephemeralPairConsumesWithoutMove` above
+  ## (module scope, not a `test:` body) for the actual proof of that
+  ## property; the tests below exercise its behavior.
+  test "the natural consuming flow compiles and works, unaided, outside a test body":
+    let peer = x25519Base(x25519EphemeralSecret())
+    check ephemeralPairConsumesWithoutMove(peer)
+
+  test "x25519EphemeralPair() generates a usable secret and its own public key":
+    let (eph, pub) = x25519EphemeralPair()
+    check toBytes(pub) != default(array[32, byte])
+    check toBytes(pub) == toBytes(x25519Base(eph))
+
+  test "pair-vs-pair handshake agrees in both directions":
+    var (ephA, pubA) = x25519EphemeralPair()
+    var (ephB, pubB) = x25519EphemeralPair()
+    let sharedA = x25519(move(ephA), pubB)
+    let sharedB = x25519(move(ephB), pubA)
+    check sharedA.isSome and sharedB.isSome
+    check toBytes(sharedA.get) == toBytes(sharedB.get)
+
+  test "pair-vs-static handshake agrees in both directions":
+    let staticSecret = toX25519StaticSecret(fromHex(
+      "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"))
+    let staticPublic = x25519Base(staticSecret)
+    var (eph, ephPublic) = x25519EphemeralPair()
+    let sharedFromEphSide = x25519(move(eph), staticPublic)
+    let sharedFromStaticSide = x25519(staticSecret, ephPublic)
+    check sharedFromEphSide.isSome and sharedFromStaticSide.isSome
+    check toBytes(sharedFromEphSide.get) == toBytes(sharedFromStaticSide.get)
 
 suite "X25519 - ephemeral single-use (compile-time, subprocess-verified)":
   ## Neither `compiles()` nor `nim check` can see either violation below --

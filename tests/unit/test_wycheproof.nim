@@ -40,7 +40,7 @@ suite "Wycheproof ed25519 verify":
         if sigBytes.len == 64:
           var sigArr: array[64, byte]
           for i in 0 ..< 64: sigArr[i] = sigBytes[i]
-          got = verify(toSignature(sigArr), msg, pk)
+          got = verify(pk, msg, toSignature(sigArr))
 
         if got != expected:
           inc failures

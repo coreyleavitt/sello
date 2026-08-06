@@ -100,7 +100,7 @@ proc coveredPointDecode*(bytes: array[32, byte]) {.cover.} =
     discard
 
 proc coveredVerify*(inp: VerifyInput) {.cover.} =
-  let ok = verify(toSignature(inp.sig), inp.msg, toPublicKey(inp.pk))
+  let ok = verify(toPublicKey(inp.pk), inp.msg, toSignature(inp.sig))
   if ok:
     # A mutation-found "valid" signature over unstructured input would
     # itself be an extraordinary finding (a forgery) -- fuzzWith already

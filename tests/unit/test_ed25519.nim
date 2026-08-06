@@ -109,32 +109,32 @@ let
 
 suite "ed25519 verify - RFC 8032 test vectors":
   test "verify empty message (RFC 8032 §7.1 test 1)":
-    check verify(toSignature(tv1_sig), tv1_msg, toPublicKey(tv1_pk))
+    check verify(toPublicKey(tv1_pk), tv1_msg, toSignature(tv1_sig))
 
   test "verify 1-byte message (RFC 8032 §7.1 test 2)":
-    check verify(toSignature(tv2_sig), tv2_msg, toPublicKey(tv2_pk))
+    check verify(toPublicKey(tv2_pk), tv2_msg, toSignature(tv2_sig))
 
   test "verify 2-byte message (RFC 8032 §7.1 test 3)":
-    check verify(toSignature(tv3_sig), tv3_msg, toPublicKey(tv3_pk))
+    check verify(toPublicKey(tv3_pk), tv3_msg, toSignature(tv3_sig))
 
   test "verify 1023-byte message, multi-block SHA-512 (RFC 8032 §7.1 TEST-1024)":
     doAssert tv1024_msg.len == 1023  # transcription self-check, belt-and-suspenders
-    check verify(toSignature(tv1024_sig), tv1024_msg, toPublicKey(tv1024_pk))
+    check verify(toPublicKey(tv1024_pk), tv1024_msg, toSignature(tv1024_sig))
 
   test "verify rejects wrong public key":
     var wrongPk: array[32, byte]
     copyMem(addr wrongPk[0], addr tv1_pk[0], 32)
     wrongPk[0] = wrongPk[0] xor 1
-    check not verify(toSignature(tv1_sig), tv1_msg, toPublicKey(wrongPk))
+    check not verify(toPublicKey(wrongPk), tv1_msg, toSignature(tv1_sig))
 
   test "verify rejects wrong message":
     var wrongMsg = [0x01'u8]
-    check not verify(toSignature(tv1_sig), wrongMsg, toPublicKey(tv1_pk))
+    check not verify(toPublicKey(tv1_pk), wrongMsg, toSignature(tv1_sig))
 
   test "verify rejects tampered signature":
     var wrongSig = tv1_sig
     wrongSig[0] = wrongSig[0] xor 1
-    check not verify(toSignature(wrongSig), tv1_msg, toPublicKey(tv1_pk))
+    check not verify(toPublicKey(tv1_pk), tv1_msg, toSignature(wrongSig))
 
 # Canonicity: RFC 8032 §5.1.3 requires rejecting y >= p and (x=0, sign=1).
 # These are the encodings Wycheproof uses for malleable-point forgeries.
@@ -167,11 +167,11 @@ suite "ed25519 point decoding - canonicity":
     var sig = tv1_sig
     let badR = fieldEnc(0xEE, 0xFF, 0x7F)
     for i in 0 ..< 32: sig[i] = badR[i]
-    check not verify(toSignature(sig), tv1_msg, toPublicKey(tv1_pk))
+    check not verify(toPublicKey(tv1_pk), tv1_msg, toSignature(sig))
 
   test "verify rejects non-canonical public key":
     let badPk = fieldEnc(0xEE, 0xFF, 0x7F)
-    check not verify(toSignature(tv1_sig), tv1_msg, toPublicKey(badPk))
+    check not verify(toPublicKey(badPk), tv1_msg, toSignature(tv1_sig))
 
 # RFC-001 ledger finding 21c: local backstop tests, independent of the
 # vendored Wycheproof JSON, for the two most structurally interesting
@@ -188,7 +188,7 @@ suite "ed25519 - local backstop tests (RFC-001 ledger finding 21c, Wycheproof-in
     ## the boundary case one-past-canonical.
     var sig = tv1_sig
     for i in 0 ..< 32: sig[32 + i] = scalar.L[i]
-    check not verify(toSignature(sig), tv1_msg, toPublicKey(tv1_pk))
+    check not verify(toPublicKey(tv1_pk), tv1_msg, toSignature(sig))
 
   test "pointDecode rejects a canonical y with no square root (u/v is a non-residue)":
     ## y = 2, canonically encoded (sign bit 0, well under p), is not a

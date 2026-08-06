@@ -99,14 +99,18 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
 # ed25519 verify (RFC 8032 §5.1.7)
 # ---------------------------------------------------------------------------
 
-func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
+func verify*(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool =
   ## Verify an ed25519 signature. Returns false for invalid inputs.
+  ##
+  ## Actor-first: `pk.verify(msg, sig)`, matching RFC 8032's own
+  ## VERIFY(pk, M, sig) notation and ed25519-dalek's
+  ## `VerifyingKey::verify(message, signature)`.
   ##
   ## **Malleability (RFC-001 ledger finding 19):** this checks the RFC
   ## 8032 §5.1.7 group equation in its cofactorless form (`[S]B == R +
   ## [k]A`), as the RFC itself specifies -- it does not multiply through by
   ## the cofactor. That equation admits low-order components: for a given
-  ## valid `(sig, msg, pk)`, adding a small-order point's contribution to
+  ## valid `(pk, msg, sig)`, adding a small-order point's contribution to
   ## `R` (and adjusting `S` to compensate) can produce a second, distinct
   ## signature that this function ALSO accepts for the same `(msg, pk)`.
   ## This is standard, RFC-conformant ed25519 behavior, not a bug specific
@@ -173,7 +177,7 @@ func verify*(sig: Signature; msg: openArray[byte]; pk: PublicKey): bool =
   # Constant-time comparison would be better, but verifier has no CT req.
   return lhsBytes == rhsBytes
 
-func verify*(sig: Signature; msg: string; pk: PublicKey): bool =
+func verify*(pk: PublicKey; msg: string; sig: Signature): bool =
   ## Zero-copy `string` overload, matching `signing.sign`'s: `msg.
   ## toOpenArrayByte` views the string's existing bytes in place, no copy.
-  verify(sig, msg.toOpenArrayByte(0, msg.len - 1), pk)
+  verify(pk, msg.toOpenArrayByte(0, msg.len - 1), sig)

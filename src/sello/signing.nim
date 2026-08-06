@@ -25,10 +25,20 @@
 ##   `PublicKey` has no need of — see `sello/types`'s doc comment on why
 ##   not) is what closes that specific gap. Construction is the explicit,
 ##   greppable `toSeed(bytes)` at exactly the point where bytes become
-##   secret, and `Seed` carries its own wipe hook, so the copy `seed()`
-##   returns — and any caller-held `Seed` — zeroes itself at scope exit
-##   instead of relying on a doc comment. `wipe` remains for explicit
-##   early wiping. `==` is for tests/tooling only and is vartime.
+##   secret. `wipe` remains for explicit early wiping.
+##
+## - **`Seed` is move-only** (RFC-002 slice 1), the same `=copy {.error.}`
+##   pattern as `Keypair`: `toBytes(kp: Keypair)` is the persistence escape
+##   hatch now (below), so nothing in the public API needs a second live
+##   `Seed` copy any more -- the old copyable `Seed` was rationalizing a
+##   missing `toBytes`, not serving a real need. `Seed` also has no `==`
+##   (RFC-002 slice 1): the X25519 secret family (`x25519.nim`) never had
+##   one at all, on the principle that this library does not offer even a
+##   vartime comparison on secret material; `Seed`'s old test/tooling-only
+##   `==` was the same principle enforced one layer up (facade export
+##   list) instead of at the type itself. Tests compare seeds via
+##   `toBytes(kp)` on a keypair derived from them, or a raw-pointer probe
+##   for a standalone `Seed` (see `test_signing.nim`).
 ##
 ##   Two deviations from RFC-001's literal §"Public API" text, both
 ##   forced by empirical Nim 2.2.10 behavior rather than a judgment call,
@@ -44,11 +54,11 @@
 ##      generated C: no `eqdestroy` call is emitted around such a local
 ##      at all, vs. a one-field `object` of the same shape, which does
 ##      get one. That silently defeats the entire point of an
-##      auto-wiping `Seed` for any caller holding one outside a
-##      `Keypair` (e.g. the `seed()` accessor's return value used
-##      standalone) — worse than a compiler error, since nothing signals
-##      the gap. RFC-001's pre-approved fallback applies: `Seed` below is
-##      the one-field object, not a distinct array.
+##      auto-wiping `Seed` for any caller holding one standalone (e.g. a
+##      `Seed` constructed via `toSeed(bytes)` and held before being
+##      passed to `keypair`) — worse than a compiler error, since nothing
+##      signals the gap. RFC-001's pre-approved fallback applies: `Seed`
+##      below is the one-field object, not a distinct array.
 ##   2. **Constructor spelling:** the RFC's exact `Seed(bytes)` call
 ##      syntax is a language feature of `distinct` types specifically
 ##      (a built-in reinterpret-cast), not something a plain `object` can
@@ -60,7 +70,8 @@
 ##      intent to the distinct-type cast it replaces).
 ## - **`Keypair` is move-only:** `=copy` is a compile error, not a hygiene
 ##   footnote; legitimate transfers move (Nim inserts moves at last use).
-##   No custom `=sink` is needed.
+##   No custom `=sink` is needed. `Seed` follows the same pattern (see
+##   above).
 ## - **`keypair()` is the only function in sello's public surface that can
 ##   raise** (`OSError`, on CSPRNG failure) — fail fast on a broken source
 ##   of randomness. It fills the stack `Seed` in place via
@@ -99,17 +110,11 @@ type
     ## doc comment for why the RFC's first-choice `distinct
     ## array[32, byte]` is not used here.
     ##
-    ## **Deliberately copyable, unlike `Keypair`.** `Seed` has no `=copy`
-    ## override, so `var b = a` compiles. This is a considered contrast
-    ## with `Keypair`'s move-only `=copy {.error.}`, not an oversight:
-    ## `Keypair` pairs a secret with the public key derived from it, and a
-    ## second live copy would defeat the single-owner invariant that pair
-    ## depends on, whereas a `Seed` is just 32 bytes with a wipe-on-exit
-    ## destructor attached — every copy carries its own `=destroy` and
-    ## self-wipes independently at its own scope exit, so duplication
-    ## costs nothing beyond the copy itself. This is also load-bearing:
-    ## `seed()` returns a copy of a `Keypair`-borrowed `Seed`, which is
-    ## only possible because a copy is allowed to exist.
+    ## **Move-only, like `Keypair`** (RFC-002 slice 1): `=copy` is a
+    ## compile error; legitimate transfers move. `toBytes(kp: Keypair)`
+    ## below is the persistence escape hatch, so nothing in the public API
+    ## needs a second live `Seed` copy any more -- see the module doc
+    ## comment for the fuller rationale.
     bytes: array[32, byte]
 
   Keypair* = object
@@ -135,6 +140,10 @@ func zeroizeSeed(s: var Seed) {.inline.} =
 proc `=destroy`(s: var Seed) =
   zeroizeSeed(s)
 
+proc `=copy`(dst: var Seed; src: Seed) {.error.}
+  ## A second live copy of a `Seed` is a compile error, not a runtime
+  ## hygiene footnote (RFC-002 slice 1). Legitimate transfers move.
+
 proc `=copy`(dst: var Keypair; src: Keypair) {.error.}
   ## A second live copy of the seed is a compile error, not a runtime
   ## hygiene footnote. Legitimate transfers move.
@@ -142,11 +151,6 @@ proc `=copy`(dst: var Keypair; src: Keypair) {.error.}
 func toSeed*(bytes: array[32, byte]): Seed {.inline.} =
   ## Explicit construction — the point where raw bytes become a secret.
   Seed(bytes: bytes)
-
-func `==`*(a, b: Seed): bool =
-  ## Vartime equality — tests/tooling only, never on a path that mixes
-  ## secret and attacker-controlled data.
-  a.bytes == b.bytes
 
 proc wipe*(s: var Seed) =
   ## Explicit early wipe, e.g. right after deriving a `Keypair` when the
@@ -171,15 +175,21 @@ func public*(kp: Keypair): PublicKey =
   ## The keypair's public key (cached at construction — never re-derived).
   kp.public
 
-func seed*(kp: Keypair): Seed =
-  ## Persistence escape hatch. The returned copy auto-wipes at scope exit
-  ## via `Seed`'s own `=destroy`.
-  kp.seed
+func toBytes*(kp: Keypair): array[32, byte] {.inline.} =
+  ## Persistence escape hatch: the keypair's raw seed bytes (RFC-002
+  ## slice 1 -- replaces the old `seed()` accessor, which returned a
+  ## `Seed` the public API provided no way to extract bytes from). The
+  ## returned copy is caller-owned and NOT wiped by this call -- wipe it
+  ## yourself (e.g. `sello/types.wipe`) once you are done with it, the
+  ## same register as `X25519StaticSecret.toBytes` (`sello/x25519`).
+  kp.seed.bytes
 
-func keypair*(seed: Seed): Keypair =
+func keypair*(seed: sink Seed): Keypair =
   ## The only constructor: derives the public key per RFC 8032 §5.1.5
   ## (`A = clamp(SHA-512(seed))[0..31]) * B`). Deterministic: the same
-  ## seed always yields the same `Keypair`.
+  ## seed always yields the same `Keypair`. `seed` is consumed: `Seed` is
+  ## move-only (RFC-002 slice 1), and `keypair(toSeed(bytes))` (an rvalue
+  ## argument) remains the construction idiom.
   result.public = toPublicKey(backend.derivePublic(seed.bytes))
   result.seed = seed
 
@@ -199,7 +209,14 @@ proc keypair*(): Keypair =
   var s: Seed
   if not urandom(s.bytes):
     raise newException(OSError, "sello.keypair: sysrand.urandom failed")
-  result = keypair(s)
+  # `move(s)`: `keypair(seed: sink Seed)`'s sink-argument "is this the
+  # last read" inference is a whole-scope occurrence count, not a true
+  # escape analysis (the same empirical finding `x25519.nim`'s
+  # `x25519(sink X25519EphemeralSecret, ...)` doc comment records) -- the
+  # `urandom(s.bytes)` field read above is an earlier reference to `s`, so
+  # the compiler needs this explicit assertion that the move below is
+  # safe.
+  result = keypair(move(s))
 
 func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## RFC 8032 §5.1.6 detached signature over `msg`. Deterministic and

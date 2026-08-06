@@ -163,24 +163,24 @@ suite "sign - RFC 8032 §7.1 signature vectors (bit-exact)":
 suite "sign - roundtrip against the pure verifier":
   test "TEST 1: sello's own signature verifies under sello's own verify()":
     let kp = keypair(toSeed(tv1_sk))
-    check verify(kp.sign(tv1_msg), tv1_msg, kp.public)
+    check verify(kp.public, tv1_msg, kp.sign(tv1_msg))
 
   test "TEST 2: sello's own signature verifies under sello's own verify()":
     let kp = keypair(toSeed(tv2_sk))
-    check verify(kp.sign(tv2_msg), tv2_msg, kp.public)
+    check verify(kp.public, tv2_msg, kp.sign(tv2_msg))
 
   test "TEST 3: sello's own signature verifies under sello's own verify()":
     let kp = keypair(toSeed(tv3_sk))
-    check verify(kp.sign(tv3_msg), tv3_msg, kp.public)
+    check verify(kp.public, tv3_msg, kp.sign(tv3_msg))
 
   test "TEST-1024: sello's own signature verifies under sello's own verify()":
     let kp = keypair(toSeed(tv1024_sk))
-    check verify(kp.sign(tv1024_msg), tv1024_msg, kp.public)
+    check verify(kp.public, tv1024_msg, kp.sign(tv1024_msg))
 
   test "a tampered message fails verification":
     let kp = keypair(toSeed(tv1_sk))
     let sig = kp.sign(tv2_msg)
-    check not verify(sig, tv1_msg, kp.public)
+    check not verify(kp.public, tv1_msg, sig)
 
 suite "sign - determinism (RFC-001 ledger finding 21a)":
   ## `sign`'s doc comment already states determinism as a contract
@@ -221,7 +221,7 @@ suite "sign/verify - SHA-512 block-boundary message lengths (RFC-001 ledger find
       var msg = newSeq[byte](length)
       for i in 0 ..< length: msg[i] = byte((i * 37 + 11) mod 256)
       let sig = kp.sign(msg)
-      check verify(sig, msg, kp.public)
+      check verify(kp.public, msg, sig)
       # Belt-and-suspenders: determinism holds at every boundary length too.
       check kp.sign(msg) == sig
 
@@ -232,13 +232,13 @@ suite "Keypair lifecycle (RFC-001 ledger finding 16)":
     ## `seed` field is a `Seed` (itself a one-field object wrapping
     ## `array[32, byte]`), so aliasing `addr kp` as `ptr Seed` at the right
     ## offset would be fragile; instead this reads back through the public
-    ## `seed()`/`public()` accessors, which is exactly what an external
-    ## caller of `wipe(var Keypair)` can observe too.
+    ## `toBytes(kp)`/`public()` accessors, which is exactly what an
+    ## external caller of `wipe(var Keypair)` can observe too.
     var kp = keypair(toSeed(tv1_sk))
     let publicBefore = kp.public
     wipe(kp)
     check kp.public == publicBefore  # untouched -- not secret, not wiped
-    check kp.seed() == toSeed(default(array[32, byte]))
+    check toBytes(kp) == default(array[32, byte])
 
   test "wipe(kp) does not prevent kp's own =destroy from firing safely at scope exit":
     ## Wiping twice (once explicitly, once via `=destroy` at scope exit)
@@ -247,7 +247,7 @@ suite "Keypair lifecycle (RFC-001 ledger finding 16)":
     block:
       var kp = keypair(toSeed(tv2_sk))
       wipe(kp)
-      check kp.seed() == toSeed(default(array[32, byte]))
+      check toBytes(kp) == default(array[32, byte])
     # No crash / defect on scope exit above is itself the assertion here.
 
 suite "sign/verify - string overload (zero-copy openArray[byte] view)":
@@ -263,41 +263,44 @@ suite "sign/verify - string overload (zero-copy openArray[byte] view)":
     let kp = keypair(toSeed(tv1_sk))
     check kp.sign("") == kp.sign(tv1_msg)
 
-  test "verify(sig, string, pk) matches verify(sig, openArray[byte], pk)":
+  test "verify(pk, string, sig) matches verify(pk, openArray[byte], sig)":
     let kp = keypair(toSeed(tv1_sk))
     let sig = kp.sign("hello")
-    check verify(sig, "hello", kp.public)
+    check verify(kp.public, "hello", sig)
 
-  test "verify(sig, \"\", pk) matches the empty-message vector":
-    check verify(tv1_sig, "", tv1_pk)
+  test "verify(pk, \"\", sig) matches the empty-message vector":
+    check verify(tv1_pk, "", tv1_sig)
 
   test "string round trip: sign then verify via the string overloads":
     let kp = keypair(toSeed(tv2_sk))
-    check verify(kp.sign("round trip"), "round trip", kp.public)
+    check verify(kp.public, "round trip", kp.sign("round trip"))
 
   test "string overload rejects a tampered message":
     let kp = keypair(toSeed(tv1_sk))
     let sig = kp.sign("hello")
-    check not verify(sig, "goodbye", kp.public)
+    check not verify(kp.public, "goodbye", sig)
 
 suite "keypair(seed) - invariant":
-  test "kp.public == derive(kp.seed): re-deriving from the returned seed matches":
+  test "kp.public == derive(kp.seed): re-deriving from toBytes(kp) matches":
     let kp = keypair(toSeed(tv1_sk))
-    let reseeded = kp.seed()
-    check keypair(reseeded).public == kp.public
+    check keypair(toSeed(toBytes(kp))).public == kp.public
 
 suite "Seed lifecycle":
   test "wipe(seed) zeroes the underlying bytes":
+    ## `Seed` has no `==`/`toBytes` of its own (RFC-002 slice 1) -- the
+    ## raw-pointer probe pattern (see the destructor smoke tests below)
+    ## is how a standalone `Seed`'s bytes get observed from a test.
     var s = toSeed(tv1_sk)
     wipe(s)
-    check s == toSeed(default(array[32, byte]))
+    let probe = cast[ptr array[32, byte]](addr s)
+    check probe[] == default(array[32, byte])
 
-  test "different seeds compare unequal, equal seeds compare equal":
-    let a = toSeed(tv1_sk)
-    let b = toSeed(tv2_sk)
-    let aAgain = toSeed(tv1_sk)
-    check a != b
-    check a == aAgain
+  test "different seed bytes derive keypairs with different toBytes; equal seed bytes derive equal ones":
+    ## `Seed.==` was deleted (RFC-002 slice 1, one principle/one layer with
+    ## the X25519 secret family's total absence of `==`) -- compare via
+    ## `toBytes(kp)` on a keypair derived from each seed instead.
+    check toBytes(keypair(toSeed(tv1_sk))) != toBytes(keypair(toSeed(tv2_sk)))
+    check toBytes(keypair(toSeed(tv1_sk))) == tv1_sk
 
 suite "Seed destructor smoke tests (RFC-001 slice 8)":
   ## `=destroy` is the whole point of `Seed` existing as its own type
@@ -320,25 +323,6 @@ suite "Seed destructor smoke tests (RFC-001 slice 8)":
       check probe[] == tv1_sk # sanity: the probe aliases the real bytes
     # `s` is out of scope; `=destroy` must have fired and wiped it in place.
     check probe[] == default(array[32, byte])
-
-  test "a COPIED seed also wipes independently at its own scope exit (RFC-001 finding 4)":
-    ## `Seed` has no `=copy` override -- `var b = a` compiles -- by
-    ## deliberate design (see the module doc comment on `Seed`): every
-    ## copy carries its own `=destroy` and self-wipes on its own scope
-    ## exit, independent of the original. This pins that down as a
-    ## regression: the copy's memory must zero even though `original`
-    ## is still alive (and gets independently wiped later).
-    var probeOriginal, probeCopy: ptr array[32, byte]
-    var original = toSeed(tv1_sk)
-    probeOriginal = cast[ptr array[32, byte]](addr original)
-    block:
-      var copy = original
-      probeCopy = cast[ptr array[32, byte]](addr copy)
-      check probeCopy[] == tv1_sk # sanity: the copy holds the same bytes
-    # `copy` is out of scope; its own `=destroy` must have wiped it,
-    # while `original` (still alive) is untouched.
-    check probeCopy[] == default(array[32, byte])
-    check probeOriginal[] == tv1_sk
 
   test "reassignment destroys (wipes) the old value, and =destroy still fires on scope exit afterward":
     var probe: ptr array[32, byte]
@@ -366,7 +350,7 @@ suite "keypair() - fresh randomness":
   test "two calls produce different seeds":
     let kp1 = keypair()
     let kp2 = keypair()
-    check kp1.seed() != kp2.seed()
+    check toBytes(kp1) != toBytes(kp2)
 
   test "two calls produce different public keys":
     let kp1 = keypair()
@@ -395,6 +379,20 @@ suite "type and ownership safety (compile-time)":
     let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
     let cmd = "nim c --hints:off --nimcache:" &
       (repoRoot / "build" / "nimcache_reject_keypair_copy") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "=copy" in output
+
+  test "Seed cannot be copied — only moved (verified via a subprocess compile, RFC-002 slice 1)":
+    ## Same methodology as `Keypair`'s copy check just above --
+    ## `tests/unit/fixtures/reject_seed_copy.nim` is deliberately invalid,
+    ## and only a real `nim c` (not `compiles()`/`nim check`) surfaces the
+    ## `=copy {.error.}` violation, raised by the later
+    ## `injectdestructors` pass.
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_seed_copy.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_seed_copy") & " " & fixture
     let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
     check exitCode != 0
     check "=copy" in output

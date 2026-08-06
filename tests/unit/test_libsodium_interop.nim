@@ -54,7 +54,7 @@ when defined(selloLibsodium):
       let pk = keypair(toSeed(seedBytes)).public
       let sodiumSig = backend_sodium.signDetached(seedBytes, array[32, byte](pk),
         msg.toOpenArrayByte(0, msg.len - 1))
-      check verify(Signature(sodiumSig), msg, pk)
+      check verify(pk, msg, Signature(sodiumSig))
 
     test "identical signatures byte-for-byte for the same (seed, msg) -- deterministic EdDSA":
       let kp = keypair(toSeed(seedBytes))
@@ -72,7 +72,7 @@ when defined(selloLibsodium):
       check array[64, byte](pureSig) == sodiumSig
       check backend_sodium.sodiumVerifyDetached(array[64, byte](pureSig), emptyMsg,
         array[32, byte](kp.public))
-      check verify(Signature(sodiumSig), emptyMsg, kp.public)
+      check verify(kp.public, emptyMsg, Signature(sodiumSig))
 else:
   suite "libsodium interop (skipped)":
     test "skipped: build with -d:selloLibsodium (scripts/test-libsodium.sh) to run this suite":

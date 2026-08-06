@@ -29,7 +29,7 @@ suite "signing property: sign -> verify roundtrip":
     given sb in seedBytes32(), msg in bytes(0, 256)
     let kp = keypair(toSeed(sb))
     let sig = kp.sign(msg)
-    ensure verify(sig, msg, kp.public())
+    ensure verify(kp.public(), msg, sig)
 
 suite "signing property: single-bit-flip rejection":
   property "flipping one bit of the signature is rejected":
@@ -39,7 +39,7 @@ suite "signing property: single-bit-flip rejection":
     let kp = keypair(toSeed(sb))
     var sigBytes = toBytes(kp.sign(msg))
     sigBytes[byteIdx] = sigBytes[byteIdx] xor byte(1 shl bitIdx)
-    ensure not verify(toSignature(sigBytes), msg, kp.public())
+    ensure not verify(kp.public(), msg, toSignature(sigBytes))
 
   property "flipping one bit of a nonempty message is rejected":
     with propertySettings50
@@ -50,4 +50,4 @@ suite "signing property: single-bit-flip rejection":
     var tampered = msg
     let idx = byteIdx mod tampered.len
     tampered[idx] = tampered[idx] xor byte(1 shl bitIdx)
-    ensure not verify(sig, tampered, kp.public())
+    ensure not verify(kp.public(), tampered, sig)

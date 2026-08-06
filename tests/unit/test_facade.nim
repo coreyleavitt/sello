@@ -1,20 +1,20 @@
 ## Facade regression test (RFC-001 slice 7): `sello.nim` must re-export
 ## the full signing surface (`Seed`, `Keypair`, `toSeed`, `keypair`,
-## `sign` incl. the `string` overload, `wipe`, `public`, `seed`) alongside
-## the pre-existing verify/X25519 surface, and it must all work through
-## `import sello` alone -- no reaching into `sello/signing` or
+## `sign` incl. the `string` overload, `wipe`, `public`, `toBytes`)
+## alongside the pre-existing verify/X25519 surface, and it must all work
+## through `import sello` alone -- no reaching into `sello/signing` or
 ## `sello/ed25519` directly. The submodule-level tests (test_signing.nim,
 ## test_ed25519.nim) own the actual behavioral coverage; this file's only
 ## job is to catch a facade export that goes missing or gets misspelled.
 
-import std/[unittest, options]
+import std/[unittest, options, tables, sets]
 import sello
 
 suite "facade - public surface (sello.nim re-exports)":
   test "keypair() / sign / verify round trip entirely through the facade":
     let kp = keypair()
     let sig = kp.sign("facade smoke test")
-    check verify(sig, "facade smoke test", kp.public)
+    check verify(kp.public, "facade smoke test", sig)
 
   test "keypair(seed) via toSeed is deterministic":
     let seedBytes = default(array[32, byte])
@@ -23,43 +23,64 @@ suite "facade - public surface (sello.nim re-exports)":
     check kp1.public == kp2.public
 
   test "wipe(kp: var Keypair) is reachable through the facade (RFC-001 ledger finding 16)":
-    ## Confirms both halves of the contract: the secret half zeroes (via
-    ## re-deriving through the now-zero seed, same technique as the
-    ## Seed-wipe check just below) and the public half survives untouched.
+    ## Confirms both halves of the contract: the secret half zeroes
+    ## (observed via `toBytes(kp)`, RFC-002 slice 1's replacement for the
+    ## old `seed()` accessor) and the public half survives untouched.
     var kp = keypair()
     let publicBefore = kp.public
     wipe(kp)
     check kp.public == publicBefore
-    let zeroKp = keypair(toSeed(default(array[32, byte])))
-    check keypair(kp.seed()).public == zeroKp.public
+    check toBytes(kp) == default(array[32, byte])
 
-  test "seed() / wipe() are reachable through the facade":
-    ## Confirms wipe zeroed `s` by re-deriving through it, rather than via
-    ## Seed's `==` -- the facade deliberately does not re-export `==`
-    ## (documented in sello/signing as vartime, tests/tooling only).
+  test "toBytes(kp: Keypair) is reachable through the facade (RFC-002 slice 1)":
     let kp = keypair()
-    var s = kp.seed()
+    check keypair(toSeed(toBytes(kp))).public == kp.public
+
+  test "wipe(var Seed) is reachable through the facade":
+    ## `Seed` has no `==`/`toBytes` of its own (RFC-002 slice 1) -- the
+    ## raw-pointer probe pattern (same as the `X25519EphemeralSecret` wipe
+    ## check below) is how the wipe gets observed here.
+    var s = toSeed([1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+                    17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32])
     wipe(s)
-    let zeroKp = keypair(toSeed(default(array[32, byte])))
-    check keypair(s).public == zeroKp.public
+    let probe = cast[ptr array[32, byte]](addr s)
+    check probe[] == default(array[32, byte])
 
   test "openArray[byte] overload is reachable through the facade":
     let kp = keypair()
     let msg = @[0x01'u8, 0x02, 0x03]
-    check verify(kp.sign(msg), msg, kp.public)
+    check verify(kp.public, msg, kp.sign(msg))
 
   test "toPublicKey / toSignature / toBytes are reachable through the facade":
     let kp = keypair()
     let sig = kp.sign("nominal types")
     let pk2 = toPublicKey(toBytes(kp.public))
     let sig2 = toSignature(toBytes(sig))
-    check verify(sig2, "nominal types", pk2)
+    check verify(pk2, "nominal types", sig2)
 
   test "toX25519Public / toBytes are reachable through the facade (RFC-001 finding 26)":
     let raw = [0x0a'u8, 0x0b, 0x0c, 0x0d, 0, 0, 0, 0, 0, 0, 0, 0,
                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
     let pub = toX25519Public(raw)
     check toBytes(pub) == raw
+
+suite "facade - hash() for the public wire types (RFC-002 slice 1)":
+  test "PublicKey/Signature/X25519Public are usable as Table/HashSet keys":
+    let kp = keypair()
+    let sig = kp.sign("hash smoke test")
+    let pub = x25519Base(x25519StaticSecret())
+
+    var pkTable = initTable[PublicKey, string]()
+    pkTable[kp.public] = "alice"
+    check pkTable[kp.public] == "alice"
+
+    var sigSet = initHashSet[Signature]()
+    sigSet.incl sig
+    check sig in sigSet
+
+    var pubSet = initHashSet[X25519Public]()
+    pubSet.incl pub
+    check pub in pubSet
 
 suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
   test "X25519StaticSecret/X25519Public/X25519Shared and their converters are reachable through the facade":
@@ -85,6 +106,18 @@ suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
     let shared = x25519(move(eph), x25519Base(x25519EphemeralSecret()))
     check shared.isSome
 
+  test "x25519EphemeralPair() is reachable through the facade (RFC-002 slice 1)":
+    ## `var`, not `let`, and an explicit `move(eph)`: `unittest`'s `test`
+    ## template wraps this body in an implicit try/finally, which requires
+    ## the same `move()` ceremony even for a sole sink-consuming use (see
+    ## `test_x25519.nim`'s dedicated, non-`test:`-wrapped proof that the
+    ## natural top-level flow needs no `move()` at all -- that is the
+    ## actual point `x25519EphemeralPair` exists to make).
+    var (eph, pub) = x25519EphemeralPair()
+    check toBytes(pub) != default(array[32, byte])
+    let shared = x25519(move(eph), x25519Base(x25519EphemeralSecret()))
+    check shared.isSome
+
   test "wipe(var X25519EphemeralSecret) is reachable through the facade":
     var eph = x25519EphemeralSecret()
     wipe(eph)
@@ -106,7 +139,7 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
     check(not compiles(block:
       let raw = default(array[32, byte])
       let sig = default(Signature)
-      discard verify(sig, "msg", raw)
+      discard verify(raw, "msg", sig)
     ))
 
   test "x25519(secret, peer) does not compile with arguments swapped":
@@ -120,7 +153,7 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
     check(not compiles(block:
       let pub = x25519Base(x25519StaticSecret())
       let sig = default(Signature)
-      discard verify(sig, "msg", pub)
+      discard verify(pub, "msg", sig)
     ))
 
   test "an ed25519 PublicKey is not implicitly usable as an X25519Public":

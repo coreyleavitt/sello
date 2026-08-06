@@ -69,7 +69,7 @@
 ## X25519 secret material a caller holds directly, alongside the automatic
 ## `=destroy` wipe every secret-holding type here already carries.
 
-import std/[options, sysrand]
+import std/[hashes, options, sysrand]
 import sello/field
 import sello/private/ct
 
@@ -119,6 +119,14 @@ type
     ## `reject_ephemeral_copy.nim`) -- see `tests/unit/test_x25519.nim`'s
     ## subprocess-driven compile tests, same methodology as
     ## `signing.Keypair`'s `reject_keypair_copy.nim`.
+    ##
+    ## **Prefer `x25519EphemeralPair()`** (RFC-002 slice 1) over calling
+    ## `x25519EphemeralSecret()` and `x25519Base(eph)` separately: deriving
+    ## the public value inside the constructor means the caller's secret
+    ## binding is referenced exactly once (the consuming `x25519` call), so
+    ## the natural flow compiles without the `move()` ceremony described
+    ## below. `x25519EphemeralSecret()`/`x25519Base(eph)` remain available
+    ## for flows that genuinely need the two steps separated.
     ##
     ## Two deliberate ABSENCES, not omissions -- each is exactly what makes
     ## this type "ephemeral" rather than a second spelling of
@@ -212,6 +220,12 @@ func `==`*(a, b: X25519Public): bool {.borrow.}
   ## same reasoning as `PublicKey`/`Signature` (`sello/types`).
 func `$`*(p: X25519Public): string {.borrow.}
 
+func hash*(p: X25519Public): Hash {.inline.} =
+  ## Hash of the underlying bytes (RFC-002 slice 1) -- unblocks
+  ## Table/HashSet keying. No constant-time requirement, same reasoning
+  ## as `==` above.
+  hash(array[32, byte](p))
+
 func toBytes*(sh: X25519Shared): array[32, byte] {.inline.} =
   ## Raw DH output. Feed it to a KDF -- never use it directly as a key.
   ## The returned copy is caller-owned and NOT wiped by this call -- wipe
@@ -298,8 +312,30 @@ func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
   ## by-value precedent, verified empirically on Nim 2.2.10/ORC -- see
   ## RFC-001's "Key decisions" log), so deriving and sending your public
   ## key ahead of the DH exchange itself compiles and does not consume the
-  ## secret -- only `x25519`'s `sink` parameter (below) does that.
+  ## secret -- only `x25519`'s `sink` parameter (below) does that. See
+  ## `x25519EphemeralPair()` below for the primary flow, which needs
+  ## neither this nor `move()`.
   toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
+
+proc x25519EphemeralPair*(): tuple[secret: X25519EphemeralSecret, public: X25519Public] =
+  ## Fresh ephemeral secret plus its derived public value, in one call
+  ## (RFC-002 slice 1) -- the primary way to get an ephemeral secret.
+  ## Deriving the public value INSIDE this constructor, rather than
+  ## requiring a separate `x25519Base(eph)` call, means the caller's
+  ## `secret` binding is referenced exactly once: the consuming `x25519`
+  ## call. That is what lets the natural
+  ## `let (eph, pub) = x25519EphemeralPair(); ...; x25519(eph, peer)` flow
+  ## compile WITHOUT `move()` -- ordinary last-use inference already
+  ## covers it, unlike `x25519EphemeralSecret()` followed by a separate
+  ## `x25519Base(eph)` call, which leaves an earlier reference to `eph`
+  ## and forces the `move()` ceremony documented on
+  ## `x25519(sink X25519EphemeralSecret, ...)` below. `x25519EphemeralSecret()`
+  ## plus `x25519Base(eph)` remain available for flows that genuinely need
+  ## the two steps separated (e.g. sending the public key well before the
+  ## exchange completes).
+  if not urandom(result.secret.bytes):
+    raise newException(OSError, "sello.x25519EphemeralPair: sysrand.urandom failed")
+  result.public = toX25519Public(ladder(result.secret.bytes, toBytes(X25519BasePoint)))
 
 func x25519*(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Shared] =
   ## Shared-secret computation: X25519(secret, peer). Returns none if the
@@ -327,6 +363,12 @@ func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25
   ## this codebase carries, here additionally enforced as single-use.
   ## Same zero-output small-order-peer check as the `X25519StaticSecret`
   ## overload above.
+  ##
+  ## `x25519EphemeralPair()` sidesteps the whole `move()` ceremony below
+  ## for the primary flow, by deriving the public value inside the
+  ## constructor instead of via a separate `x25519Base(eph)` call -- read
+  ## on for why that ceremony exists at all, needed only for callers using
+  ## `x25519EphemeralSecret()`/`x25519Base(eph)` directly.
   ##
   ## **Empirical Nim ownership finding (verified against Nim 2.2.10/ORC
   ## with isolated scratch probes, not assumed):** if `x25519Base` (or ANY

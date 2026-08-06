@@ -114,11 +114,11 @@ import sello
 let kp = keypair()
 
 let sig = kp.sign("hello")               # deterministic, total, constant-time
-doAssert verify(sig, "hello", kp.public)
+doAssert kp.public.verify("hello", sig)
 
 # openArray[byte] works the same way as the string overload above.
 let msg = @[0x01'u8, 0x02, 0x03]
-doAssert verify(kp.sign(msg), msg, kp.public)
+doAssert kp.public.verify(msg, kp.sign(msg))
 ```
 
 Deriving a keypair from an existing 32-byte seed (import, tests, or a KDF
@@ -135,50 +135,70 @@ let kp = keypair(toSeed(seedBytes))
 ```
 
 Hold `Keypair`/`Seed` as stack values, never boxed in a `seq` or `ref` --
-that's what lets their destructors guarantee the wipe. `Keypair` is
-move-only (`=copy` is a compile error): pass it by value and let Nim move
-it; a second live copy of the seed is a bug the compiler catches for you
-at compile time.
+that's what lets their destructors guarantee the wipe. Both `Keypair` and
+`Seed` are move-only (`=copy` is a compile error): pass them by value and
+let Nim move them; a second live copy of a secret is a bug the compiler
+catches for you at compile time. `toBytes(kp)` returns the keypair's raw
+seed bytes for persistence -- the returned copy is caller-owned and not
+itself wiped.
 
-`kp.sign(msg)` takes the keypair first (`sig = kp.sign(msg)`, matching
-`x25519`'s actor-first argument order); `verify(sig, msg, pk)` takes the
-signature first, because it shipped first, in the verify-only 0.1.0
-release, and is already relied on that way. The asymmetry is a recorded,
-deliberate decision (see `sello.nim`'s doc comment), not an oversight.
+`kp.sign(msg)` takes the keypair first (`sig = kp.sign(msg)`) and
+`pk.verify(msg, sig)` takes the public key first, matching RFC 8032's own
+VERIFY(pk, M, sig) notation and ed25519-dalek's
+`VerifyingKey::verify(message, signature)` -- both actor-first, and both
+matching `x25519`'s own actor-first argument order.
 
 ### X25519
 
 Prefer a fresh **ephemeral** secret per exchange unless you specifically
 need a reusable, long-lived (**static**) X25519 identity -- e.g. a server
 key you publish and reuse across many exchanges; a fresh ephemeral costs
-nothing but one `x25519EphemeralSecret()` call and cannot be reused even by
+nothing but one `x25519EphemeralPair()` call and cannot be reused even by
 accident.
 
 ```nim
 import std/options
 import sello
 
-var aEph = x25519EphemeralSecret()        # fresh, single-use, via std/sysrand
-var bEph = x25519EphemeralSecret()
+var (aEph, aPublic) = x25519EphemeralPair()   # fresh secret + its public value
+var (bEph, bPublic) = x25519EphemeralPair()
 
-let aPublic = x25519Base(aEph)             # non-consuming: safe to send first
-let bPublic = x25519Base(bEph)
-
-let shared = x25519(move(aEph), bPublic)   # Option[X25519Shared]; CONSUMES aEph
-doAssert shared.isSome                     # None only for a small-order peer key
+let shared = x25519(move(aEph), bPublic)      # Option[X25519Shared]; CONSUMES aEph
+doAssert shared.isSome                        # None only for a small-order peer key
 doAssert toBytes(shared.get) == toBytes(x25519(move(bEph), aPublic).get)
 ```
 
 `X25519EphemeralSecret` is move-only: `x25519` takes it by `sink`, so
-reusing the same variable in a second `x25519`/`x25519Base` call, or
-copying it (`var b = a`), is a compile error, not a documented caller
-obligation -- verified against checked-in negative-compile fixtures. Since
-`x25519Base` already read `aEph`/`bEph` above, the consuming call needs an
-explicit `move(...)` (`aEph`/`bEph` declared `var`, not `let`, since `move`
-requires that) -- Nim's own idiom for "this really is safe to move," needed
-because the compiler's own last-use check does not see through an earlier,
-harmless read. A secret consumed with no earlier read at all needs no
-`move()`. There is deliberately no way to construct an
+reusing the same variable in a second `x25519` call, or copying it
+(`var b = a`), is a compile error, not a documented caller obligation --
+verified against checked-in negative-compile fixtures. `x25519EphemeralPair`
+derives the public value *inside* the constructor, so `aEph`/`bEph` above
+have exactly one reference each (the consuming `x25519` call); `move(...)`
+is still required at that call site because it's the only way to assert a
+move out of a `var` binding, but no earlier read forces it the way a
+separate derivation step would.
+
+If you need to send your public value before generating it via the pair
+(or some other flow that genuinely needs the two steps apart), fall back to
+`x25519EphemeralSecret()` plus the non-consuming `x25519Base` overload:
+
+```nim
+import std/options
+import sello
+
+var eph = x25519EphemeralSecret()   # fresh, single-use, via std/sysrand
+let pub = x25519Base(eph)           # non-consuming: safe to send first
+
+let peer = x25519Base(x25519EphemeralSecret())
+let shared = x25519(move(eph), peer)   # Option[X25519Shared]; CONSUMES eph
+doAssert shared.isSome
+```
+
+Here the consuming `x25519(move(eph), peer)` call needs an explicit
+`move(...)` (`eph` declared `var`, not `let`, since `move` requires that)
+-- Nim's own idiom for "this really is safe to move," needed because the
+compiler's own last-use check does not see through the earlier, harmless
+`x25519Base` read. There is deliberately no way to construct an
 `X25519EphemeralSecret` from existing bytes and no way to export one back
 to bytes -- freshness and unpersistability are the whole point.
 
@@ -199,9 +219,11 @@ doAssert shared.isSome                    # None only for a small-order peer key
 doAssert toBytes(shared.get) == toBytes(x25519(bSecret, aPublic).get)
 ```
 
-`X25519StaticSecret` is deliberately copyable (like `Seed`): `aSecret` above
-is reusable across as many exchanges as you like. `toX25519StaticSecret(bytes)`
-constructs one from existing material (e.g. a persisted key).
+`X25519StaticSecret` is deliberately copyable -- unlike `Seed`/`Keypair`,
+there is no paired invariant a second live copy could violate: `aSecret`
+above is reusable across as many exchanges as you like.
+`toX25519StaticSecret(bytes)` constructs one from existing material (e.g. a
+persisted key).
 
 X25519's public/shared roles round out the type family: `X25519Public` (a
 public u-coordinate; `toX25519Public(bytes)` from a peer's wire value) and
