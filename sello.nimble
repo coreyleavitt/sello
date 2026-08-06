@@ -31,6 +31,7 @@ const unitTestFiles = [
   "tests/unit/test_x25519.nim",
   "tests/unit/test_wycheproof.nim",
   "tests/unit/test_wycheproof_x25519.nim",
+  "tests/unit/test_libsodium_interop.nim",
 ]
 
 proc runUnitTests(extraDefines = "") =
@@ -39,6 +40,17 @@ proc runUnitTests(extraDefines = "") =
 
 task test, "Run test suite":
   runUnitTests()
+
+# RFC-001 slice 10: same unitTestFiles list as `test`, recompiled with
+# -d:selloLibsodium so signing.nim dispatches to the libsodium FFI adapter
+# (private/backend_sodium.nim) instead of the pure-Nim backend, and
+# test_libsodium_interop.nim's real bidirectional interop checks compile
+# in. Requires libsodium-devel -- run inside the sello-owned `Containerfile`
+# image (podman build -t sello-libsodium -f Containerfile .), not the base
+# Nim image. `sello/ed25519.verify` is never affected: it has no backend
+# dispatch and stays pure-Nim under this flag too.
+task testLibsodium, "Run test suite against the libsodium adapter backend (-d:selloLibsodium)":
+  runUnitTests("-d:selloLibsodium")
 
 # RFC-001 slice 9: dudect-style constant-time timing harness. Deliberately
 # a SEPARATE task from `test` -- it is statistical and environment-

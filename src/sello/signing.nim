@@ -1,7 +1,12 @@
 ## sello/signing.nim — Seed/Keypair types, lifecycle, and RFC 8032 keygen
-## (RFC-001 Stage B). Backend dispatch (pure-Nim vs. libsodium) also lands
-## here once the adapter exists (RFC-001 slice 10); the facade re-exports
-## from this module and gains no conditional logic of its own.
+## (RFC-001 Stage B). Backend dispatch (pure-Nim vs. libsodium) lives here
+## too (RFC-001 slice 10): `when defined(selloLibsodium)` selects
+## `sello/private/backend_sodium` in place of `sello/private/backend`,
+## both bound to the same local name `backend` so every call site below
+## is backend-agnostic. The facade re-exports from this module and gains
+## no conditional logic of its own. `sello/ed25519.verify` has no
+## dispatch at all -- it is always the pure-Nim verifier, on both
+## backends.
 ##
 ## Contracts:
 ##
@@ -70,8 +75,15 @@
 
 import std/sysrand
 import sello/ed25519
-import sello/private/backend
 import sello/private/ct
+
+when defined(selloLibsodium):
+  # RFC-001 slice 10: libsodium FFI adapter. Same seed-level contract
+  # (`derivePublic`, `signDetached`) as the pure-Nim backend below, so
+  # nothing past this import needs to know which one is active.
+  import sello/private/backend_sodium as backend
+else:
+  import sello/private/backend
 
 type
   Seed* = object
