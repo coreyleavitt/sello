@@ -1,0 +1,8 @@
+id: F01
+target: src/sello/field.nim
+desc: feFromBytes: shift amount off-by-one, 'h1 shl 6' -> 'h1 shl 5' (limb-boundary shift for the 2nd input limb).
+====OLD====
+  h1 = h1 shl 6
+====NEW====
+  h1 = h1 shl 5
+====END====

@@ -1,0 +1,8 @@
+id: F11
+target: src/sello/field.nim
+desc: feMul: reduction-by-p coefficient swapped, 'let b1_19 = 19 * b1' -> '... = 18 * b1' (the schoolbook-multiply reduction constant, not the carry-propagation tail feMul shares with feSq).
+====OLD====
+  let b1_19 = 19 * b1; let b2_19 = 19 * b2; let b3_19 = 19 * b3
+====NEW====
+  let b1_19 = 18 * b1; let b2_19 = 19 * b2; let b3_19 = 19 * b3
+====END====

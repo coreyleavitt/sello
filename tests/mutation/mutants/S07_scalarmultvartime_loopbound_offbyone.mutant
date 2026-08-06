@@ -1,0 +1,8 @@
+id: S07
+target: src/sello/scalar.nim
+desc: scalarmultVartime: loop-bound off-by-one, 'countdown(63, 0)' -> 'countdown(62, 0)', skipping the scalar's top nibble entirely.
+====OLD====
+  for i in countdown(63, 0):
+====NEW====
+  for i in countdown(62, 0):
+====END====

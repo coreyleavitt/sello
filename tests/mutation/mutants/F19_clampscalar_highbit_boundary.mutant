@@ -1,0 +1,8 @@
+id: F19
+target: src/sello/field.nim
+desc: clampScalar: boundary constant changed, '(s[31] and 127) or 64' -> '... or 32', setting bit 253 instead of bit 254.
+====OLD====
+  s[31] = (s[31] and 127) or 64
+====NEW====
+  s[31] = (s[31] and 127) or 32
+====END====

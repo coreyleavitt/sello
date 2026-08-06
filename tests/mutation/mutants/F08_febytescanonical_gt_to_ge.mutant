@@ -1,0 +1,8 @@
+id: F08
+target: src/sello/field.nim
+desc: feBytesCanonical: comparison flip, 'v > p: return false' -> 'v >= p: return false', rejecting some canonical encodings whose most-significant differing byte equals p's.
+====OLD====
+    if v > p: return false
+====NEW====
+    if v >= p: return false
+====END====

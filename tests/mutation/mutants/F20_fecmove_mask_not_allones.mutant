@@ -1,0 +1,8 @@
+id: F20
+target: src/sello/field.nim
+desc: feCMove: constant-time mask construction broken, 'let mask = -int32(b)' -> 'let mask = int32(b)' (mask becomes 0/1 instead of 0/all-ones, so the XOR-select only ever touches each limb's least significant bit).
+====OLD====
+  let mask = -int32(b)
+====NEW====
+  let mask = int32(b)
+====END====

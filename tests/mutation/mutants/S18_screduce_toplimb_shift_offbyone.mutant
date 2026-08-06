@@ -1,0 +1,8 @@
+id: S18
+target: src/sello/scalar.nim
+desc: scReduce: shift-amount off-by-one in the top-limb (s23) extraction, 'load4(s, 60) shr 3' -> 'shr 2'.
+====OLD====
+  var s23 = load4(s, 60) shr 3
+====NEW====
+  var s23 = load4(s, 60) shr 2
+====END====

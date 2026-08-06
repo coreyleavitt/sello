@@ -1,0 +1,8 @@
+id: S02
+target: src/sello/scalar.nim
+desc: geP2Dbl: sign flip in point doubling, 'X+Y' computed via feSub instead of feAdd.
+====OLD====
+  feAdd(r.y, p.x, p.y)      # X+Y
+====NEW====
+  feSub(r.y, p.x, p.y)      # X+Y
+====END====

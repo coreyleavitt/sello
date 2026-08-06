@@ -1,0 +1,8 @@
+id: F18
+target: src/sello/field.nim
+desc: clampScalar: boundary constant widened, 's[0] and 248' -> 's[0] and 240' (clears bit 3 in addition to RFC 8032/7748's low 3 bits).
+====OLD====
+  s[0] = s[0] and 248
+====NEW====
+  s[0] = s[0] and 240
+====END====

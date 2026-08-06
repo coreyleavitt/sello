@@ -1,0 +1,8 @@
+id: F07
+target: src/sello/field.nim
+desc: feBytesCanonical: comparison flip, 'v < p: return true' -> 'v <= p: return true', which would accept one non-canonical encoding (a byte string equal to p in its most-significant differing position) as canonical.
+====OLD====
+    if v < p: return true
+====NEW====
+    if v <= p: return true
+====END====

@@ -1,0 +1,8 @@
+id: S06
+target: src/sello/scalar.nim
+desc: scalarmultVartime: boundary constant narrowed, nibble mask 'and 0xF' -> 'and 0x7', dropping the window's top bit.
+====OLD====
+    let window = (b shr (4 * (i and 1))) and 0xF
+====NEW====
+    let window = (b shr (4 * (i and 1))) and 0x7
+====END====

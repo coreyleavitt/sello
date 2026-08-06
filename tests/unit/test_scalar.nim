@@ -320,3 +320,64 @@ suite "recodeScalarRadix16 (RFC-001 slice 4, white-box)":
       inc checked
 
     check checked == 200
+
+# ---------------------------------------------------------------------------
+# geP2Dbl (RFC-002 slice 5 finding): single-call isolation.
+#
+# Every call site of geP2Dbl in scalar.nim -- scalarmultVartime's per-nibble
+# doubling loop (exactly 4 consecutive calls) and geP3Double's own two
+# callers, buildBaseTable (8 consecutive calls per row) and
+# geScalarmultBase (4 consecutive calls to scale by 16) -- invokes it an
+# EVEN number of times before the result is ever compared against anything.
+# A systematic sign error that negates geP2Dbl's output (Dbl'(P) = -Dbl(P),
+# i.e. the Edwards-curve point negation (-x, y)) is therefore invisible at
+# every existing call site: two (or four, or eight) such errors compose
+# back to the correct point, since (-1)^even = 1. RFC-002 slice 5's curated
+# mutation-testing catalog (tests/mutation/mutants/S02_gep2dbl_xplusy_sign_
+# flip.mutant, feAdd -> feSub on the "X+Y" line) caught exactly this: it
+# survived scripts/test.sh's full suite untouched, because nothing in that
+# suite calls geP2Dbl an odd number of times before checking the result.
+# This test closes the gap directly, by isolating a single (odd-count)
+# call -- doubling the base point once and checking it against [2]B,
+# computed independently via the already-vector-trusted scalarmultVartime
+# -- rather than relying on some other test happening to hit an odd count.
+# ---------------------------------------------------------------------------
+
+suite "geP2Dbl (RFC-002 slice 5 finding: single-call isolation)":
+  test "a single geP2Dbl call on the base point equals [2]B":
+    let b = geBasePoint()
+    var p2: GeP2
+    geP3ToP2(p2, b)
+    var d: GeP1P1
+    geP2Dbl(d, p2)
+    var doubled: GeP3
+    geP1P1ToP3(doubled, d)
+
+    var two: array[32, byte]
+    two[0] = 2
+    check pointEncode(doubled) == refBaseMultEncoded(two)
+
+  test "a single geP2Dbl call on 100 random points equals scalarmultVartime([2], p)":
+    ## Generalizes the base-point anchor above across random curve points
+    ## (reached via scalarmultVartime on random scalars, not just B), so
+    ## the isolation guard doesn't depend on any base-point-specific
+    ## coincidence.
+    var checked = 0
+    for i in 0'u64 ..< 100:
+      let s = prngScalar32(i)
+      var p3: GeP3
+      scalarmultVartime(p3, s, geBasePoint())
+      var p2: GeP2
+      geP3ToP2(p2, p3)
+      var d: GeP1P1
+      geP2Dbl(d, p2)
+      var doubled: GeP3
+      geP1P1ToP3(doubled, d)
+
+      var two: array[32, byte]
+      two[0] = 2
+      var expected: GeP3
+      scalarmultVartime(expected, two, p3)
+      check pointEncode(doubled) == pointEncode(expected)
+      inc checked
+    check checked == 100

@@ -1,0 +1,8 @@
+id: S12
+target: src/sello/scalar.nim
+desc: recodeScalarRadix16: digit-range constant changed, carry-formation offset '(result[i] + 8) shr 4' -> '(result[i] + 9) shr 4', shifting the signed-digit recentering point.
+====OLD====
+    carry = (result[i] + 8) shr 4
+====NEW====
+    carry = (result[i] + 9) shr 4
+====END====

@@ -1,0 +1,8 @@
+id: F02
+target: src/sello/field.nim
+desc: feFromBytes: boundary constant, top-limb truncation mask 8388607 (0x7FFFFF) widened to 16777215 (0xFFFFFF), letting an extra high bit of the input leak into h9 before the clamp.
+====OLD====
+  h9 = (h9 and 8388607) shl 2
+====NEW====
+  h9 = (h9 and 16777215) shl 2
+====END====

@@ -1,0 +1,8 @@
+id: F15
+target: src/sello/field.nim
+desc: feMul121666: RFC 7748 X25519 curve constant A24=121666 off-by-one, '121666' -> '121665'.
+====OLD====
+121666'i64
+====NEW====
+121665'i64
+====END====

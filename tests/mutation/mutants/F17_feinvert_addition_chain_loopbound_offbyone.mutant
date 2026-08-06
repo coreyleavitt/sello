@@ -1,0 +1,10 @@
+id: F17
+target: src/sello/field.nim
+desc: feInvert: addition-chain iteration-count off-by-one, 'for i in 1..<5: feSq(t2, t2)' -> '1..<4', short-circuiting one squaring in the Fermat-little-theorem exponent ladder.
+====OLD====
+  for i in 1..<5:
+    feSq(t2, t2)
+====NEW====
+  for i in 1..<4:
+    feSq(t2, t2)
+====END====

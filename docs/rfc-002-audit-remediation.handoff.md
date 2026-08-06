@@ -13,7 +13,16 @@
     one judgment call). It relocated the modules every later slice's test code imports
     (`types.nim` → `wire.nim`/`wipe.nim`, `challenge.nim` extraction), so nothing ran
     beside it.
-  - **Phase B — slices 3 and 5 in parallel** (NEXT), each in a worktree-isolated sonnet subagent
+  - **Phase B — slices 3 and 5 in parallel** (slice 5 DONE — merged to master 2026-08-06,
+    subject: "RFC-002 slice 5: mutation testing"; the control loop squash-merged the
+    worktree `worktree-agent-a89f2e8ee4886e233` and re-ran `scripts/test.sh` on the merged
+    tree, 165 OK / 0 failures; `scripts/mutation.sh`'s own 36/36 clean run happened in the
+    worktree on byte-identical content — master had not moved since the worktree branched —
+    so it was not re-run at merge. Slice 3 still IN PROGRESS in worktree branch
+    `worktree-agent-a6c3675ac2b6041c5` under `.claude/worktrees/`, event-driven-waiting on
+    its final test.sh gate; when it lands, rebase/merge it onto the now-moved master,
+    re-run gates on the merged tree — this time content will NOT be identical — commit,
+    update this doc, then clean up both worktrees), each in a worktree-isolated sonnet subagent
     (disjoint files: tests/fuzz/ + scripts/fuzz.sh vs. scripts/mutation.sh + catalog +
     docs/mutation-results.md; only slice 5's killing-tests-for-survivors can brush
     tests/unit/). Phase-B agents do NOT commit and do NOT touch this handoff — the
@@ -105,9 +114,27 @@
 - [ ] 4 Verification deepening — random-seed backend↔sodium parity property; ephemeral
       dudect target + ct-results update; Z3 whole-chain attempt (64 free nibbles; honest
       outcome either way)
-- [ ] 5 Mutation testing — curated mutant catalog for field/scalar hot spots,
-      scripts/mutation.sh, docs/mutation-results.md, kill-rate; survivors get killing tests
-      in-slice
+- [x] 5 Mutation testing (subject: "RFC-002 slice 5: mutation testing") — patch-based
+      harness: `scripts/mutation.sh` (host wrapper, one podman invocation for the whole
+      campaign so nimcache carries across mutants — roughly halved wall clock) +
+      `tests/mutation/run_mutation.py` (exact-string OLD/NEW mutant applier — unified
+      diffs rejected because no `diff`/`patch` exists in the base image, confirmed
+      empirically, and exact-match fails loudly on source drift; scratch-copy isolation,
+      compile-error kills classified separately from test kills) + 36 active `.mutant`
+      files (18 field.nim: carry chains, shift off-by-ones, 19/0x7FFFFF/121666/clamp
+      boundary constants, feBytesCanonical comparison flips, feCMove mask break; 18
+      scalar.nim: group-law sign flips, vartime/cmovCached/recode boundaries, scIsCanonical
+      flips, L-constant corruption, scReduce/scMulAdd shifts) + `docs/mutation-results.md`.
+      **Final kill rate: 36/36 killed by test red, 0 by compile error, 0 survivors.**
+      Two initial survivors, both resolved honestly: F05 (feToBytes q-seed 19→18) proven a
+      GENUINE EQUIVALENT MUTANT via ~206k-case empirical sweep (the carry refinement fully
+      re-derives the seeded estimate; q ∈ {0,1} absorbs the error) — retired to
+      `tests/mutation/mutants/equivalent/` with evidence, not counted, not force-tested;
+      S02 (geP2Dbl X+Y feAdd→feSub) exposed a REAL coverage gap — the mutant negates a
+      single doubling but every existing call site doubles an even number of times so the
+      sign cancels pairwise; killed by 2 new single-call `geP2Dbl` isolation tests in
+      `test_scalar.nim` (verified red under the mutant before finalizing). Suite is now
+      165 OK. Merged from worktree by the control loop; gates re-run on master post-merge.
 
 ## Open forks (awaiting Corey)
 - none — all decisions resolved at RFC approval

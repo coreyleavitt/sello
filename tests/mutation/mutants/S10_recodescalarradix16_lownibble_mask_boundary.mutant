@@ -1,0 +1,8 @@
+id: S10
+target: src/sello/scalar.nim
+desc: recodeScalarRadix16: digit-range constant narrowed, low-nibble mask 'and 0xF' -> 'and 0x7' for the even-indexed digits.
+====OLD====
+    result[2 * i] = int32(s[i] and 0xF)
+====NEW====
+    result[2 * i] = int32(s[i] and 0x7)
+====END====

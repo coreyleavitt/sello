@@ -1,0 +1,12 @@
+id: F03
+target: src/sello/field.nim
+desc: feFromBytes: reduction-by-p constant swapped, 'carry9 * 19' -> 'carry9 * 18' (p = 2^255 - 19; this is the wraparound coefficient the RFC calls out by name).
+====OLD====
+  var carry9 = (h9 + (1'i64 shl 24)) shr 25
+  h0 += carry9 * 19
+  h9 -= carry9 shl 25
+====NEW====
+  var carry9 = (h9 + (1'i64 shl 24)) shr 25
+  h0 += carry9 * 18
+  h9 -= carry9 shl 25
+====END====

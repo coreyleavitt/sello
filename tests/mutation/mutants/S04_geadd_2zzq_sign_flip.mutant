@@ -1,0 +1,8 @@
+id: S04
+target: src/sello/scalar.nim
+desc: geAdd: sign flip, '2*Z*Zq' (D+D) computed via feSub instead of feAdd, zeroing the term instead of doubling it.
+====OLD====
+  feAdd(D, D, D)            # 2*Z*Zq
+====NEW====
+  feSub(D, D, D)            # 2*Z*Zq
+====END====

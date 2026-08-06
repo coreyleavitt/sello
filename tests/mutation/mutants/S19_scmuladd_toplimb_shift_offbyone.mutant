@@ -1,0 +1,8 @@
+id: S19
+target: src/sello/scalar.nim
+desc: scMulAdd: shift-amount off-by-one in the 'a' operand's top-limb (a11) extraction, 'load4(a, 28) shr 7' -> 'shr 6'.
+====OLD====
+  let a11 = load4(a, 28) shr 7
+====NEW====
+  let a11 = load4(a, 28) shr 6
+====END====

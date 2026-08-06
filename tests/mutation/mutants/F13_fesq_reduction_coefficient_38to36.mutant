@@ -1,0 +1,8 @@
+id: F13
+target: src/sello/field.nim
+desc: feSq: reduction-by-2p coefficient swapped, 'let a5_38 = 38 * a5' -> '... = 36 * a5' (38 = 2*19, feSq's own reduction constant distinct from feMul's).
+====OLD====
+  let a5_38 = 38 * a5; let a6_19 = 19 * a6; let a7_38 = 38 * a7
+====NEW====
+  let a5_38 = 36 * a5; let a6_19 = 19 * a6; let a7_38 = 38 * a7
+====END====

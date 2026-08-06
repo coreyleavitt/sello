@@ -1,0 +1,8 @@
+id: F06
+target: src/sello/field.nim
+desc: feToBytes: reduction constant swapped, 'h0 += 19 * q' -> 'h0 += 18 * q' (second, independent use of the p=2^255-19 coefficient in the same function).
+====OLD====
+  h0 += 19 * q
+====NEW====
+  h0 += 18 * q
+====END====

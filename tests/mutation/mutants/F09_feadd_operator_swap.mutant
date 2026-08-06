@@ -1,0 +1,8 @@
+id: F09
+target: src/sello/field.nim
+desc: feAdd: carry-chain operator swap, per-limb '+' -> '-', turning field addition into field subtraction.
+====OLD====
+    r.limbs[i] = a.limbs[i] + b.limbs[i]
+====NEW====
+    r.limbs[i] = a.limbs[i] - b.limbs[i]
+====END====
