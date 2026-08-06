@@ -62,9 +62,9 @@ suite "facade - public surface (sello.nim re-exports)":
     check toBytes(pub) == raw
 
 suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
-  test "X25519Secret/X25519Public/X25519Shared and their converters are reachable through the facade":
-    let aliceSecret = x25519Secret()
-    let bobSecret = x25519Secret()
+  test "X25519StaticSecret/X25519Public/X25519Shared and their converters are reachable through the facade":
+    let aliceSecret = x25519StaticSecret()
+    let bobSecret = x25519StaticSecret()
     let alicePublic = x25519Base(aliceSecret)
     let bobPublic = x25519Base(bobSecret)
     let sharedA = x25519(aliceSecret, bobPublic)
@@ -73,18 +73,31 @@ suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
     check toBytes(sharedA.get) == toBytes(sharedB.get)
 
     let raw = default(array[32, byte])
-    let secret2 = toX25519Secret(raw)
+    let secret2 = toX25519StaticSecret(raw)
     let public2 = toX25519Public(raw)
     check toBytes(secret2) == raw
     check toBytes(public2) == raw
 
-  test "wipe(X25519Secret) / wipe(X25519Shared) are reachable through the facade":
-    var secret = x25519Secret()
+  test "X25519EphemeralSecret / x25519EphemeralSecret are reachable through the facade (static/ephemeral split)":
+    var eph = x25519EphemeralSecret()
+    let pub = x25519Base(eph)
+    check toBytes(pub) != default(array[32, byte])
+    let shared = x25519(move(eph), x25519Base(x25519EphemeralSecret()))
+    check shared.isSome
+
+  test "wipe(var X25519EphemeralSecret) is reachable through the facade":
+    var eph = x25519EphemeralSecret()
+    wipe(eph)
+    let probe = cast[ptr array[32, byte]](addr eph)
+    check probe[] == default(array[32, byte])
+
+  test "wipe(X25519StaticSecret) / wipe(X25519Shared) are reachable through the facade":
+    var secret = x25519StaticSecret()
     wipe(secret)
     check toBytes(secret) == default(array[32, byte])
 
-    let peer = x25519Base(x25519Secret())
-    var shared = x25519(x25519Secret(), peer).get
+    let peer = x25519Base(x25519StaticSecret())
+    var shared = x25519(x25519StaticSecret(), peer).get
     wipe(shared)
     check toBytes(shared) == default(array[32, byte])
 
@@ -98,14 +111,14 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
 
   test "x25519(secret, peer) does not compile with arguments swapped":
     check(not compiles(block:
-      let secret = x25519Secret()
-      let peer = x25519Base(x25519Secret())
-      discard x25519(peer, secret) # (X25519Public, X25519Secret) -- wrong order
+      let secret = x25519StaticSecret()
+      let peer = x25519Base(x25519StaticSecret())
+      discard x25519(peer, secret) # (X25519Public, X25519StaticSecret) -- wrong order
     ))
 
   test "an X25519Public is not implicitly usable as an ed25519 PublicKey":
     check(not compiles(block:
-      let pub = x25519Base(x25519Secret())
+      let pub = x25519Base(x25519StaticSecret())
       let sig = default(Signature)
       discard verify(sig, "msg", pub)
     ))
@@ -113,18 +126,39 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
   test "an ed25519 PublicKey is not implicitly usable as an X25519Public":
     check(not compiles(block:
       let pk = toPublicKey(default(array[32, byte]))
-      let secret = x25519Secret()
+      let secret = x25519StaticSecret()
       discard x25519(secret, pk)
     ))
 
-  test "X25519Secret does not implicitly convert to X25519Public":
+  test "X25519StaticSecret does not implicitly convert to X25519Public":
     check(not compiles(block:
-      let secret = x25519Secret()
+      let secret = x25519StaticSecret()
       let pub: X25519Public = secret
     ))
 
-  test "X25519Secret does not implicitly convert to array[32, byte]":
+  test "X25519StaticSecret does not implicitly convert to array[32, byte]":
     check(not compiles(block:
-      let secret = x25519Secret()
+      let secret = x25519StaticSecret()
       let raw: array[32, byte] = secret
+    ))
+
+  test "X25519EphemeralSecret has no toBytes overload (unpersistable by design)":
+    ## Absence checks, not move-only enforcement -- `not compiles(...)` CAN
+    ## see a missing overload (unlike the `=copy`/sink violations, which
+    ## need the subprocess-`nim c` fixtures in test_x25519.nim). No
+    ## `toBytes(X25519EphemeralSecret)` exists at all: an ephemeral secret
+    ## that could be exported to bytes could be persisted, defeating the
+    ## whole point.
+    check(not compiles(block:
+      let eph = x25519EphemeralSecret()
+      discard toBytes(eph)
+    ))
+
+  test "X25519EphemeralSecret has no toX25519EphemeralSecret(bytes) constructor (freshness by construction)":
+    ## The only constructor is `x25519EphemeralSecret()` itself (fresh from
+    ## the OS CSPRNG) -- no from-bytes route exists to resurrect or replay
+    ## a previous value.
+    check(not compiles(block:
+      let raw = default(array[32, byte])
+      discard toX25519EphemeralSecret(raw)
     ))

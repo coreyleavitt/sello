@@ -148,12 +148,48 @@ deliberate decision (see `sello.nim`'s doc comment), not an oversight.
 
 ### X25519
 
+Prefer a fresh **ephemeral** secret per exchange unless you specifically
+need a reusable, long-lived (**static**) X25519 identity -- e.g. a server
+key you publish and reuse across many exchanges; a fresh ephemeral costs
+nothing but one `x25519EphemeralSecret()` call and cannot be reused even by
+accident.
+
 ```nim
 import std/options
 import sello
 
-let aSecret = x25519Secret()              # fresh, via std/sysrand
-let bSecret = x25519Secret()
+var aEph = x25519EphemeralSecret()        # fresh, single-use, via std/sysrand
+var bEph = x25519EphemeralSecret()
+
+let aPublic = x25519Base(aEph)             # non-consuming: safe to send first
+let bPublic = x25519Base(bEph)
+
+let shared = x25519(move(aEph), bPublic)   # Option[X25519Shared]; CONSUMES aEph
+doAssert shared.isSome                     # None only for a small-order peer key
+doAssert toBytes(shared.get) == toBytes(x25519(move(bEph), aPublic).get)
+```
+
+`X25519EphemeralSecret` is move-only: `x25519` takes it by `sink`, so
+reusing the same variable in a second `x25519`/`x25519Base` call, or
+copying it (`var b = a`), is a compile error, not a documented caller
+obligation -- verified against checked-in negative-compile fixtures. Since
+`x25519Base` already read `aEph`/`bEph` above, the consuming call needs an
+explicit `move(...)` (`aEph`/`bEph` declared `var`, not `let`, since `move`
+requires that) -- Nim's own idiom for "this really is safe to move," needed
+because the compiler's own last-use check does not see through an earlier,
+harmless read. A secret consumed with no earlier read at all needs no
+`move()`. There is deliberately no way to construct an
+`X25519EphemeralSecret` from existing bytes and no way to export one back
+to bytes -- freshness and unpersistability are the whole point.
+
+For a reusable identity, use `X25519StaticSecret` instead:
+
+```nim
+import std/options
+import sello
+
+let aSecret = x25519StaticSecret()        # fresh, via std/sysrand
+let bSecret = x25519StaticSecret()
 
 let aPublic = x25519Base(aSecret)
 let bPublic = x25519Base(bSecret)
@@ -163,15 +199,17 @@ doAssert shared.isSome                    # None only for a small-order peer key
 doAssert toBytes(shared.get) == toBytes(x25519(bSecret, aPublic).get)
 ```
 
-X25519 has three roles, and each gets its own nominal type (RFC-001 ledger
-#29, revisited: this replaces the earlier single `X25519Key` design):
-`X25519Secret` (a private scalar; `x25519Secret()` for a fresh one,
-`toX25519Secret(bytes)` from existing material), `X25519Public` (a public
-u-coordinate; `toX25519Public(bytes)` from a peer's wire value), and
+`X25519StaticSecret` is deliberately copyable (like `Seed`): `aSecret` above
+is reusable across as many exchanges as you like. `toX25519StaticSecret(bytes)`
+constructs one from existing material (e.g. a persisted key).
+
+X25519's public/shared roles round out the type family: `X25519Public` (a
+public u-coordinate; `toX25519Public(bytes)` from a peer's wire value) and
 `X25519Shared` (a completed DH output -- feed it to a KDF, never use it
-directly as a key). `X25519Secret`/`X25519Shared` wipe themselves on scope
-exit and on explicit `wipe(...)`, the same as `Seed`; `toBytes` converts any
-of the three back to raw bytes, e.g. for persistence -- the returned copy is
+directly as a key). Every secret-holding type (`X25519StaticSecret`,
+`X25519EphemeralSecret`, `X25519Shared`) wipes itself on scope exit and on
+explicit `wipe(...)`, the same as `Seed`; `toBytes` converts the other
+types back to raw bytes, e.g. for persistence -- the returned copy is
 caller-owned and not itself wiped.
 
 `x25519` returns `none` rather than a shared secret when the peer supplies

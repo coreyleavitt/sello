@@ -14,48 +14,60 @@
 ## once the ladder is done with it. The remaining constant-time toolkit
 ## item (the dudect harness) is tracked with the ed25519 signing milestone.
 ##
-## Public API types: three role-typed wrappers, one per X25519 role
-## (RFC-001 ledger #29, revisited on Corey's direction; supersedes the
-## single-`X25519Key` design B3 originally chose):
+## Public API types: role-typed wrappers, one per X25519 role (RFC-001
+## ledger #29, revisited on Corey's direction; supersedes the single-
+## `X25519Key` design B3 originally chose), with the SECRET role itself
+## split in two (the static/ephemeral batch that completed ledger #29,
+## mirroring x25519-dalek's `StaticSecret`/`EphemeralSecret` in this
+## module's own vocabulary rather than importing dalek's names):
 ##
-## - `X25519Secret` — a clamped private scalar. One-field object (not
-##   `distinct array[32, byte]`) for the exact reason `signing.Seed` is:
-##   Nim 2.2.10/ORC silently never fires `=destroy` on a bare `distinct
-##   array` local, confirmed by inspecting the generated C — see
-##   `signing.Seed`'s doc comment for the full writeup. `=destroy` wipes.
-##   Deliberately copyable (like `Seed`, unlike `Keypair`): no `=copy`
-##   override, every copy self-wipes independently at its own scope exit.
+## - `X25519StaticSecret` — a clamped, REUSABLE private scalar. One-field
+##   object (not `distinct array[32, byte]`) for the exact reason
+##   `signing.Seed` is: Nim 2.2.10/ORC silently never fires `=destroy` on a
+##   bare `distinct array` local, confirmed by inspecting the generated C
+##   — see `signing.Seed`'s doc comment for the full writeup. `=destroy`
+##   wipes. Deliberately copyable (like `Seed`, unlike `Keypair`): no
+##   `=copy` override, every copy self-wipes independently at its own
+##   scope exit.
+## - `X25519EphemeralSecret` — a clamped, SINGLE-USE private scalar.
+##   Move-only (`=copy {.error.}`, the `Keypair` pattern): constructed
+##   ONLY via `x25519EphemeralSecret()` (fresh `std/sysrand`, no from-bytes
+##   route — freshness by construction), no `toBytes` either (unpersistable
+##   by design). `x25519Base` borrows it (non-consuming); `x25519` takes it
+##   by `sink` and CONSUMES it — reuse is a compile error, fixture-verified
+##   (see the type's own doc comment for the full contract, the `move()`
+##   nuance this enforcement needs in practice, and its honestly-disclosed
+##   residual scope).
 ## - `X25519Public` — a public u-coordinate: `x25519Base`'s result, or a
 ##   peer's value off the wire. Plain `distinct array[32, byte]`, freely
 ##   copyable — not secret material, no destructor.
 ## - `X25519Shared` — a completed DH output. This IS secret material (feed
 ##   it to a KDF, never use it directly as a key), so it follows
-##   `X25519Secret`'s exact shape: one-field object, copyable, wiped.
+##   `X25519StaticSecret`'s exact shape: one-field object, copyable, wiped.
 ##
-## Why three types instead of B3's one `X25519Key` covering all three
-## roles: RFC 7748 does treat all three as the identical 32-byte wire
+## Why role-typed wrappers instead of B3's one `X25519Key` covering every
+## role: RFC 7748 does treat all of them as the identical 32-byte wire
 ## format, and that reasoning still holds -- but role confusion between
 ## SECRET and SENDABLE material fails open under one type (nothing stopped
 ## a shared secret or a private scalar from being handed to code expecting
 ## a value safe to log/transmit), and encoding "same wire format" as "same
 ## type" was never required by the format itself. Splitting mirrors the
 ## `Seed`/`PublicKey` treatment already established on the ed25519 side of
-## this library, in this module's own established vocabulary
-## (`X25519Secret`/`X25519Public`/`X25519Shared`, not dalek's
-## `EphemeralSecret`/`StaticSecret`/`PublicKey`/`SharedSecret`). What this
-## design does NOT do, by explicit decision: a static/ephemeral secret
-## split (x25519-dalek's consume-on-use `EphemeralSecret`, which makes
-## `x25519` take the secret by value and never allows reuse). That is a
-## genuinely different, larger API shape -- deferred, not built here.
+## this library. The further static/ephemeral split on the secret role
+## mirrors `Keypair`'s move-only `=copy` closing accidental duplication:
+## a single-use secret that the type system, not caller discipline, refuses
+## to let outlive one exchange. Prefer `X25519EphemeralSecret` unless you
+## specifically need a reusable/static identity.
 ##
-## `toX25519Secret`/`toX25519Public`/`toBytes` are the named conversions
+## `toX25519StaticSecret`/`toX25519Public`/`toBytes` are the named conversions
 ## to/from raw bytes (symmetry with `sello/types`'s `toPublicKey`/
-## `toSignature` and `signing.toSeed`); `x25519Secret()` generates a fresh
-## secret from `std/sysrand`. `wipe` (`X25519Secret`- and
+## `toSignature` and `signing.toSeed`); `x25519StaticSecret()`/
+## `x25519EphemeralSecret()` generate a fresh secret from `std/sysrand`.
+## `wipe` (`X25519StaticSecret`-, `X25519EphemeralSecret`-, and
 ## `X25519Shared`-typed here; the generic `array[32, byte]` overload lives
 ## in `sello/types`) is the public, audited route to `private/ct.wipe` for
 ## X25519 secret material a caller holds directly, alongside the automatic
-## `=destroy` wipe both secret-holding types already carry.
+## `=destroy` wipe every secret-holding type here already carries.
 
 import std/[options, sysrand]
 import sello/field
@@ -67,7 +79,7 @@ type
     ## a peer's public value received over the wire. Freely copyable --
     ## this is not secret material.
 
-  X25519Secret* = object
+  X25519StaticSecret* = object
     ## A clamped X25519 private scalar. One-field object, not `distinct
     ## array[32, byte]`: `signing.Seed`'s module doc comment already
     ## establishes, empirically, that a bare `distinct array` local's
@@ -87,8 +99,45 @@ type
   X25519Shared* = object
     ## The output of a completed Diffie-Hellman exchange (`x25519`). This
     ## IS secret material -- feed it to a KDF, never use it directly as a
-    ## key -- so it follows `X25519Secret`'s exact shape: one-field object,
+    ## key -- so it follows `X25519StaticSecret`'s exact shape: one-field object,
     ## copyable, `=destroy`-wiped.
+    bytes: array[32, byte]
+
+  X25519EphemeralSecret* = object
+    ## A single-use X25519 private scalar (x25519-dalek's `EphemeralSecret`,
+    ## in this module's own vocabulary). Where `X25519StaticSecret` is
+    ## deliberately copyable (an identity you keep using), this type is
+    ## deliberately MOVE-ONLY (`=copy` is a compile error, the same
+    ## `Keypair` pattern) so that `x25519`'s `sink` parameter can enforce
+    ## single use at compile time: consuming an ephemeral in a DH exchange
+    ## moves it out of the caller's variable, and any second consuming use
+    ## (another `x25519` call, `wipe`, or a bare copy) is a compile error,
+    ## not a convention. `x25519Base` is a separate, non-consuming borrow
+    ## (see below) and does not count. Verified empirically against
+    ## Nim 2.2.10/ORC's `injectdestructors` pass with checked-in negative
+    ## fixtures (`tests/unit/fixtures/reject_ephemeral_reuse.nim`,
+    ## `reject_ephemeral_copy.nim`) -- see `tests/unit/test_x25519.nim`'s
+    ## subprocess-driven compile tests, same methodology as
+    ## `signing.Keypair`'s `reject_keypair_copy.nim`.
+    ##
+    ## Two deliberate ABSENCES, not omissions -- each is exactly what makes
+    ## this type "ephemeral" rather than a second spelling of
+    ## `X25519StaticSecret`:
+    ## - **No `toX25519EphemeralSecret(bytes)` constructor.** The only way
+    ##   to get one is `x25519EphemeralSecret()`, fresh from the OS CSPRNG.
+    ##   Freshness is a constructor guarantee, not a caller convention --
+    ##   there is no way to resurrect or replay a previous ephemeral value.
+    ## - **No `toBytes(X25519EphemeralSecret)`.** An ephemeral secret that
+    ##   can be exported to bytes could be persisted, defeating the entire
+    ##   point (a value meant to be used once and discarded). Both absences
+    ##   are pinned as regression tests in `test_facade.nim` (`not
+    ##   compiles(...)` -- these two ARE visible to the ordinary compile-time
+    ##   checker, unlike the move-only enforcement above).
+    ##
+    ## One-field object, not `distinct array[32, byte]`, for the same
+    ## empirically-established reason as `X25519StaticSecret`/`Seed` (see
+    ## their doc comments): a bare `distinct array` local's `=destroy` never
+    ## fires under ORC on Nim 2.2.10.
     bytes: array[32, byte]
 
 ## Type hooks must be declared immediately after the type they attach to,
@@ -96,11 +145,11 @@ type
 ## module doc comment for why (Nim may otherwise synthesize a default
 ## hook first and reject an explicit one declared later).
 
-func zeroizeX25519Secret(s: var X25519Secret) {.inline.} =
+func zeroizeX25519StaticSecret(s: var X25519StaticSecret) {.inline.} =
   ct.wipe(s.bytes)
 
-proc `=destroy`(s: var X25519Secret) =
-  zeroizeX25519Secret(s)
+proc `=destroy`(s: var X25519StaticSecret) =
+  zeroizeX25519StaticSecret(s)
 
 func zeroizeX25519Shared(s: var X25519Shared) {.inline.} =
   ct.wipe(s.bytes)
@@ -108,27 +157,46 @@ func zeroizeX25519Shared(s: var X25519Shared) {.inline.} =
 proc `=destroy`(s: var X25519Shared) =
   zeroizeX25519Shared(s)
 
-func toX25519Secret*(bytes: array[32, byte]): X25519Secret {.inline.} =
+func zeroizeX25519EphemeralSecret(s: var X25519EphemeralSecret) {.inline.} =
+  ct.wipe(s.bytes)
+
+proc `=destroy`(s: var X25519EphemeralSecret) =
+  zeroizeX25519EphemeralSecret(s)
+
+proc `=copy`(dst: var X25519EphemeralSecret; src: X25519EphemeralSecret) {.error.}
+  ## Move-only, the `Keypair`/RFC-001 slice 5 pattern: a second live copy
+  ## of a single-use secret is a compile error, not a hygiene footnote.
+  ## Legitimate transfers move (`x25519`'s `sink` parameter below).
+
+func toX25519StaticSecret*(bytes: array[32, byte]): X25519StaticSecret {.inline.} =
   ## Explicit construction from raw bytes (e.g. straight out of a CSPRNG,
   ## or persisted/loaded material) -- the point where bytes become a
   ## secret. For a fresh secret sourced from the OS CSPRNG directly, use
-  ## `x25519Secret()` instead.
-  X25519Secret(bytes: bytes)
+  ## `x25519StaticSecret()` instead.
+  X25519StaticSecret(bytes: bytes)
 
-proc x25519Secret*(): X25519Secret =
+proc x25519StaticSecret*(): X25519StaticSecret =
   ## Fresh secret via `std/sysrand`, filling the object's bytes IN PLACE
   ## (the `signing.keypair()` lesson: never a bare unwiped local that gets
   ## wrapped afterward). Raises `OSError` if the OS CSPRNG call fails --
   ## fail fast on a broken source of randomness, the same policy
   ## `signing.keypair()` follows.
   if not urandom(result.bytes):
-    raise newException(OSError, "sello.x25519Secret: sysrand.urandom failed")
+    raise newException(OSError, "sello.x25519StaticSecret: sysrand.urandom failed")
 
-func toBytes*(s: X25519Secret): array[32, byte] {.inline.} =
+func toBytes*(s: X25519StaticSecret): array[32, byte] {.inline.} =
   ## Deliberate export for persistence/interop. The returned copy is
   ## caller-owned and NOT wiped by this call -- wipe it yourself (e.g.
   ## `sello/types.wipe`) once you are done with it.
   s.bytes
+
+proc x25519EphemeralSecret*(): X25519EphemeralSecret =
+  ## The ONLY constructor -- deliberately no `toX25519EphemeralSecret(bytes)`
+  ## counterpart (see the type's doc comment: freshness-by-construction is
+  ## the whole point). Same `std/sysrand`-in-place-fill / `OSError`-on-
+  ## failure contract as `x25519StaticSecret()`/`signing.keypair()`.
+  if not urandom(result.bytes):
+    raise newException(OSError, "sello.x25519EphemeralSecret: sysrand.urandom failed")
 
 func toX25519Public*(bytes: array[32, byte]): X25519Public {.inline.} =
   ## Explicit construction from raw bytes (e.g. a peer's public value
@@ -218,16 +286,79 @@ func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
 
 {.pop.}
 
-func x25519Base*(secret: X25519Secret): X25519Public =
+func x25519Base*(secret: X25519StaticSecret): X25519Public =
   ## Public key derivation: X25519(secret, 9). Never all-zero for a
   ## clamped scalar, so no Option.
   toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
 
-func x25519*(secret: X25519Secret; peer: X25519Public): Option[X25519Shared] =
+func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
+  ## Public key derivation for an ephemeral secret. Deliberately
+  ## NON-consuming: a plain by-value `X25519EphemeralSecret` parameter is a
+  ## borrow when this is not the argument's last use (the `Keypair`
+  ## by-value precedent, verified empirically on Nim 2.2.10/ORC -- see
+  ## RFC-001's "Key decisions" log), so deriving and sending your public
+  ## key ahead of the DH exchange itself compiles and does not consume the
+  ## secret -- only `x25519`'s `sink` parameter (below) does that.
+  toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
+
+func x25519*(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Shared] =
   ## Shared-secret computation: X25519(secret, peer). Returns none if the
   ## result is all zero -- the peer supplied a small-order point, and the
   ## "shared secret" would be attacker-known (RFC 7748 §6.1 zero-output
   ## check). Callers need no further checks.
+  let s = ladder(secret.bytes, array[32, byte](peer))
+  var acc: byte = 0
+  for b in s: acc = acc or b
+  if acc == 0:
+    none[X25519Shared]()
+  else:
+    some(X25519Shared(bytes: s))
+
+func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25519Shared] =
+  ## Shared-secret computation that CONSUMES the ephemeral secret: `sink`
+  ## plus `X25519EphemeralSecret`'s move-only `=copy {.error.}` together
+  ## make reuse a compile error rather than a documented caller obligation
+  ## -- see the type's doc comment and the negative-compile fixtures
+  ## (`tests/unit/fixtures/reject_ephemeral_reuse.nim`,
+  ## `reject_ephemeral_copy.nim`) that pin this down empirically. `secret`
+  ## is a local owned by this proc for the duration of the call and is
+  ## wiped by its own `=destroy` when it goes out of scope at return --
+  ## the same automatic-wipe guarantee every other secret-holding type in
+  ## this codebase carries, here additionally enforced as single-use.
+  ## Same zero-output small-order-peer check as the `X25519StaticSecret`
+  ## overload above.
+  ##
+  ## **Empirical Nim ownership finding (verified against Nim 2.2.10/ORC
+  ## with isolated scratch probes, not assumed):** if `x25519Base` (or ANY
+  ## other reference at all -- a bare field read and a raw `addr` both
+  ## reproduce it) touched the same `X25519EphemeralSecret` variable
+  ## earlier in the same scope, calling `x25519(secret, peer)` bare fails
+  ## to compile with `'=dup' is not available ...; requires a copy because
+  ## it's not the last read of 'secret'` -- Nim's sink-argument "is this
+  ## the last read" inference is a simple per-symbol occurrence count over
+  ## the whole scope, not a true escape/alias analysis, so it cannot see
+  ## that an earlier read-only borrow leaves no live alias behind. The
+  ## caller must wrap the argument in `system.move` (`x25519(move(secret),
+  ## peer)`, which requires `secret` be declared `var`, not `let`, since
+  ## `move` takes a `var T`) to explicitly assert the move is safe. A
+  ## secret with NO earlier reference at all (pure single-use) needs no
+  ## `move()` -- ordinary last-use inference already covers it, exactly as
+  ## in `reject_ephemeral_reuse.nim`'s legitimate first call.
+  ##
+  ## **Honest residual gap, inherent to Nim's ownership model, not
+  ## something this design can close:** `move()` is an explicit override
+  ## of the compiler's static analysis, so a caller who writes
+  ## `move(secret)` at TWO separate consuming call sites for the same
+  ## variable (instead of the natural, unadorned `x25519(secret, peer)`
+  ## reuse pattern the negative fixtures cover) would compile -- the
+  ## second call would silently run on the wiped-to-zero, moved-from
+  ## bytes rather than being rejected. The ORDINARY reuse pattern (no
+  ## explicit `move()` anywhere) IS correctly rejected at compile time --
+  ## verified by `reject_ephemeral_reuse.nim` -- and that is the shape
+  ## every legitimate call site in this codebase's own tests and this
+  ## proc's own doc example use. `move()` is Nim's own standard idiom for
+  ## "I assert this is safe," the same escape hatch every Nim ARC/ORC
+  ## move-only type shares; it is not a sello-specific hole.
   let s = ladder(secret.bytes, array[32, byte](peer))
   var acc: byte = 0
   for b in s: acc = acc or b
@@ -246,19 +377,31 @@ func x25519*(secret: X25519Secret; peer: X25519Public): Option[X25519Shared] =
 # compiler is free to delete as a dead store (the precise bug class
 # RFC-001 slice 8 fixed internally; see `private/ct.nim`'s module doc
 # comment). The generic `array[32, byte]` overload lives in `sello/types`
-# (any 32-byte secret shape); the two overloads below are specific to this
+# (any 32-byte secret shape); the overloads below are specific to this
 # module's own secret-holding types.
 # ---------------------------------------------------------------------------
 
-proc wipe*(s: var X25519Secret) =
+proc wipe*(s: var X25519StaticSecret) =
   ## Explicit early wipe, e.g. right after deriving a public key or a
   ## shared secret when the caller does not need to retain the raw
   ## secret. `=destroy` performs the same wipe automatically at scope
   ## exit; this exists for callers that want it sooner.
-  zeroizeX25519Secret(s)
+  zeroizeX25519StaticSecret(s)
 
 proc wipe*(sh: var X25519Shared) =
   ## Explicit early wipe of a DH output, e.g. right after feeding it to a
   ## KDF. `=destroy` performs the same wipe automatically at scope exit;
   ## this exists for callers that want it sooner.
   zeroizeX25519Shared(sh)
+
+proc wipe*(s: var X25519EphemeralSecret) =
+  ## Early disposal of an ephemeral secret that was generated but never
+  ## consumed by `x25519` (e.g. the caller decided not to complete the
+  ## exchange). `=destroy` performs the same wipe automatically at scope
+  ## exit; this exists for callers that want it sooner. Note this is
+  ## explicit early wipe of a still-owned value, not a way around the
+  ## move-only single-use rule -- `wipe` takes `var`, not `sink`, so a
+  ## caller cannot "wipe, then still pass to x25519" any more than they
+  ## already could before this proc existed; the type's single ownership
+  ## just moves to whichever consumes it first, `wipe` or `x25519`.
+  zeroizeX25519EphemeralSecret(s)

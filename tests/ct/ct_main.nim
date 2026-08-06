@@ -32,9 +32,9 @@
 ##   - `x25519Base` -- the RFC 7748 Montgomery ladder over a secret
 ##     scalar (`sello/x25519.x25519Base`), covering the one secret-
 ##     holding code path outside the ed25519 signing stack. Constructs a
-##     fresh `X25519Secret` per sample via `toX25519Secret` (RFC-001
+##     fresh `X25519StaticSecret` per sample via `toX25519StaticSecret` (RFC-001
 ##     ledger #29 revisited: `X25519Key` replaced by role-typed
-##     `X25519Secret`/`X25519Public`/`X25519Shared`) -- identical
+##     `X25519StaticSecret`/`X25519Public`/`X25519Shared`) -- identical
 ##     construction cost for both classes, so it does not perturb the
 ##     measurement.
 ##
@@ -116,7 +116,7 @@ proc opGeScalarmultBase(s: array[32, byte]): uint64 =
 # ---------------------------------------------------------------------------
 
 proc opX25519Base(secret: array[32, byte]): uint64 =
-  let pk = x25519Base(toX25519Secret(secret))
+  let pk = x25519Base(toX25519StaticSecret(secret))
   var acc: uint64 = 0
   for b in toBytes(pk): acc = (acc shl 1) or uint64(b and 1'u8)
   acc

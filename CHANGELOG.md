@@ -80,6 +80,31 @@ until 1.0.0.
   `libsodium-devel`, so one dev image (`sello-dev`, renamed from
   `sello-libsodium`) covers both the libsodium adapter matrix
   (`scripts/test-libsodium.sh`) and the Z3 proof (`scripts/bmc.sh`).
+- **`X25519EphemeralSecret`** (`x25519.nim`): a single-use X25519 secret,
+  closing the static/ephemeral deferral this same 0.2.0 cycle originally
+  recorded (x25519-dalek's `EphemeralSecret`, in sello's own vocabulary).
+  Move-only (`=copy {.error.}`, the `Keypair` pattern); constructed ONLY
+  via `x25519EphemeralSecret()` (fresh from `std/sysrand`, no from-bytes
+  constructor -- freshness by construction) with no `toBytes` either
+  (unpersistable by design; both absences are pinned in
+  `test_facade.nim`, not just documented). `x25519Base(secret:
+  X25519EphemeralSecret): X25519Public` is a non-consuming borrow (safe to
+  derive and send your public key before completing the exchange);
+  `x25519(secret: sink X25519EphemeralSecret; peer): Option[X25519Shared]`
+  CONSUMES it -- reusing the same variable in a second `x25519` call, or
+  copying it, is a compile error verified against checked-in negative
+  fixtures (`tests/unit/fixtures/reject_ephemeral_reuse.nim`,
+  `reject_ephemeral_copy.nim`, subprocess-`nim c`-driven in
+  `test_x25519.nim`, same methodology as `Keypair`'s copy fixture),
+  not merely a documented caller obligation. Empirically, whenever
+  `x25519Base` (or any other reference) touches the secret before the
+  consuming call, Nim's own last-use inference needs an explicit
+  `system.move` at that call site (`x25519(move(secret), peer)`) -- see
+  `x25519.nim`'s doc comment on the `sink` overload for the full
+  writeup, including the honest residual scope of that mechanism.
+  README's X25519 section now leads with the ephemeral form as the
+  recommended default; `X25519StaticSecret` (below) remains for a
+  reusable identity.
 
 ### Changed
 
@@ -109,7 +134,7 @@ until 1.0.0.
 
 ### Removed (breaking)
 
-- **`X25519Key` replaced by `X25519Secret`/`X25519Public`/`X25519Shared`.**
+- **`X25519Key` replaced by `X25519StaticSecret`/`X25519Public`/`X25519Shared`.**
   (RFC-001 ledger #29, revisited on Corey's direction after originally being
   recorded `wontfix`.) X25519's three roles -- a private scalar, a public
   u-coordinate, and a completed DH shared secret -- previously shared one
@@ -117,16 +142,27 @@ until 1.0.0.
   but left same-role/wrong-argument swaps (`x25519(secret, secret)`) and
   secret/sendable role confusion (nothing stopped a shared secret from being
   passed where a public value was expected) uncaught. Three role-typed
-  wrappers close both: `X25519Secret` and `X25519Shared` are one-field
+  wrappers close both: `X25519StaticSecret` and `X25519Shared` are one-field
   objects with a `=destroy` wipe hook and eager `wipe(...)` overloads, the
   same shape as `Seed`; `X25519Public` is a plain `distinct array[32, byte]`,
-  freely copyable, no destructor. `toX25519Key` is gone; `toX25519Secret`/
-  `toX25519Public`/`toBytes` replace it, plus a new `x25519Secret()` for
+  freely copyable, no destructor. `toX25519Key` is gone; `toX25519StaticSecret`/
+  `toX25519Public`/`toBytes` replace it, plus a new `x25519StaticSecret()` for
   fresh generation via `std/sysrand` (mirroring `signing.keypair()`). No
   migration path for `X25519Key` itself -- construct through the new
   role-specific converters instead. A static/ephemeral secret split
   (x25519-dalek's consume-on-use `EphemeralSecret`) was considered and
-  deliberately deferred, not built.
+  initially deferred -- since built, in this same 0.2.0 cycle, as
+  `X25519EphemeralSecret` (see Added, above).
+- **`X25519Secret` (this same 0.2.0 cycle's initial three-role name)
+  renamed to `X25519StaticSecret`**, to make room for the new
+  `X25519EphemeralSecret` above and name the reusable/single-use
+  distinction explicitly at the type level rather than leaving
+  `X25519Secret` ambiguous between the two. `toX25519Secret`/
+  `x25519Secret()` renamed to `toX25519StaticSecret`/`x25519StaticSecret()`
+  to match; semantics unchanged, name only. Since `X25519Secret` never
+  shipped in a released version (0.2.0 is still unreleased as of this
+  cycle), there is no external migration path to document -- this note
+  exists for anyone who checked out sello mid-cycle.
 - **`SecretKey` removed from the public facade.** It was an unused,
   never-implemented placeholder type predating the signing design; the
   real signing surface is `Seed`/`Keypair` above. There is no

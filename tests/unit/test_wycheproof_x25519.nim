@@ -25,7 +25,7 @@ suite "Wycheproof X25519":
       for t in g["tests"]:
         let tcId = t["tcId"].getInt
         let pub = toX25519Public(fromHex32(t["public"].getStr))
-        let priv = toX25519Secret(fromHex32(t["private"].getStr))
+        let priv = toX25519StaticSecret(fromHex32(t["private"].getStr))
         var zeroExpected = false
         for f in t["flags"]:
           if f.getStr == "ZeroSharedSecret": zeroExpected = true
