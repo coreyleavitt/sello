@@ -138,7 +138,7 @@ suite "field property: ring axioms":
     with covSettings()
     given ab in fe32()
     let a = toFe(ab)
-    assume feIsNonZero(a)
+    assume feIsNonZeroVartime(a)
     var inv, r: Fe
     feInvert(inv, a)
     feMul(r, a, inv)

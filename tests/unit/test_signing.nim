@@ -232,13 +232,14 @@ suite "Keypair lifecycle (RFC-001 ledger finding 16)":
     ## `seed` field is a `Seed` (itself a one-field object wrapping
     ## `array[32, byte]`), so aliasing `addr kp` as `ptr Seed` at the right
     ## offset would be fragile; instead this reads back through the public
-    ## `toBytes(kp)`/`public()` accessors, which is exactly what an
-    ## external caller of `wipe(var Keypair)` can observe too.
+    ## `toSeedBytes(kp)`/`public()` accessors (renamed from `toBytes` by
+    ## round-3 finding A7), which is exactly what an external caller of
+    ## `wipe(var Keypair)` can observe too.
     var kp = keypair(toSeed(tv1_sk))
     let publicBefore = kp.public
     wipe(kp)
     check kp.public == publicBefore  # untouched -- not secret, not wiped
-    check toBytes(kp) == default(array[32, byte])
+    check toSeedBytes(kp) == default(array[32, byte])
 
   test "wipe(kp) does not prevent kp's own =destroy from firing safely at scope exit":
     ## Wiping twice (once explicitly, once via `=destroy` at scope exit)
@@ -247,7 +248,7 @@ suite "Keypair lifecycle (RFC-001 ledger finding 16)":
     block:
       var kp = keypair(toSeed(tv2_sk))
       wipe(kp)
-      check toBytes(kp) == default(array[32, byte])
+      check toSeedBytes(kp) == default(array[32, byte])
     # No crash / defect on scope exit above is itself the assertion here.
 
 suite "sign/verify - string overload (zero-copy openArray[byte] view)":
@@ -281,9 +282,9 @@ suite "sign/verify - string overload (zero-copy openArray[byte] view)":
     check not verify(kp.public, "goodbye", sig)
 
 suite "keypair(seed) - invariant":
-  test "kp.public == derive(kp.seed): re-deriving from toBytes(kp) matches":
+  test "kp.public == derive(kp.seed): re-deriving from toSeedBytes(kp) matches":
     let kp = keypair(toSeed(tv1_sk))
-    check keypair(toSeed(toBytes(kp))).public == kp.public
+    check keypair(toSeed(toSeedBytes(kp))).public == kp.public
 
 suite "Seed lifecycle":
   test "wipe(seed) zeroes the underlying bytes":
@@ -295,12 +296,13 @@ suite "Seed lifecycle":
     let probe = cast[ptr array[32, byte]](addr s)
     check probe[] == default(array[32, byte])
 
-  test "different seed bytes derive keypairs with different toBytes; equal seed bytes derive equal ones":
+  test "different seed bytes derive keypairs with different toSeedBytes; equal seed bytes derive equal ones":
     ## `Seed.==` was deleted (RFC-002 slice 1, one principle/one layer with
     ## the X25519 secret family's total absence of `==`) -- compare via
-    ## `toBytes(kp)` on a keypair derived from each seed instead.
-    check toBytes(keypair(toSeed(tv1_sk))) != toBytes(keypair(toSeed(tv2_sk)))
-    check toBytes(keypair(toSeed(tv1_sk))) == tv1_sk
+    ## `toSeedBytes(kp)` (renamed from `toBytes` by round-3 finding A7) on a
+    ## keypair derived from each seed instead.
+    check toSeedBytes(keypair(toSeed(tv1_sk))) != toSeedBytes(keypair(toSeed(tv2_sk)))
+    check toSeedBytes(keypair(toSeed(tv1_sk))) == tv1_sk
 
 suite "Seed destructor smoke tests (RFC-001 slice 8)":
   ## `=destroy` is the whole point of `Seed` existing as its own type
@@ -350,7 +352,7 @@ suite "keypair() - fresh randomness":
   test "two calls produce different seeds":
     let kp1 = keypair()
     let kp2 = keypair()
-    check toBytes(kp1) != toBytes(kp2)
+    check toSeedBytes(kp1) != toSeedBytes(kp2)
 
   test "two calls produce different public keys":
     let kp1 = keypair()

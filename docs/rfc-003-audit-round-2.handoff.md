@@ -161,6 +161,50 @@
 - combined RFC-002+003 code review after implementation (near-total file overlap)
 - Ordering: 1 → {2,4 free; 3 after 1} → 5 → 6
 
+## Round-3 fix-now batch (Corey 2026-08-07: "nope we keep kicking the can down the
+## road. fix now" — FULL audit scope accepted, no RFC doc, fix directly; includes the
+## Z3 follow-ons and the SecretScalar type. Same per-batch agent/gate/commit discipline
+## as the slice grind. Batches: A src design+CT hygiene (wipes, feIsNonZeroVartime,
+## SecretScalar, completeExchange dedupe, func→proc de-cast, secretHooks template,
+## feFromLimbs assert, toBytes(kp)→toSeedBytes, bool/Option rationale doc) → B
+## verification infra (differential Wycheproof/fuzz vs libsodium, accept-boundary fuzz
+## seeding or disclosed limit, 2-4 signing/backend mutants, dudect percentile battery,
+## geAdd P+P/P+(-P) tests, test.sh tier summary; ONE full ct.sh run at end of B after
+## all src+harness changes) → Z Z3 follow-ons (scReduce/scMulAdd carry bounds, feCMove/
+## feCSwap mask algebra, per the proven lemma+composition pattern) → C docs/packaging
+## (stale only-raiser claim ×3, retroactive tags v0.1.0-v0.3.0, milpa/GHCR availability
+## statement, SECURITY.md, threat-model section, CHANGELOG breaking tag + fold fix-now
+## changes into 0.3.0 entry [nothing shipped/tagged yet], plain-nimble boundary,
+## NOTICE/X25519BasePoint/tested-versions nits). CHANGELOG/version stays 0.3.0.
+## Status: batch A DONE (committed; 179 OK / 185 OK libsodium / 46-46 mutants with
+## F21/F22/E01/X01/X02 OLD-strings re-anchored / 5-5 fences; judgment calls recorded in
+## source doc comments: SecretScalar home=scalar.nim with recode/ladder below the typed
+## boundary, secretHooks needs {.dirty.} else ORC ignores renamed hooks, feFromLimbs
+## bound read as magnitude |limb|<2^26/2^25 matching signed constants, ladder temps
+## hoisted out of loop to be wipeable once, keypair/sign became proc with backends).
+## KNOWN FALLOUT for batch B: tests/ct/ct_main.nim's geScalarmultBase call needs a
+## toSecretScalar wrap (not in unit gates; ct.sh not yet re-run — batch B owns it).
+## Batch B in progress; Z, C pending.
+## Original audit summary (for context) below:
+Headline (control-loop-verified where load-bearing): (1) differential testing vs the
+libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
+(highest-severity; the one empirical "does sello disagree with an audited
+implementation under adversarial pressure" question nothing answers today); (2) X25519
+ladder wipe coverage is thinner than backend.nim's (accumulators x2/z2/x3/z3, temps,
+zInv, and the raw ladder output `s` at both call sites un-wiped; only clamped `e` is);
+(3) `feIsNonZero` is vartime (early return) with no Vartime suffix in the shared field
+leaf; (4) vartime-never-sees-secret is convention-enforced — a `SecretScalar` distinct
+type would make it a compile error; (5) stale "keypair() is the only function that can
+raise" claim in README:123 + signing.nim:75,198 — false since the four OSError-raising
+x25519 constructors; (6) no git tags for 0.1/0.2/0.3; (7) fuzz verify oracle never
+exercises the accept boundary; (8) zero mutants in signing/backend; (9) dudect is a
+single-crop single-t-test vs a percentile battery; plus ~15 smaller items (geAdd P+P/
+P+-P tests, duplicated x25519 zero-check, toBytes(kp) naming trap [revisits an
+RFC-002-approved decision], cast(noSideEffect) in backend_sodium, feFromLimbs debug
+assert, SECURITY.md, threat-model section, milpa/GHCR public-availability statement,
+CHANGELOG breaking tag on verify flip, plain-nimble clone story, NOTICE wording).
+Exemption lens re-verified 14 standing disclosures as genuine ceilings.
+
 ## Review ledger (stage 4 — empty until review)
 | id | sev | finding | status | proof / reason |
 |----|-----|---------|--------|----------------|

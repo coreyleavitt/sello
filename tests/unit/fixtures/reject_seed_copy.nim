@@ -2,8 +2,9 @@
 ##
 ## `Seed` is move-only as of RFC-002 slice 1: `sello/signing` declares
 ## `=copy` with `{.error.}` (the same `Keypair` pattern, now that
-## `toBytes(kp: Keypair)` removes the only copy-requiring API -- the old
-## `seed()` accessor -- `Seed`'s copyability used to serve), so a genuine
+## `toSeedBytes(kp: Keypair)` (renamed from `toBytes` by round-3 finding
+## A7) removes the only copy-requiring API -- the old `seed()` accessor --
+## `Seed`'s copyability used to serve), so a genuine
 ## copy -- as opposed to a last-use move -- must be a compile error. Same
 ## subprocess-`nim c` methodology as `reject_keypair_copy.nim`: the
 ## `=copy` violation Nim raises here is only surfaced by the

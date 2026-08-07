@@ -24,17 +24,18 @@ suite "facade - public surface (sello.nim re-exports)":
 
   test "wipe(kp: var Keypair) is reachable through the facade (RFC-001 ledger finding 16)":
     ## Confirms both halves of the contract: the secret half zeroes
-    ## (observed via `toBytes(kp)`, RFC-002 slice 1's replacement for the
-    ## old `seed()` accessor) and the public half survives untouched.
+    ## (observed via `toSeedBytes(kp)`, RFC-002 slice 1's replacement for
+    ## the old `seed()` accessor, renamed from `toBytes` by round-3 finding
+    ## A7) and the public half survives untouched.
     var kp = keypair()
     let publicBefore = kp.public
     wipe(kp)
     check kp.public == publicBefore
-    check toBytes(kp) == default(array[32, byte])
+    check toSeedBytes(kp) == default(array[32, byte])
 
-  test "toBytes(kp: Keypair) is reachable through the facade (RFC-002 slice 1)":
+  test "toSeedBytes(kp: Keypair) is reachable through the facade (RFC-002 slice 1, renamed by round-3 finding A7)":
     let kp = keypair()
-    check keypair(toSeed(toBytes(kp))).public == kp.public
+    check keypair(toSeed(toSeedBytes(kp))).public == kp.public
 
   test "wipe(var Seed) is reachable through the facade":
     ## `Seed` has no `==`/`toBytes` of its own (RFC-002 slice 1) -- the

@@ -28,17 +28,19 @@
 ##   secret. `wipe` remains for explicit early wiping.
 ##
 ## - **`Seed` is move-only** (RFC-002 slice 1), the same `=copy {.error.}`
-##   pattern as `Keypair`: `toBytes(kp: Keypair)` is the persistence escape
-##   hatch now (below), so nothing in the public API needs a second live
-##   `Seed` copy any more -- the old copyable `Seed` was rationalizing a
-##   missing `toBytes`, not serving a real need. `Seed` also has no `==`
-##   (RFC-002 slice 1): the X25519 secret family (`x25519.nim`) never had
-##   one at all, on the principle that this library does not offer even a
-##   vartime comparison on secret material; `Seed`'s old test/tooling-only
-##   `==` was the same principle enforced one layer up (facade export
-##   list) instead of at the type itself. Tests compare seeds via
-##   `toBytes(kp)` on a keypair derived from them, or a raw-pointer probe
-##   for a standalone `Seed` (see `test_signing.nim`).
+##   pattern as `Keypair`: `toSeedBytes(kp: Keypair)` (renamed from
+##   `toBytes` by round-3 finding A7 -- see that proc's own doc comment) is
+##   the persistence escape hatch now (below), so nothing in the public API
+##   needs a second live `Seed` copy any more -- the old copyable `Seed`
+##   was rationalizing a missing `toSeedBytes`, not serving a real need.
+##   `Seed` also has no `==` (RFC-002 slice 1): the X25519 secret family
+##   (`x25519.nim`) never had one at all, on the principle that this
+##   library does not offer even a vartime comparison on secret material;
+##   `Seed`'s old test/tooling-only `==` was the same principle enforced
+##   one layer up (facade export list) instead of at the type itself.
+##   Tests compare seeds via `toSeedBytes(kp)` on a keypair derived from
+##   them, or a raw-pointer probe for a standalone `Seed` (see
+##   `test_signing.nim`).
 ##
 ##   Two deviations from RFC-001's literal §"Public API" text, both
 ##   forced by empirical Nim 2.2.10 behavior rather than a judgment call,
@@ -92,6 +94,7 @@
 import std/sysrand
 import sello/wire  # PublicKey/Signature nominal types (RFC-001 finding 9)
 import sello/private/ct
+import sello/private/secret_hooks
 
 when defined(selloLibsodium):
   # RFC-001 slice 10: libsodium FFI adapter. Same seed-level contract
@@ -111,7 +114,7 @@ type
     ## array[32, byte]` is not used here.
     ##
     ## **Move-only, like `Keypair`** (RFC-002 slice 1): `=copy` is a
-    ## compile error; legitimate transfers move. `toBytes(kp: Keypair)`
+    ## compile error; legitimate transfers move. `toSeedBytes(kp: Keypair)`
     ## below is the persistence escape hatch, so nothing in the public API
     ## needs a second live `Seed` copy any more -- see the module doc
     ## comment for the fuller rationale.
@@ -127,22 +130,23 @@ type
 ## Type hooks must be declared immediately after the type they attach to,
 ## before anything else touches the type by value — otherwise Nim may
 ## synthesize (and lock in) a default hook first and then reject an
-## explicit one declared later with "cannot bind another '=destroy'".
+## explicit one declared later with "cannot bind another '=destroy'". The
+## `secretHooks*`/`secretHooksMoveOnly*` templates below (round-3 finding
+## A5, `sello/private/secret_hooks`) expand to exactly the hand-written
+## `zeroizeSeed`/`=destroy`/`=copy` shape this comment used to introduce
+## directly -- see that module's doc comment for the full "why a template,
+## why `{.dirty.}`, why `Keypair` stays hand-written" writeup.
 
-func zeroizeSeed(s: var Seed) {.inline.} =
-  ## RFC-001 slice 8: routed through `ct.wipe` (volatile stores + compiler
-  ## barrier) rather than a plain loop -- the whole point of `Seed`'s
-  ## `=destroy` hook is to guarantee the wipe actually happens, which a
-  ## compiler-eliminable dead store would silently defeat (see
-  ## `sello/private/ct` and the x25519.nim ladder fix in this same slice).
-  ct.wipe(s.bytes)
-
-proc `=destroy`(s: var Seed) =
-  zeroizeSeed(s)
-
-proc `=copy`(dst: var Seed; src: Seed) {.error.}
-  ## A second live copy of a `Seed` is a compile error, not a runtime
-  ## hygiene footnote (RFC-002 slice 1). Legitimate transfers move.
+## RFC-001 slice 8: `zeroizeSeed`'s wipe (emitted below by
+## `secretHooksMoveOnly`) is routed through `ct.wipe` (volatile stores +
+## compiler barrier) rather than a plain loop -- the whole point of
+## `Seed`'s `=destroy` hook is to guarantee the wipe actually happens,
+## which a compiler-eliminable dead store would silently defeat (see
+## `sello/private/ct` and the x25519.nim ladder fix in this same slice).
+## The `=copy {.error.}` this also emits (RFC-002 slice 1): a second live
+## copy of a `Seed` is a compile error, not a runtime hygiene footnote.
+## Legitimate transfers move.
+secretHooksMoveOnly(Seed, zeroizeSeed, bytes)
 
 proc `=copy`(dst: var Keypair; src: Keypair) {.error.}
   ## A second live copy of the seed is a compile error, not a runtime
@@ -175,21 +179,35 @@ func public*(kp: Keypair): PublicKey =
   ## The keypair's public key (cached at construction — never re-derived).
   kp.public
 
-func toBytes*(kp: Keypair): array[32, byte] {.inline.} =
+func toSeedBytes*(kp: Keypair): array[32, byte] {.inline.} =
   ## Persistence escape hatch: the keypair's raw seed bytes (RFC-002
   ## slice 1 -- replaces the old `seed()` accessor, which returned a
-  ## `Seed` the public API provided no way to extract bytes from). The
-  ## returned copy is caller-owned and NOT wiped by this call -- wipe it
-  ## yourself (e.g. `sello/wipe.wipe`) once you are done with it, the
-  ## same register as `X25519StaticSecret.toBytes` (`sello/x25519`).
+  ## `Seed` the public API provided no way to extract bytes from).
+  ## **Renamed from `toBytes` (round-3 finding A7):** every other
+  ## `toBytes` in this codebase serializes ITS OWN type's identity
+  ## (`PublicKey`'s bytes, `X25519Shared`'s bytes, ...) -- this one instead
+  ## returns the keypair's SEED, a different (if related) value than "the
+  ## keypair itself," which the old name `toBytes(kp: Keypair)` did not
+  ## signal at the call site; a reader could easily assume it serializes
+  ## the whole keypair (public key included) rather than exposing raw
+  ## secret seed material. `toSeedBytes` says exactly what it returns.
+  ## Semantics are unchanged: the returned copy is caller-owned and NOT
+  ## wiped by this call -- wipe it yourself (e.g. `sello/wipe.wipe`) once
+  ## you are done with it, the same register as
+  ## `X25519StaticSecret.toBytes` (`sello/x25519`).
   kp.seed.bytes
 
-func keypair*(seed: sink Seed): Keypair =
+proc keypair*(seed: sink Seed): Keypair =
   ## The only constructor: derives the public key per RFC 8032 §5.1.5
   ## (`A = clamp(SHA-512(seed))[0..31]) * B`). Deterministic: the same
   ## seed always yields the same `Keypair`. `seed` is consumed: `Seed` is
   ## move-only (RFC-002 slice 1), and `keypair(toSeed(bytes))` (an rvalue
   ## argument) remains the construction idiom.
+  ##
+  ## `proc`, not `func` (round-3 finding A4): calls `backend.derivePublic`,
+  ## which is itself `proc` now on both backends (the sodium adapter has
+  ## real FFI/global-state side effects it can no longer hide behind a
+  ## false `{.cast(noSideEffect).}` -- see `private/backend_sodium.nim`).
   result.public = toPublicKey(backend.derivePublic(seed.bytes))
   result.seed = seed
 
@@ -218,7 +236,7 @@ proc keypair*(): Keypair =
   # safe.
   result = keypair(move(s))
 
-func sign*(kp: Keypair; msg: openArray[byte]): Signature =
+proc sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## RFC 8032 §5.1.6 detached signature over `msg`. Deterministic and
   ## total: the same `(kp, msg)` pair always yields the same signature, and
   ## it cannot fail for any seed/message — unlike `x25519`, whose `Option`
@@ -231,12 +249,18 @@ func sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## key as `A` instead of re-deriving it from the secret scalar on every
   ## call, which is exactly what the `Keypair` invariant
   ## (`kp.public == derive(kp.seed)`) exists to make safe.
+  ##
+  ## `proc`, not `func` (round-3 finding A4): same reason as `keypair(seed:
+  ## sink Seed)` above -- `backend.signDetached` is `proc` on both
+  ## backends now.
   toSignature(backend.signDetached(kp.seed.bytes, toBytes(kp.public), msg))
 
-func sign*(kp: Keypair; msg: string): Signature =
+proc sign*(kp: Keypair; msg: string): Signature =
   ## Zero-copy `string` overload: `openArray[byte]` does not accept
   ## `string` in Nim, and `kp.sign("hello")` failing to compile flunks the
   ## ergonomics bar. `msg.toOpenArrayByte` views the string's existing
   ## bytes in place -- no copy, no allocation. `ed25519.verify` gains the
-  ## matching additive overload in the same slice.
+  ## matching additive overload in the same slice. `proc`, not `func`
+  ## (round-3 finding A4): calls the `openArray[byte]` overload above,
+  ## itself `proc` now.
   kp.sign(msg.toOpenArrayByte(0, msg.len - 1))

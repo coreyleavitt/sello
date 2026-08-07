@@ -84,7 +84,7 @@ export x25519.x25519EphemeralPair
 export signing.Seed, signing.Keypair, signing.toSeed
 export signing.keypair, signing.sign
 export signing.wipe
-export signing.public, signing.toBytes
+export signing.public, signing.toSeedBytes
 # Neither `Seed` nor `X25519StaticSecret`/`X25519EphemeralSecret`/
 # `X25519Shared` has an `==` at all (RFC-002 slice 1 removed `Seed`'s old
 # test/tooling-only one): all four hold secret material, so this library

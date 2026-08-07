@@ -9,9 +9,12 @@
 ## masking (feCSwap, marked `{.noinline.}` so the C compiler can't
 ## re-introduce a branch by inlining it into a context where the masking
 ## simplifies away), secrets live in fixed-size stack arrays, Nim's runtime
-## checks are disabled in the core, and the clamped secret copy is wiped
-## via `ct.wipe` (volatile stores + compiler barrier — RFC-001 slice 8)
-## once the ladder is done with it. The constant-time discipline above is
+## checks are disabled in the core, and every secret-derived intermediate
+## -- the clamped scalar copy, the ladder's own accumulators/temporaries,
+## and the raw DH output (round-3 finding A1, extending RFC-001 slice 8's
+## original clamped-scalar-only wipe) -- is wiped via `ct.wipe` (volatile
+## stores + compiler barrier) once the ladder is done with it. The
+## constant-time discipline above is
 ## backed by `tests/ct/`'s dudect harness, which covers this module's own
 ## secret-holding call shapes directly (`x25519Base`, the ephemeral
 ## construct+consume path, and the static-secret fixed-vs-random DH path
@@ -76,6 +79,7 @@
 import std/[hashes, options, sysrand]
 import sello/field
 import sello/private/ct
+import sello/private/secret_hooks
 
 type
   X25519Public* = distinct array[32, byte]
@@ -155,30 +159,24 @@ type
 ## Type hooks must be declared immediately after the type they attach to,
 ## before anything else touches the type by value -- see signing.nim's
 ## module doc comment for why (Nim may otherwise synthesize a default
-## hook first and reject an explicit one declared later).
+## hook first and reject an explicit one declared later). The
+## `secretHooks*`/`secretHooksMoveOnly*` templates below (round-3 finding
+## A5, `sello/private/secret_hooks`) expand to exactly the hand-written
+## `zeroize<Type>`/`=destroy`/`=copy` shape this comment used to introduce
+## directly for all three types here -- see that module's doc comment for
+## the full "why a template, why `{.dirty.}`" writeup.
 
-func zeroizeX25519StaticSecret(s: var X25519StaticSecret) {.inline.} =
-  ct.wipe(s.bytes)
+## Copyable (no `=copy` restriction, unlike the ephemeral secret below):
+## every copy self-wipes independently at its own scope exit.
+secretHooks(X25519StaticSecret, zeroizeX25519StaticSecret, bytes)
 
-proc `=destroy`(s: var X25519StaticSecret) =
-  zeroizeX25519StaticSecret(s)
+## Copyable, same reasoning as `X25519StaticSecret` above.
+secretHooks(X25519Shared, zeroizeX25519Shared, bytes)
 
-func zeroizeX25519Shared(s: var X25519Shared) {.inline.} =
-  ct.wipe(s.bytes)
-
-proc `=destroy`(s: var X25519Shared) =
-  zeroizeX25519Shared(s)
-
-func zeroizeX25519EphemeralSecret(s: var X25519EphemeralSecret) {.inline.} =
-  ct.wipe(s.bytes)
-
-proc `=destroy`(s: var X25519EphemeralSecret) =
-  zeroizeX25519EphemeralSecret(s)
-
-proc `=copy`(dst: var X25519EphemeralSecret; src: X25519EphemeralSecret) {.error.}
-  ## Move-only, the `Keypair`/RFC-001 slice 5 pattern: a second live copy
-  ## of a single-use secret is a compile error, not a hygiene footnote.
-  ## Legitimate transfers move (`x25519`'s `sink` parameter below).
+## Move-only, the `Keypair`/RFC-001 slice 5 pattern: a second live copy of
+## a single-use secret is a compile error, not a hygiene footnote.
+## Legitimate transfers move (`x25519`'s `sink` parameter below).
+secretHooksMoveOnly(X25519EphemeralSecret, zeroizeX25519EphemeralSecret, bytes)
 
 func toX25519StaticSecret*(bytes: array[32, byte]): X25519StaticSecret {.inline.} =
   ## Explicit construction from raw bytes (e.g. straight out of a CSPRNG,
@@ -257,50 +255,87 @@ func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
   var z3 = FeOne
   var swap = false
 
-  for pos in countdown(254, 0):
-    let bit = ((e[pos shr 3] shr (pos and 7)) and 1) != 0
-    swap = swap xor bit
+  # Per-iteration temporaries hoisted out of the loop below (round-3
+  # finding A1): each iteration fully overwrites every field via
+  # feAdd/feSub/feMul before it is ever read, so hoisting the declaration
+  # changes no computed value -- it exists so the secret-derived
+  # intermediate state the FINAL iteration leaves in these stack slots can
+  # be wiped once, below, alongside x2/z2/x3/z3/zInv, instead of going out
+  # of scope 255 times with no wipe at all (the gap this finding closes:
+  # `backend.nim`'s secrets never had this gap, since its secrets are all
+  # declared once at function scope already).
+  var a, aa, b, bb, ee, c, d, da, cb, t: Fe
+  var zInv: Fe
+
+  # `try`/`finally` (defensive, currently unreachable: every operation in
+  # the loop and tail below is fixed-size-array field arithmetic under
+  # `checks: off`, with no raising op reachable) -- same net
+  # `private/backend.nim`'s secret-holding functions use, so an unwind
+  # between a secret's creation and its explicit wipe below cannot leave
+  # it live in this stack frame.
+  try:
+    for pos in countdown(254, 0):
+      let bit = ((e[pos shr 3] shr (pos and 7)) and 1) != 0
+      swap = swap xor bit
+      feCSwap(x2, x3, swap)
+      feCSwap(z2, z3, swap)
+      swap = bit
+
+      # One ladder step (RFC 7748 §5 pseudocode). Uses the identity
+      # AA + 121665*E == BB + 121666*E to reuse feMul121666.
+      feAdd(a, x2, z2)          # A  = x2 + z2
+      feSq(aa, a)               # AA = A^2
+      feSub(b, x2, z2)          # B  = x2 - z2
+      feSq(bb, b)               # BB = B^2
+      feSub(ee, aa, bb)         # E  = AA - BB
+      feAdd(c, x3, z3)          # C  = x3 + z3
+      feSub(d, x3, z3)          # D  = x3 - z3
+      feMul(da, d, a)           # DA = D*A
+      feMul(cb, c, b)           # CB = C*B
+      feAdd(t, da, cb)
+      feSq(x3, t)               # x3 = (DA + CB)^2
+      feSub(t, da, cb)
+      feSq(t, t)
+      feMul(z3, x1, t)          # z3 = x1 * (DA - CB)^2
+      feMul(x2, aa, bb)         # x2 = AA * BB
+      feMul121666(t, ee)
+      feAdd(t, bb, t)           # BB + 121666*E
+      feMul(z2, ee, t)          # z2 = E * (BB + 121666*E)
+
     feCSwap(x2, x3, swap)
     feCSwap(z2, z3, swap)
-    swap = bit
 
-    # One ladder step (RFC 7748 §5 pseudocode). Uses the identity
-    # AA + 121665*E == BB + 121666*E to reuse feMul121666.
-    var a, aa, b, bb, ee, c, d, da, cb, t: Fe
-    feAdd(a, x2, z2)          # A  = x2 + z2
-    feSq(aa, a)               # AA = A^2
-    feSub(b, x2, z2)          # B  = x2 - z2
-    feSq(bb, b)               # BB = B^2
-    feSub(ee, aa, bb)         # E  = AA - BB
-    feAdd(c, x3, z3)          # C  = x3 + z3
-    feSub(d, x3, z3)          # D  = x3 - z3
-    feMul(da, d, a)           # DA = D*A
-    feMul(cb, c, b)           # CB = C*B
-    feAdd(t, da, cb)
-    feSq(x3, t)               # x3 = (DA + CB)^2
-    feSub(t, da, cb)
-    feSq(t, t)
-    feMul(z3, x1, t)          # z3 = x1 * (DA - CB)^2
-    feMul(x2, aa, bb)         # x2 = AA * BB
-    feMul121666(t, ee)
-    feAdd(t, bb, t)           # BB + 121666*E
-    feMul(z2, ee, t)          # z2 = E * (BB + 121666*E)
+    feInvert(zInv, z2)
+    feMul(x2, x2, zInv)
+    result = feToBytes(x2)
 
-  feCSwap(x2, x3, swap)
-  feCSwap(z2, z3, swap)
-
-  var zInv: Fe
-  feInvert(zInv, z2)
-  feMul(x2, x2, zInv)
-  result = feToBytes(x2)
-
-  # RFC-001 slice 8: this was previously a plain `for i in 0 ..< 32:
-  # e[i] = 0` loop -- confirmed by disassembly at -d:release to be an
-  # unbarriered dead store, entirely absent from the emitted machine code,
-  # because nothing reads `e` again after this point. `ct.wipe` survives
-  # (re-verified by disassembly after this fix): volatile per-byte stores
-  # plus the memory barrier compile to literal store instructions.
-  ct.wipe(e)
+    # RFC-001 slice 8: this was previously a plain `for i in 0 ..< 32:
+    # e[i] = 0` loop -- confirmed by disassembly at -d:release to be an
+    # unbarriered dead store, entirely absent from the emitted machine code,
+    # because nothing reads `e` again after this point. `ct.wipe` survives
+    # (re-verified by disassembly after this fix): volatile per-byte stores
+    # plus the memory barrier compile to literal store instructions.
+    #
+    # Round-3 finding A1 extends this from `e` alone (the clamped scalar
+    # copy) to every OTHER secret-derived accumulator/temporary the ladder
+    # touches -- `x2`/`z2`/`x3`/`z3`/`zInv` and the per-iteration
+    # temporaries hoisted above -- bringing this module to the same "wipe
+    # every secret intermediate, not just the input" discipline
+    # `private/backend.nim` already carries. `x1` (derived from `u`, the
+    # PUBLIC peer/base coordinate) and `result` (the caller's own return
+    # value, which the `x25519`/`x25519Base` callers below wipe or hand
+    # back per their own contracts) are deliberately NOT wiped here.
+    ct.wipe(e)
+    ct.wipe(x2); ct.wipe(z2); ct.wipe(x3); ct.wipe(z3)
+    ct.wipe(a); ct.wipe(aa); ct.wipe(b); ct.wipe(bb); ct.wipe(ee)
+    ct.wipe(c); ct.wipe(d); ct.wipe(da); ct.wipe(cb); ct.wipe(t)
+    ct.wipe(zInv)
+  finally:
+    ct.wipe(e)
+    ct.wipe(x2); ct.wipe(z2); ct.wipe(x3); ct.wipe(z3)
+    ct.wipe(a); ct.wipe(aa); ct.wipe(b); ct.wipe(bb); ct.wipe(ee)
+    ct.wipe(c); ct.wipe(d); ct.wipe(da); ct.wipe(cb); ct.wipe(t)
+    ct.wipe(zInv)
 
 {.pop.}
 
@@ -373,13 +408,40 @@ func x25519*(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Share
   ## result is all zero -- the peer supplied a small-order point, and the
   ## "shared secret" would be attacker-known (RFC 7748 §6.1 zero-output
   ## check). Callers need no further checks.
-  let s = ladder(secret.bytes, array[32, byte](peer))
+  ##
+  ## **Why `Option`, not `bool` (round-3 finding A8; contrast
+  ## `ed25519.verify`'s plain `bool`):** `verify` is a TOTAL PREDICATE over
+  ## public data -- every input has a well-defined true/false answer, so a
+  ## `bool` return loses nothing. `x25519` is a PARTIAL FUNCTION: for a
+  ## small-order peer point there is no well-defined shared secret to
+  ## return at all (the RFC 7748 §6.1 zero-output case), so a `bool` would
+  ## have nowhere to put the "yes, and here it is" payload for the success
+  ## case, and returning an all-zero `X25519Shared` on failure would hand
+  ## callers a value indistinguishable from a genuine (if degenerate)
+  ## shared secret. `Option[X25519Shared]` makes the partiality explicit in
+  ## the type instead of relying on a sentinel value or a doc comment.
+  ##
+  ## `s`, the raw ladder output, is secret-derived even on the `none` path
+  ## (the peer's small-order point is public, but `s` is still this
+  ## caller's own DH output before the zero-check inspects it) -- wiped via
+  ## `ct.wipe` (RFC-001 slice 8's one audited primitive, round-3 finding
+  ## A1) on BOTH branches below, once its bytes are copied into the `some`
+  ## branch's `X25519Shared` (the copy already happened by then, so the
+  ## wipe cannot affect the returned value). `try`/`finally` (defensive,
+  ## currently unreachable: neither the `or`-accumulation loop nor the
+  ## record-construction copy below can raise) so the wipe fires regardless
+  ## of which branch runs -- the same net `backend.nim`'s secret-holding
+  ## functions use.
+  var s = ladder(secret.bytes, array[32, byte](peer))
   var acc: byte = 0
   for b in s: acc = acc or b
-  if acc == 0:
-    none[X25519Shared]()
-  else:
-    some(X25519Shared(bytes: s))
+  try:
+    if acc == 0:
+      result = none[X25519Shared]()
+    else:
+      result = some(X25519Shared(bytes: s))
+  finally:
+    ct.wipe(s)
 
 func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25519Shared] =
   ## Shared-secret computation that CONSUMES the ephemeral secret: `sink`
@@ -432,13 +494,22 @@ func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25
   ## proc's own doc example use. `move()` is Nim's own standard idiom for
   ## "I assert this is safe," the same escape hatch every Nim ARC/ORC
   ## move-only type shares; it is not a sello-specific hole.
-  let s = ladder(secret.bytes, array[32, byte](peer))
+  ##
+  ## `s` (the raw ladder output) is wiped via `ct.wipe` on both branches,
+  ## same as the `X25519StaticSecret` overload above -- see that overload's
+  ## doc comment for the `Option`-vs-`bool` rationale (round-3 finding A8)
+  ## and the try/finally wipe rationale (round-3 finding A1), not repeated
+  ## here.
+  var s = ladder(secret.bytes, array[32, byte](peer))
   var acc: byte = 0
   for b in s: acc = acc or b
-  if acc == 0:
-    none[X25519Shared]()
-  else:
-    some(X25519Shared(bytes: s))
+  try:
+    if acc == 0:
+      result = none[X25519Shared]()
+    else:
+      result = some(X25519Shared(bytes: s))
+  finally:
+    ct.wipe(s)
 
 # ---------------------------------------------------------------------------
 # Public wipe

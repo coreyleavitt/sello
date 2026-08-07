@@ -222,12 +222,12 @@ suite "scalar property: geScalarmultBase vs scalarmultVartime agreement":
   property "clamped domain: geScalarmultBase(s) == [s]B (scalarmultVartime)":
     with propertySettings50
     given s in clampedScalar()
-    ensure pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+    ensure pointEncode(geScalarmultBase(toSecretScalar(s))) == refBaseMultEncoded(s)
 
   property "reduced-mod-L domain: geScalarmultBase(s) == [s]B (scalarmultVartime)":
     with propertySettings50
     given s in reducedScalar()
-    ensure pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+    ensure pointEncode(geScalarmultBase(toSecretScalar(s))) == refBaseMultEncoded(s)
 
 suite "scalar property: geScalarmultBase is additive over scMulAdd":
   # a + b mod L is computed via the already-audited scMulAdd(a, 1, b) =
@@ -244,10 +244,10 @@ suite "scalar property: geScalarmultBase is additive over scMulAdd":
     given a in reducedScalar(), b in reducedScalar()
     var one: array[32, byte]
     one[0] = 1
-    let aPlusB = scMulAdd(a, one, b)
-    let lhs = geScalarmultBase(aPlusB)
-    let pa = geScalarmultBase(a)
-    let pb = geScalarmultBase(b)
+    let aPlusB = scMulAdd(a, toSecretScalar(one), toSecretScalar(b))
+    let lhs = geScalarmultBase(toSecretScalar(aPlusB))
+    let pa = geScalarmultBase(toSecretScalar(a))
+    let pb = geScalarmultBase(toSecretScalar(b))
     var cachedPb: GeCached
     geP3ToCached(cachedPb, pb)
     var sum: GeP1P1
@@ -272,7 +272,7 @@ suite "scalar/ed25519 property: pointEncode/pointDecode round-trip":
   property "pointDecode(pointEncode(p)) round-trips to the identical encoding, for p = geScalarmultBase(s)":
     with propertySettings50
     given s in clampedScalar()
-    let p = geScalarmultBase(s)
+    let p = geScalarmultBase(toSecretScalar(s))
     let encoded = pointEncode(p)
     let decoded = pointDecode(encoded)
     ensure decoded.isSome

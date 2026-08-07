@@ -150,9 +150,9 @@ Hold `Keypair`/`Seed` as stack values, never boxed in a `seq` or `ref` --
 that's what lets their destructors guarantee the wipe. Both `Keypair` and
 `Seed` are move-only (`=copy` is a compile error): pass them by value and
 let Nim move them; a second live copy of a secret is a bug the compiler
-catches for you at compile time. `toBytes(kp)` returns the keypair's raw
-seed bytes for persistence -- the returned copy is caller-owned and not
-itself wiped.
+catches for you at compile time. `toSeedBytes(kp)` returns the keypair's
+raw seed bytes for persistence -- the returned copy is caller-owned and
+not itself wiped.
 
 `kp.sign(msg)` takes the keypair first (`sig = kp.sign(msg)`) and
 `pk.verify(msg, sig)` takes the public key first, matching RFC 8032's own

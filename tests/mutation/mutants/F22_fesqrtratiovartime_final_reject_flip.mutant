@@ -2,9 +2,9 @@ id: F22
 target: src/sello/field.nim
 desc: feSqrtRatioVartime: final reject condition inverted, 'if feIsNonZero(vxx): return none[Fe]()' -> 'if not feIsNonZero(vxx): return none[Fe]()' (the second check, after the sqrt(-1) retry) -- rejects the genuinely valid sqrt-ratio cases (where the retried root now checks out) and accepts the genuinely invalid ones (no square root exists).
 ====OLD====
-    if feIsNonZero(vxx):
+    if feIsNonZeroVartime(vxx):
       return none[Fe]()
 ====NEW====
-    if not feIsNonZero(vxx):
+    if not feIsNonZeroVartime(vxx):
       return none[Fe]()
 ====END====

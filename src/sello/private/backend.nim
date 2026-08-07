@@ -46,13 +46,30 @@ import sello/private/ct
 
 {.push checks: off.}
 
-func derivePublic*(seed: array[32, byte]): array[32, byte] =
+proc derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## RFC 8032 §5.1.5 public-key derivation: A = clamp(SHA-512(seed)[0..31])
   ## * B, canonically encoded. `seed` and the intermediate hash/scalar are
   ## secret; both live in fixed-size stack arrays with zero heap
   ## allocation and are wiped via `ct.wipe` (volatile stores + compiler
   ## barrier — RFC-001 slice 8) once no longer needed, including the
   ## `Sha2Context` itself, which buffers the secret seed internally.
+  ##
+  ## `proc`, not `func` (round-3 finding A4): this and `signDetached` below
+  ## were already effect-free in practice and compiled fine as `func`, but
+  ## `signing.nim`'s callers must be able to call either this pure backend
+  ## OR `private/backend_sodium.nim`'s FFI-backed adapter through the same
+  ## one-line-import-swap dispatch (see `signing.nim`'s module doc) -- and
+  ## the sodium adapter's equivalents have real, un-hideable side effects
+  ## (global `sodium_init` state, FFI calls) once A4 removes the false
+  ## `{.cast(noSideEffect).}` that used to paper over that. Both backends'
+  ## contract must match exactly, so both are `proc`.
+  ##
+  ## `a`, the clamped secret key scalar, is `SecretScalar`-typed (round-3
+  ## finding A3) from the point it is fully assembled -- built up in the
+  ## explicitly-named `aBytes` scratch array first (clamping mutates bytes
+  ## in place, which `SecretScalar` does not expose), then wrapped via
+  ## `toSecretScalar` for its one consuming call into `geScalarmultBase`.
+  ## Both `aBytes` and `a` are secret and both get wiped below.
   ##
   ## The whole body runs under one `try`/`finally` (RFC-001 ledger finding
   ## 18, defensive, currently unreachable): every secret declared below is
@@ -65,26 +82,30 @@ func derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## no-op there.
   var h: array[64, byte]
   var sha: sha512
-  var a: array[32, byte]
+  var aBytes: array[32, byte]
+  var a: SecretScalar
   try:
     sha.init()
     sha.update(seed)
     sha.finish(h)
     ct.wipe(sha)
 
-    for i in 0 ..< 32: a[i] = h[i]
-    clampScalar(a)
+    for i in 0 ..< 32: aBytes[i] = h[i]
+    clampScalar(aBytes)
+    a = toSecretScalar(aBytes)
 
     result = pointEncode(geScalarmultBase(a))
 
     ct.wipe(h)
+    ct.wipe(aBytes)
     ct.wipe(a)
   finally:
     ct.wipe(sha)
     ct.wipe(h)
+    ct.wipe(aBytes)
     ct.wipe(a)
 
-func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
+proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
                     msg: openArray[byte]): array[64, byte] =
   ## RFC 8032 §5.1.6 detached signature (Ed25519: no context, no prehash):
   ##   h = SHA-512(seed); a = clamp(h[0..31]); prefix = h[32..63]
@@ -95,7 +116,14 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   ##   S = scMulAdd(k, a, r)
   ##   signature = R || S
   ## `seed`, `a`, `prefix`, `r`, and `h` are all secret; every one lives in a
-  ## fixed-size stack array with zero heap allocation.
+  ## fixed-size stack array with zero heap allocation. `a` and `r` are
+  ## `SecretScalar`-typed once fully assembled (round-3 finding A3, same
+  ## `<x>Bytes` scratch-then-wrap register as `derivePublic` above) --
+  ## `scMulAdd`'s and `geScalarmultBase`'s secret-scalar parameters accept
+  ## only `SecretScalar`, not a bare `array[32, byte]`, so this function
+  ## and `scalarmultVartime` (the verify-only vartime path, never called
+  ## from here) cannot be confused for each other at a type-checker level,
+  ## not merely by naming convention.
   ##
   ## `publicBytes` (RFC-001 ledger finding 13): the caller-supplied public
   ## key, used as `A` directly instead of re-deriving
@@ -122,19 +150,22 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   ## happy path.
   var h: array[64, byte]
   var sha: sha512
-  var a: array[32, byte]
+  var aBytes: array[32, byte]
+  var a: SecretScalar
   var prefix: array[32, byte]
   var nonceHash: array[64, byte]
   var nonceSha: sha512
-  var r: array[32, byte]
+  var rBytes: array[32, byte]
+  var r: SecretScalar
   try:
     sha.init()
     sha.update(seed)
     sha.finish(h)
     ct.wipe(sha)
 
-    for i in 0 ..< 32: a[i] = h[i]
-    clampScalar(a)
+    for i in 0 ..< 32: aBytes[i] = h[i]
+    clampScalar(aBytes)
+    a = toSecretScalar(aBytes)
 
     for i in 0 ..< 32: prefix[i] = h[32 + i]
     ct.wipe(h)
@@ -178,7 +209,8 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
     ct.wipe(nonceSha)
     ct.wipe(prefix)
 
-    scReduce(r, nonceHash)
+    scReduce(rBytes, nonceHash)
+    r = toSecretScalar(rBytes)
     ct.wipe(nonceHash)
 
     let R = pointEncode(geScalarmultBase(r))
@@ -188,15 +220,19 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
     for i in 0 ..< 32: result[i] = R[i]
     for i in 0 ..< 32: result[32 + i] = S[i]
 
+    ct.wipe(aBytes)
     ct.wipe(a)
+    ct.wipe(rBytes)
     ct.wipe(r)
   finally:
     ct.wipe(sha)
     ct.wipe(h)
+    ct.wipe(aBytes)
     ct.wipe(a)
     ct.wipe(prefix)
     ct.wipe(nonceHash)
     ct.wipe(nonceSha)
+    ct.wipe(rBytes)
     ct.wipe(r)
 
 {.pop.}

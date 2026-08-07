@@ -61,7 +61,7 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
   var x = xOpt.get
 
   # RFC 8032 §5.1.3 step 4: x = 0 with sign bit set is invalid.
-  if sign and not feIsNonZero(x):
+  if sign and not feIsNonZeroVartime(x):
     return none[GeP3]()
 
   if feIsNegative(x) != sign:

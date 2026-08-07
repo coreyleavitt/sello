@@ -17,6 +17,56 @@ import sello/field
 # ---------------------------------------------------------------------------
 
 type
+  SecretScalar* = distinct array[32, byte]
+    ## A scalar that must never reach `scalarmultVartime` (round-3 finding
+    ## A3). Before this type existed, "never pass the signer's secret
+    ## scalar to `scalarmultVartime`" was enforced by nothing but a naming
+    ## convention (the `Vartime` suffix, RFC-001 finding 8) and a doc
+    ## comment -- a plain `array[32, byte]` is structurally identical
+    ## whether it holds a public nonce-derived digest or a secret signing
+    ## key, so nothing stopped a future refactor from silently handing one
+    ## to the other. `SecretScalar` closes that at the type level:
+    ## `scalarmultVartime` (below) accepts only a bare `array[32, byte]`,
+    ## with no converter to/from `SecretScalar`, so passing a
+    ## `SecretScalar` where it expects a scalar is an ordinary Nim type
+    ## mismatch -- a compile error, not a discipline that has to hold by
+    ## habit. Pinned as a regression by
+    ## `tests/unit/fixtures/reject_secretscalar_vartime.nim`.
+    ##
+    ## **Home, and why not elsewhere (recorded per this finding's own
+    ## request for the reasoning):** lives here, in `scalar.nim`, rather
+    ## than a shared leaf like `wire.nim`/`wipe.nim`. Those two leaves hold
+    ## PUBLIC wire types and a generic wipe utility respectively -- neither
+    ## is the right home for a type whose entire purpose is gating access
+    ## to this file's OWN `geScalarmultBase`/`scMulAdd`. `field.nim` (below
+    ## this file) was also considered, since `clampScalar` and
+    ## `x25519.nim`'s ladder both handle secret scalars too -- but
+    ## `x25519.nim` never calls `scalarmultVartime` or `geScalarmultBase`
+    ## at all (its Montgomery ladder is a wholly separate RFC 7748
+    ## algorithm on `field.nim` alone, with no vartime group-op path to
+    ## accidentally reach), so it has no compile-time hazard this type
+    ## needs to close, and `x25519.nim`'s own module doc/CLAUDE.md
+    ## architecture note is explicit that it "must remain a
+    ## `field.nim`-only consumer" -- adding a `scalar.nim` dependency there
+    ## just to share this type would cost a real layering rule for zero
+    ## benefit. `SecretScalar` stays scoped to exactly the two functions
+    ## (`geScalarmultBase`, `scMulAdd`'s secret positions) and the one
+    ## caller module (`private/backend.nim`) it actually protects.
+    ##
+    ## **`recodeScalarRadix16` and the Montgomery ladder deliberately stay
+    ## byte-level**, below this type's boundary, not wrapped in
+    ## `SecretScalar` themselves: `recodeScalarRadix16` is a pure
+    ## bit-recoding leaf with no group-op call of its own (it cannot reach
+    ## `scalarmultVartime` no matter what type its input has) and is
+    ## exercised directly, over plain `array[32, byte]` scalars, by
+    ## white-box tests (`test_scalar.nim`) and the Z3 harness
+    ## (`tests/verify/symex_recode.nim`) that have no reason to know about
+    ## a signing-specific secrecy type; threading `SecretScalar` through it
+    ## would widen the type's footprint without tightening anything it
+    ## actually guards. `geScalarmultBase` is where the boundary is drawn
+    ## instead: it is the actual entry point `backend.nim` calls with a
+    ## real secret, so that is where the type does its one job.
+
   GeP2* = object
     x*, y*, z*: Fe
 
@@ -28,6 +78,22 @@ type
 
   GeCached* = object
     yPlusX*, yMinusX*, z*, t2d*: Fe
+
+func toSecretScalar*(bytes: array[32, byte]): SecretScalar {.inline.} =
+  ## Explicit, grep-able construction -- the point where a byte array
+  ## becomes type-tracked as a secret scalar, mirroring
+  ## `wire.toPublicKey`/`signing.toSeed`'s naming convention.
+  SecretScalar(bytes)
+
+func secretScalarBytes*(s: SecretScalar): array[32, byte] {.inline.} =
+  ## Explicit, grep-able unwrap. A named accessor rather than a bare
+  ## `array[32, byte](s)` cast at each call site (round-3 finding A3(c)):
+  ## every place that genuinely needs the raw bytes back (this file's own
+  ## `geScalarmultBase`/`scMulAdd`, or a future caller with a real reason)
+  ## greps for this one name instead of an invisible cast scattered through
+  ## the codebase -- the same "one audited door" register as
+  ## `field.feFromLimbs`/`wire.toBytes`.
+  array[32, byte](s)
 
 # ---------------------------------------------------------------------------
 # Curve constants (ref10)
@@ -332,7 +398,7 @@ func recodeScalarRadix16*(s: array[32, byte]): array[64, int32] =
     result[i] -= carry shl 4
   result[63] += carry
 
-func geScalarmultBase*(s: array[32, byte]): GeP3 =
+func geScalarmultBase*(s: SecretScalar): GeP3 =
   ## r = [s]B — fixed-base scalar multiplication via the compile-time
   ## GeBaseTable and cmovCached's constant-time select. Ports ref10's
   ## ge_scalarmult_base structure (public domain): recode into signed
@@ -347,6 +413,15 @@ func geScalarmultBase*(s: array[32, byte]): GeP3 =
   ## comment; do not additionally require clamped shape. Branchless on
   ## `s`: recoding is carry-propagation arithmetic and every table lookup
   ## goes through cmovCached's full 8-entry scan.
+  ##
+  ## `s: SecretScalar`, not a bare `array[32, byte]` (round-3 finding A3):
+  ## this is the one entry point `private/backend.nim` hands a real secret
+  ## scalar to, so this is where the type boundary belongs -- see
+  ## `SecretScalar`'s own doc comment above for the full home/scope
+  ## reasoning. `secretScalarBytes(s)` below is the explicit, grep-able
+  ## unwrap for the two places genuinely below the type boundary
+  ## (the bit-255 precondition check, `recodeScalarRadix16`'s byte-level
+  ## input).
   # Debug-only precondition check (RFC-002 slice 2 item 3a): plain
   # `assert`, meant to be absent from the dudect-measured `-d:release`
   # build (and every downstream consumer's release build) entirely, so it
@@ -370,11 +445,12 @@ func geScalarmultBase*(s: array[32, byte]): GeP3 =
   # assert can actually fire. (Same empirical-deviation register as
   # `signing.Seed`'s `distinct array` fallback -- see that module's doc
   # comment.)
+  let sBytes = secretScalarBytes(s)
   when not defined(release):
     {.push assertions: on.}
-    assert (s[31] and 0x80'u8) == 0, "geScalarmultBase: bit 255 of s must be 0"
+    assert (sBytes[31] and 0x80'u8) == 0, "geScalarmultBase: bit 255 of s must be 0"
     {.pop.}
-  let digits = recodeScalarRadix16(s)
+  let digits = recodeScalarRadix16(sBytes)
 
   var acc: GeP3
   acc.x = FeZero; acc.y = FeOne; acc.z = FeOne; acc.t = FeZero
@@ -665,15 +741,27 @@ func scIsCanonical*(s: array[32, byte]): bool =
     if s[i] > L[i]: return false
   return false
 
-func scMulAdd*(a, b, c: array[32, byte]): array[32, byte] =
+func scMulAdd*(a: array[32, byte]; bSecret, cSecret: SecretScalar): array[32, byte] =
   ## s = (a*b + c) mod L. Ported from ref10 sc_muladd (public domain;
   ## also shipped as libsodium's sc25519_muladd). Same radix-2^21,
   ## 12-limb decomposition as scReduce, but here the limbs come straight
   ## from 32-byte inputs (not a 64-byte hash) and are combined via a full
   ## schoolbook multiply before the same carry-propagation/reduction tail.
-  ## a, b are secret in the sign path (the nonce r and clamped scalar a);
-  ## this function indexes fixed-size arrays at compile-time-constant
-  ## offsets only, so checks-off carries no additional CT burden here.
+  ## `b`/`c` are secret in the real sign path (`private/backend.nim` calls
+  ## this as `scMulAdd(k, a, r)`: `a` here is the PUBLIC challenge scalar
+  ## `k`; `b`/`c` bind to the clamped secret key scalar `a` and the secret
+  ## nonce `r` respectively) -- typed `SecretScalar` accordingly (round-3
+  ## finding A3), while the public multiplier stays a bare
+  ## `array[32, byte]`. `bSecret`/`cSecret` are unwrapped once, right below,
+  ## into plain-byte `let b`/`c` shadows: the rest of this function's body
+  ## is otherwise the untouched ref10 port (the same `a0..a11`/`b0..b11`/
+  ## `c0..c11` limb extraction every other consumer of this arithmetic
+  ## already relies on byte-for-byte), so the `SecretScalar` boundary costs
+  ## nothing but these two lines. This function indexes fixed-size arrays
+  ## at compile-time-constant offsets only, so checks-off carries no
+  ## additional CT burden here.
+  let b = secretScalarBytes(bSecret)
+  let c = secretScalarBytes(cSecret)
   let a0  = 0x1FFFFF'i64 and load3(a, 0)
   let a1  = 0x1FFFFF'i64 and (load4(a, 2) shr 5)
   let a2  = 0x1FFFFF'i64 and (load3(a, 5) shr 2)

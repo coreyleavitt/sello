@@ -5,7 +5,7 @@
 ## oracle tests/vectors/gen_scmuladd_vectors.py (Python bigints, independent
 ## of sello's own arithmetic) into tests/vectors/scmuladd_test.json.
 
-import std/[unittest, json, strutils]
+import std/[unittest, json, strutils, osproc, os]
 import nimcrypto/sha2
 import sello/scalar
 import sello/field
@@ -41,7 +41,7 @@ suite "scMulAdd":
     a[0] = 1
     b[0] = 1
     expected[0] = 1
-    check scMulAdd(a, b, c) == expected
+    check scMulAdd(a, toSecretScalar(b), toSecretScalar(c)) == expected
 
   test "27 fixed joint combinations of (a, b, c) in {0, 1, L-1}^3":
     let root = parseJson(rawVectors)
@@ -51,7 +51,7 @@ suite "scMulAdd":
       let b = hexToArray32(v["b"].getStr)
       let c = hexToArray32(v["c"].getStr)
       let expected = hexToArray32(v["expected"].getStr)
-      check scMulAdd(a, b, c) == expected
+      check scMulAdd(a, toSecretScalar(b), toSecretScalar(c)) == expected
       inc checked
     check checked == 27
 
@@ -64,7 +64,7 @@ suite "scMulAdd":
       let b = hexToArray32(v["b"].getStr)
       let c = hexToArray32(v["c"].getStr)
       let expected = hexToArray32(v["expected"].getStr)
-      check scMulAdd(a, b, c) == expected
+      check scMulAdd(a, toSecretScalar(b), toSecretScalar(c)) == expected
       inc checked
     check checked == randomGroup["count"].getInt
     check checked >= 1000
@@ -235,7 +235,7 @@ suite "geScalarmultBase (RFC-001 slice 4)":
   test "[1]B equals the base point itself (RED anchor vector)":
     var s: array[32, byte]
     s[0] = 1
-    check pointEncode(geScalarmultBase(s)) == pointEncode(geBasePoint())
+    check pointEncode(geScalarmultBase(toSecretScalar(s))) == pointEncode(geBasePoint())
 
   test "clamped domain: RFC 8032 test-vector-1 seed, expanded and clamped":
     # RFC 8032 Section 7.1 TEST 1 secret key seed (also tv1_sk in
@@ -255,14 +255,14 @@ suite "geScalarmultBase (RFC-001 slice 4)":
     var a: array[32, byte]
     for i in 0 ..< 32: a[i] = expanded[i]
     clampScalar(a)
-    check pointEncode(geScalarmultBase(a)) == refBaseMultEncoded(a)
+    check pointEncode(geScalarmultBase(toSecretScalar(a))) == refBaseMultEncoded(a)
 
   test "clamped domain: 100 random clamped scalars match scalarmultVartime":
     var checked = 0
     for i in 0'u64 ..< 100:
       var s = prngScalar32(i)
       clampScalar(s)
-      check pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+      check pointEncode(geScalarmultBase(toSecretScalar(s))) == refBaseMultEncoded(s)
       inc checked
     check checked == 100
 
@@ -272,14 +272,14 @@ suite "geScalarmultBase (RFC-001 slice 4)":
     clampScalar(s)
     check s[0] == 0xF8
     check s[31] == 0x7F
-    check pointEncode(geScalarmultBase(s)) == refBaseMultEncoded(s)
+    check pointEncode(geScalarmultBase(toSecretScalar(s))) == refBaseMultEncoded(s)
 
   test "r-shaped domain: 100 random reduced-mod-L scalars match scalarmultVartime":
     var checked = 0
     for i in 0'u64 ..< 100:
       let r = prngReducedScalar32(i)
       check scIsCanonical(r)
-      check pointEncode(geScalarmultBase(r)) == refBaseMultEncoded(r)
+      check pointEncode(geScalarmultBase(toSecretScalar(r))) == refBaseMultEncoded(r)
       inc checked
     check checked == 100
 
@@ -287,7 +287,7 @@ suite "geScalarmultBase (RFC-001 slice 4)":
     for amount in [1, 2, 3, 17, 255]:
       let r = decrementLE(L, amount)
       check scIsCanonical(r)
-      check pointEncode(geScalarmultBase(r)) == refBaseMultEncoded(r)
+      check pointEncode(geScalarmultBase(toSecretScalar(r))) == refBaseMultEncoded(r)
 
 suite "recodeScalarRadix16 (RFC-001 slice 4, white-box)":
   test "digit range is asymmetric: [-8,7] for positions 0..62, [-8,8] for 63":
@@ -381,3 +381,40 @@ suite "geP2Dbl (RFC-002 slice 5 finding: single-call isolation)":
       check pointEncode(doubled) == pointEncode(expected)
       inc checked
     check checked == 100
+
+# ---------------------------------------------------------------------------
+# SecretScalar type boundary (round-3 finding A3): "a secret scalar can
+# never reach scalarmultVartime" is a compile error, not a naming
+# convention -- see SecretScalar's own doc comment above for the full
+# reasoning.
+# ---------------------------------------------------------------------------
+
+suite "SecretScalar - scalarmultVartime type boundary (compile-time)":
+  test "SecretScalar has no implicit converter to array[32, byte]":
+    ## `compiles()` CAN see this one (an ordinary type mismatch, unlike the
+    ## `=copy`/sink violations tested via subprocess elsewhere in this
+    ## suite) -- pinned directly first, cheaply, before the subprocess
+    ## fixture below re-confirms it as a literal compiler diagnostic for
+    ## consistency with this directory's established methodology.
+    check(not compiles(block:
+      var r: GeP3
+      let secretScalar = toSecretScalar(default(array[32, byte]))
+      let p = geBasePoint()
+      scalarmultVartime(r, secretScalar, p)
+    ))
+
+  test "scalarmultVartime(r, secretScalar, p) is rejected (subprocess compile)":
+    ## Same subprocess-`nim c` methodology as `test_signing.nim`'s
+    ## `Keypair`/`Seed` copy checks and `test_x25519.nim`'s ephemeral
+    ## fixtures: a real compile of a deliberately-invalid, checked-in
+    ## fixture, asserted to fail. `tests/unit/fixtures/
+    ## reject_secretscalar_vartime.nim`'s own doc comment explains why this
+    ## particular error class is ALSO visible to `compiles()` above --
+    ## included regardless, as the literal pinned diagnostic.
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_secretscalar_vartime.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_secretscalar_vartime") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "type mismatch" in output

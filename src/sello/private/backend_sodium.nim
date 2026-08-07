@@ -129,24 +129,34 @@ func toPtr(a: openArray[byte]): ptr UncheckedArray[byte] =
   ## matching RFC 8032's empty-message vector (TEST 1).
   if a.len > 0: cast[ptr UncheckedArray[byte]](unsafeAddr a[0]) else: nil
 
-func derivePublic*(seed: array[32, byte]): array[32, byte] =
+proc derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## Same contract as `backend.derivePublic`: RFC 8032 §5.1.5 public-key
   ## derivation, via `crypto_sign_seed_keypair`. The returned libsodium
   ## secret key (`seed ‖ pk`, 64 bytes) is a copy of the secret seed and is
   ## wiped via `ct.wipe` before returning.
+  ##
+  ## `proc`, not `func` (round-3 finding A4): this genuinely has side
+  ## effects (the FFI calls below, `ensureSodiumInit`'s global atomic
+  ## state), which used to be hidden from Nim's effect system by a
+  ## `{.cast(noSideEffect).}` block purely to keep `func` parity with
+  ## `backend.nim`'s pure equivalent -- a false purity claim wrapping a
+  ## genuine one, removed here. `backend.nim`'s `derivePublic`/
+  ## `signDetached` are `proc` too now, for the same reason from the other
+  ## direction: `signing.nim` dispatches to either backend through one
+  ## local name, so both sides of that dispatch must share one true
+  ## contract, not one honest and one lied-about.
   var pk: array[CryptoSignPublicKeyBytes, byte]
   var sk: array[CryptoSignSecretKeyBytes, byte]
-  {.cast(noSideEffect).}:
-    ensureSodiumInit()
-    let rc = c_crypto_sign_seed_keypair(
-      cast[ptr UncheckedArray[byte]](addr pk[0]),
-      cast[ptr UncheckedArray[byte]](addr sk[0]),
-      cast[ptr UncheckedArray[byte]](unsafeAddr seed[0]))
-    doAssert rc == 0, "crypto_sign_seed_keypair failed with rc=" & $rc
+  ensureSodiumInit()
+  let rc = c_crypto_sign_seed_keypair(
+    cast[ptr UncheckedArray[byte]](addr pk[0]),
+    cast[ptr UncheckedArray[byte]](addr sk[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr seed[0]))
+  doAssert rc == 0, "crypto_sign_seed_keypair failed with rc=" & $rc
   result = pk
   ct.wipe(sk)
 
-func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
+proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
                     msg: openArray[byte]): array[64, byte] =
   ## Same contract as `backend.signDetached` (RFC-001 ledger finding 13:
   ## both backends take the caller-supplied public key as a parameter
@@ -170,15 +180,14 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   for i in 0 ..< 32: sk[32 + i] = publicBytes[i]
   var sig: array[CryptoSignBytes, byte]
   var siglen: culonglong
-  {.cast(noSideEffect).}:
-    ensureSodiumInit()
-    let rcSign = c_crypto_sign_detached(
-      cast[ptr UncheckedArray[byte]](addr sig[0]),
-      addr siglen,
-      toPtr(msg),
-      culonglong(msg.len),
-      cast[ptr UncheckedArray[byte]](addr sk[0]))
-    doAssert rcSign == 0, "crypto_sign_detached failed with rc=" & $rcSign
+  ensureSodiumInit()
+  let rcSign = c_crypto_sign_detached(
+    cast[ptr UncheckedArray[byte]](addr sig[0]),
+    addr siglen,
+    toPtr(msg),
+    culonglong(msg.len),
+    cast[ptr UncheckedArray[byte]](addr sk[0]))
+  doAssert rcSign == 0, "crypto_sign_detached failed with rc=" & $rcSign
   # RFC-001 ledger finding 20: self-checking FFI boundary -- confirm
   # libsodium actually wrote a full 64-byte signature rather than trusting
   # rcSign == 0 alone to mean "and siglen was what we expected."
@@ -187,20 +196,21 @@ func signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   result = sig
   ct.wipe(sk)
 
-func sodiumVerifyDetached*(sig: array[64, byte]; msg: openArray[byte]; pk: array[32, byte]): bool =
+proc sodiumVerifyDetached*(sig: array[64, byte]; msg: openArray[byte]; pk: array[32, byte]): bool =
   ## Exposed for the bidirectional interop tests only (RFC-001 slice 10):
   ## calls libsodium's OWN `crypto_sign_verify_detached`, independent of
   ## `sello/ed25519.verify`, so the interop suite can confirm libsodium
   ## itself accepts signatures produced by sello's pure-Nim signer. Not
   ## part of the `derivePublic`/`signDetached` dispatch contract
   ## `signing.nim` uses -- `signing.nim` never calls this; verification is
-  ## always `sello/ed25519.verify`, on both backends.
+  ## always `sello/ed25519.verify`, on both backends. `proc`, not `func`
+  ## (round-3 finding A4) -- same real-FFI-side-effects reasoning as
+  ## `derivePublic`/`signDetached` above.
   var rc: cint
-  {.cast(noSideEffect).}:
-    ensureSodiumInit()
-    rc = c_crypto_sign_verify_detached(
-      cast[ptr UncheckedArray[byte]](unsafeAddr sig[0]),
-      toPtr(msg),
-      culonglong(msg.len),
-      cast[ptr UncheckedArray[byte]](unsafeAddr pk[0]))
+  ensureSodiumInit()
+  rc = c_crypto_sign_verify_detached(
+    cast[ptr UncheckedArray[byte]](unsafeAddr sig[0]),
+    toPtr(msg),
+    culonglong(msg.len),
+    cast[ptr UncheckedArray[byte]](unsafeAddr pk[0]))
   result = rc == 0

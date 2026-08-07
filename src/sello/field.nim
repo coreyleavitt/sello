@@ -61,16 +61,46 @@ func feFromLimbs*(limbs: array[10, int32]): Fe {.inline.} =
   ## itself stays open.
   ##
   ## Caller's obligation, restated from this module's own doc comment
-  ## above (not checked here -- checks are off for this whole file):
-  ## `limbs` must already satisfy the per-limb range invariant (limb i
-  ## even: [0, 2^26); limb i odd: [0, 2^25)) before calling this. Every
-  ## curve/field constant this codebase hand-decomposes into limbs
-  ## (`Ed25519D_Raw`, `Ed25519Gx_Raw`, `Ed25519Gy_Raw`, the sqrt(-1)
-  ## constant in this module) was verified to satisfy it at authoring
-  ## time (ref10/orlp provenance); passing anything else is a silent
-  ## wrong-arithmetic-result bug with no runtime diagnostic, exactly as
-  ## the module doc comment above already warns for direct `.limbs`
-  ## access.
+  ## above (not checked here in a release build -- checks are off for this
+  ## whole file, and the debug-only assert below is compiled out entirely
+  ## under `-d:release`): `limbs` must already satisfy the per-limb range
+  ## invariant (limb i even: [0, 2^26); limb i odd: [0, 2^25)) before
+  ## calling this. Every curve/field constant this codebase hand-decomposes
+  ## into limbs (`Ed25519D_Raw`, `Ed25519Gx_Raw`, `Ed25519Gy_Raw`, the
+  ## sqrt(-1) constant in this module) was verified to satisfy it at
+  ## authoring time (ref10/orlp provenance); passing anything else is a
+  ## silent wrong-arithmetic-result bug with no runtime diagnostic in a
+  ## release build, exactly as the module doc comment above already warns
+  ## for direct `.limbs` access.
+  ##
+  ## Debug-only precondition check (round-3 finding A6, same register as
+  ## `scalar.geScalarmultBase`'s bit-255 assert and `backend.signDetached`'s
+  ## consistency check -- see either's doc comment for the full "why not a
+  ## bare `assert`" writeup, not repeated here): `when not defined(release)`
+  ## rather than a bare `assert`, because this whole file sits under
+  ## `checks: off`, whose umbrella bundles `assertions` off unconditionally
+  ## -- a bare `assert` here would be silently compiled out even in a plain
+  ## debug build, not just under `-d:release`. The inner
+  ## `{.push assertions: on.}` locally re-enables just this statement.
+  ## Checks the exact magnitude bound this module's own doc comment states
+  ## (even limb i: `[0, 2^26)`, odd limb i: `[0, 2^25)`) -- read as a
+  ## SIGNED magnitude bound, not a literal non-negative range: the doc's
+  ## unsigned-looking notation is this project's shorthand for "bounded in
+  ## absolute value by 2^26/2^25" (every `fe*` primitive's own overflow
+  ## analysis is a magnitude property, indifferent to sign), which is also
+  ## the only reading consistent with the actual authored constants this
+  ## function exists to gate (`Ed25519D_Raw`, `Ed25519Gx_Raw`,
+  ## `Ed25519Gy_Raw`, `SqrtM1Raw` all carry negative limbs).
+  when not defined(release):
+    {.push assertions: on.}
+    for i in 0 ..< 10:
+      if i mod 2 == 0:
+        assert limbs[i] > -67108864'i32 and limbs[i] < 67108864'i32,
+          "feFromLimbs: even limb " & $i & " magnitude out of [0, 2^26) bound"
+      else:
+        assert limbs[i] > -33554432'i32 and limbs[i] < 33554432'i32,
+          "feFromLimbs: odd limb " & $i & " magnitude out of [0, 2^25) bound"
+    {.pop.}
   Fe(limbs: limbs)
 
 # ---------------------------------------------------------------------------
@@ -248,7 +278,17 @@ func feIsNegative*(f: Fe): bool {.inline.} =
   let b = feToBytes(f)
   (b[0] and 1) != 0
 
-func feIsNonZero*(f: Fe): bool {.inline.} =
+func feIsNonZeroVartime*(f: Fe): bool {.inline.} =
+  ## *Vartime* (RFC-001 finding 8 naming convention, round-3 finding A2):
+  ## early-returns on the first nonzero byte, so its running time leaks
+  ## which byte (if any) is nonzero. Safe only on PUBLIC data -- every call
+  ## site today is verify-path (`ed25519.pointDecode`'s sign/zero check,
+  ## `feSqrtRatioVartime`'s two retry-branch checks below), never a secret
+  ## scalar. Renamed from the un-suffixed `feIsNonZero` (round-3 audit): the
+  ## old name was indistinguishable at call sites from a constant-time
+  ## primitive, the same naming gap `scalarmultVartime` closed for group
+  ## ops (RFC-001 finding 8) -- do not drop the suffix, and do not call this
+  ## on secret-derived data.
   let b = feToBytes(f)
   for i in 0..<32:
     if b[i] != 0: return true
@@ -657,7 +697,7 @@ func feSqrtRatioVartime*(u, v: Fe): Option[Fe] =
   feMul(vxx, vxx, v)
   feSub(vxx, vxx, u)
 
-  if feIsNonZero(vxx):
+  if feIsNonZeroVartime(vxx):
     # v*x^2 != u; retry with x*sqrt(-1), which squares to -x^2.
     # Valid iff v*x^2 == -u; anything else means u/v is not a square.
     let S = feFromLimbs(SqrtM1Raw)
@@ -665,7 +705,7 @@ func feSqrtRatioVartime*(u, v: Fe): Option[Fe] =
     feSq(vxx, x)
     feMul(vxx, vxx, v)
     feSub(vxx, vxx, u)
-    if feIsNonZero(vxx):
+    if feIsNonZeroVartime(vxx):
       return none[Fe]()
 
   return some(x)
