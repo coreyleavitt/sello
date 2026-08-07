@@ -1,14 +1,11 @@
 # RFC-002 audit remediation — handoff
 
-- **Stage:** 3 (implement) — slices defined in `docs/rfc-002-audit-remediation.md`; RFC
-  approved by Corey 2026-08-06 with all decisions resolved (no architect rounds needed —
-  the RFC *is* the output of a three-lens architect audit, and Corey approved the full scope).
-- **Resume:** slice 1 (`02e0005`) and slice 2 (subject: "RFC-002 slice 2: core hygiene
-  remediation" — identified by subject line, not hash: slice 1's amend-the-handoff-in
-  pattern recorded a stale pre-amend hash, so this handoff update was written BEFORE the
-  single slice-2 commit instead, and future slices should keep doing the same) are both
-  done. Continue via the PHASED ORDERING below (revised 2026-08-06, supersedes plain
-  2→3→4→5), now at **Phase B**:
+- **Stage:** 4 (review) — implementation complete. All five slices land; RFC approved by
+  Corey 2026-08-06 with all decisions resolved (no architect rounds needed — the RFC *is*
+  the output of a three-lens architect audit, and Corey approved the full scope).
+- **Resume:** RFC-002 stage 4: `/code-review`. All five slices (`docs/rfc-002-audit-
+  remediation.md`) are done — see the slice list below for what each changed, its
+  judgment calls, and its gate results. Nothing left to implement for this RFC.
   - **Phase A — slice 2 alone** — DONE (see the slice list below for what changed and its
     one judgment call). It relocated the modules every later slice's test code imports
     (`types.nim` → `wire.nim`/`wipe.nim`, `challenge.nim` extraction), so nothing ran
@@ -32,10 +29,11 @@
     compile a trivial `-fsanitize-coverage=trace-pc` + proptest_cov.c binary in the base
     image before writing any harness; if the toolchain refuses, return that as a blocker
     immediately instead of building around it.
-  - **Phase C — slice 4 alone, last, with no concurrent container load**: its dudect run
-    is timing-sensitive (docs/ct-results.md already records environment caveats — don't
-    add "another agent was compiling mutants on all cores" to them) and its Z3 retry
-    needs the memory headroom the first attempt's OOM lacked.
+  - **Phase C — slice 4 alone, last** — DONE (subject: "RFC-002 slice 4: verification
+    deepening"; see the slice list below for the parity property, dudect target, and Z3
+    result in full). The "no concurrent container load" precondition this phase called for
+    was NOT perfectly met in practice — see slice 4's own entry below for what was
+    actually observed on the host and why the results are still trusted.
   Build/test: `scripts/test.sh`, `scripts/test-libsodium.sh` (sello-dev image),
   `scripts/check-readme.sh`, `scripts/fuzz.sh`, `scripts/bmc.sh`, `scripts/ct.sh`; single
   file via the podman + milpa-CAS-mount invocation in CLAUDE.md. `rm` is aliased
@@ -129,9 +127,108 @@
       real API matched the RFC's assumptions (cosmetic signature diffs vs INTERFACE.md
       confirmed against fuzz.nim source before use). Campaign at merge: 2108/1603/847
       iterations, 351/333/291 edges, 0 crashes, exit 0.
-- [ ] 4 Verification deepening — random-seed backend↔sodium parity property; ephemeral
-      dudect target + ct-results update; Z3 whole-chain attempt (64 free nibbles; honest
-      outcome either way)
+- [x] 4 Verification deepening (subject: "RFC-002 slice 4: verification deepening") — all
+      three items landed; Z3 outcome is the PROVED branch.
+
+      **Item 1 — random-seed backend parity property.** Added to
+      `tests/unit/test_libsodium_interop.nim` (the established home for cross-backend
+      coverage, already carrying the `when defined(selloLibsodium)` skip pattern): a
+      `property` (via **proptest**, already a fetched optional dep — `_deps/proptest`
+      present, no `milpa fetch --features proptest` needed this session) generalizing the
+      suite's single pinned seed to a `forAll` over 50 random `(seed, msg)` pairs, calling
+      `sello/private/backend.derivePublic`/`signDetached` and
+      `sello/private/backend_sodium`'s equivalents directly (bypassing `Keypair`, matching
+      RFC-001 ledger finding 13's shared seed-level contract) and asserting byte-for-byte
+      agreement on both the derived public key and the signature. Compiles and runs only
+      under `-d:selloLibsodium`; a plain `scripts/test.sh` run never imports `proptest` or
+      `backend_sodium` from this file (the `when` branch containing both imports is
+      unreached), so the skip pattern's "stays green with no libsodium installed" property
+      is preserved. Passed on first real run (`scripts/test-libsodium.sh`, 171 `[OK]`).
+
+      **Item 2 — ephemeral dudect target.** `tests/ct/ct_main.nim` gained a fifth target
+      exercising `x25519(sink X25519EphemeralSecret, peer)`. **Judgment call:**
+      `X25519EphemeralSecret` has, by design, no from-bytes constructor and does not export
+      its scalar bytes outside `x25519.nim` (confirmed by reading the type, not assumed) —
+      there is no way to build a "fixed vs. random secret" class pair for it the way the
+      other four targets do. Rather than force a construction that doesn't fit or silently
+      skip the target, both dudect classes do the IDENTICAL thing every sample: draw a
+      fresh ephemeral secret from the OS CSPRNG and consume it against the same fixed peer
+      point. This is disclosed plainly (in `ct_main.nim`'s module doc, the new target's own
+      doc comment, and `docs/ct-results.md`) as a calibration/self-consistency check on the
+      sink-consuming call chain's own machinery (construction, ladder, zero-check, `Option`
+      wrap, `=destroy` wipe) rather than a "does this secret's value leak" test the way the
+      other four targets' results are — there is no fixed secret value to ask that question
+      about for this type. Full run (`scripts/ct.sh`, 1,000,000 samples/class,
+      `taskset -c 0`-pinned): positive control t = 950.93 (FAIL, expected — harness
+      self-test); `signDetached` t = -1.75; `geScalarmultBase` t = 1.15; `x25519Base`
+      t = 1.10; ephemeral construct+consume t = -1.42 — all four real targets PASS
+      comfortably inside `|t| <= 4.5`, no WARN, no FAIL, nothing to escalate.
+      `docs/ct-results.md` updated with the new target's table row, its own "why this one's
+      different" subsection, and both runs (RFC-001 four-target, RFC-002 five-target) kept
+      side by side rather than overwriting history.
+
+      **Judgment call / environment honesty:** Phase C's own precondition ("no concurrent
+      container load") was NOT perfectly met — `podman ps`/`uptime` showed an unrelated,
+      otherwise-idle `amoxtli-dev` container present on the shared host for part of the run
+      window, and the 15-minute load average briefly touched 8.07 on 6 cores shortly before
+      the run. Disclosed in `docs/ct-results.md`'s environment section rather than silently
+      claimed away; the actual t-statistics (all real targets under |t| = 2) don't show the
+      variance inflation heavy concurrent load would produce, so the result is trusted, but
+      the precondition gap is recorded plainly rather than asserting a quieter environment
+      than what the tools actually showed. Separately, the SAME shared host's `/tmp`
+      (rootless podman's storage backend) filled to 100% mid-slice from other sessions'
+      accumulated container layers — diagnosed via `podman system df -v` before touching
+      anything, then reclaimed conservatively (`podman volume prune -f`, ~4.3GB, and a
+      dangling-image-only `podman image prune -f`, which found nothing further to remove
+      without resorting to `-a`, which would have deleted OTHER PROJECTS' tagged-but-idle
+      images — not done). This was a pre-existing host condition, not something this
+      session's own container runs caused (each `--rm` podman invocation cleans up its own
+      layer).
+
+      **Item 3 — Z3 whole-chain proof attempt: PROVED (`sxUnsat`).** The RFC's proposed
+      encoding (64 free symbolic nibbles chained through `oneStep`/`finalStep` directly)
+      does not compile/run as specified — two DISTINCT empirical symex limitations, found
+      via isolated scratch probes before touching the real harness (same standard as
+      `signing.Seed`'s and slice 2's `checks:off`/`assertions` findings): (1) calling an
+      `int32`-typed proc as a NESTED callee (not the direct `symexFind` SUT) that does
+      checked `+`/`shr` arithmetic crashes the walker outright
+      (`FieldDefect: field 'bv32' is not accessible for type 'SymVal' using 'kind =
+      svBV64'`, in `proptest/smt/runtime.nim`'s `lowerArith`/`overflowCond`) — neither
+      `{.push overflowChecks: off.}` nor `SymexSettings.arithChecks = {}` suppresses it;
+      (2) independently, a proc that RETURNS A TUPLE and is called as a nested callee hits
+      `sxUnknown`/`weInternalWalkerFault: composite-typed proc return not yet wired`. Both
+      reproduced on minimal (1-2 call) probes with no scalar.nim-specific content, so this
+      is a symex-version limitation, not a bug in this project's encoding attempt.
+      **Fix:** `oneStepChain`/`finalStepChain`, new tooling-compatible re-encodings of
+      `oneStep`/`finalStep` in `tests/verify/symex_recode.nim` — plain `int` (sidesteps
+      limitation 1; the value ranges involved are tiny, so `int` vs `int32` changes no
+      mathematical content) and a `var` output parameter instead of a tuple return
+      (sidesteps limitation 2) — checked EXHAUSTIVELY (not sampled) against `oneStep`/
+      `finalStep` over their full 32+16 concrete `(nibble, carryIn)` pairs before being
+      trusted, closing the "two independently-typed-out implementations could silently
+      drift" risk the same way round-2 finding 31 already closed it once. `wholeChainRecode`
+      (64 free `int` parameters, no array anywhere) chains 63 calls to `oneStepChain` plus
+      one to `finalStepChain`; `symexFind(wholeChainRecode, tAssertionViolation())` with
+      DEFAULT `SymexSettings` (no special budget needed) returned **`sxUnsat`** in ~84-100s
+      wall-clock (compile + solve) inside `scripts/bmc.sh`'s 300s (or 600s, both tried)
+      kill-timeout — comfortably tractable, confirming the RFC's own hypothesis that the
+      first attempt's OOM was the byte-array/mutated-array encoding, not the 63-step carry
+      chain itself. The full 63-step composition is therefore now machine-checked, not
+      manually argued. Per the RFC's own instruction, the manual-induction caveat is
+      RETIRED everywhere it was documented: `tests/verify/symex_recode.nim`'s module doc
+      (rewritten with the "Z3 WHOLE-CHAIN ATTEMPT" section covering the two symex
+      limitations, the fix, and the verdict), `CLAUDE.md`'s Tests section and validation-bar
+      entry, and `README.md`'s Z3 paragraph. `docs/rfc-001-signing.md` does not mention this
+      proof at all (grepped, confirmed) — nothing to retire there.
+      `docs/rfc-002-audit-remediation.md`'s slice-4 text is left as-is per its own
+      instruction (it records the plan, not the outcome).
+
+      **Gates:** `scripts/test.sh` green (all 13 unit test files, plain backend, no
+      failures). `scripts/test-libsodium.sh` green (171 `[OK]`, includes the new parity
+      property). `scripts/check-readme.sh` green (5/5 fences — touched for the Z3 paragraph
+      edit). `scripts/ct.sh` full run clean on all five targets (numbers above);
+      `docs/ct-results.md` updated. `scripts/bmc.sh` clean `sxUnsat` on all three
+      `symexFind` calls (`oneStep`, `finalStep`, `wholeChainRecode`).
 - [x] 5 Mutation testing (subject: "RFC-002 slice 5: mutation testing") — patch-based
       harness: `scripts/mutation.sh` (host wrapper, one podman invocation for the whole
       campaign so nimcache carries across mutants — roughly halved wall clock) +
@@ -164,8 +261,10 @@
 - Fuzz in-process `{.cover.}` wrappers gave a 2-edge universe — coverage guidance was
   provably saturated/black-box; external SanitizerCoverage target is proptest's own shipped
   mechanism and keeps audited sources pragma-free.
-- Z3 retry hypothesis: prior OOM blamed on 32-byte symbolic extraction, not the carry chain;
-  free-nibble encoding is a strict generalization. Honest partial remains acceptable.
+- Z3 retry hypothesis CONFIRMED: prior OOM blamed on 32-byte symbolic extraction, not the
+  carry chain; the free-nibble encoding (via tooling-compatible `int`/`var`-out-param
+  re-encodings, needed to work around two empirical symex interprocedural-call limitations
+  — see slice 4) proved `sxUnsat` in ~90s. The manual-induction caveat is retired.
 - Mutation testing is sello-side patch-based (proptest mutation v1 is int->int only).
 - Batch verification: disclose as considered/deferred now; feature is RFC-003 candidate.
 

@@ -47,6 +47,23 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
   below remain `-d:release`-only evidence.
 - **No bare-metal comparison run** was performed; all numbers below are
   container-only.
+- **Shared host, RFC-002 slice 4 run.** Unlike the RFC-001 run above, this
+  host was not exclusively dedicated to this measurement for its entire
+  duration: `podman ps` showed an unrelated, otherwise-idle
+  `amoxtli-dev` container present for part of the run window (an
+  interactive `/bin/bash` session from a different project, not doing
+  active compute as far as `ps`/load average could tell), and the 15-
+  minute load average briefly touched 8.07 on this 6-core host shortly
+  before the run started, settling toward 3.5 by the time it ran. This is
+  disclosed rather than silently omitted: the RFC-002 slice-4 handoff
+  explicitly called for "no concurrent container load" for exactly this
+  reason, and that precondition was not perfectly met here (a genuinely
+  idle background container was present; nothing else was intentionally
+  scheduled by this run's own agent). The measured t-statistics below
+  (all real targets well under 2 in absolute value) do not show the kind
+  of variance inflation heavy concurrent load would produce, but this
+  caveat is recorded plainly rather than asserting a quieter environment
+  than what `ps`/`uptime` actually showed at the time.
 
 ## Harness design
 
@@ -62,7 +79,9 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
   drift and cache/branch warmup bias from the repeatedly-executed fixed
   input.
 - **Samples:** 1,000,000 per class per target (2,000,000 timed calls per
-  target; 8,000,000 total across the four targets in this run).
+  target; 8,000,000 total across the four targets in the RFC-001 run,
+  10,000,000 total across all five targets as of the RFC-002 slice 4 run
+  below).
 - **Cropping:** upper-percentile cropping at the 99.5th percentile,
   computed once from the *pooled* (both classes together) sample and
   applied identically to both classes, so the cropping step itself cannot
@@ -81,12 +100,68 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
 
 ## Targets and results
 
+### RFC-001 run (four targets)
+
 | target | samples/class | kept (fixed/random) | cropped | mean cycles (fixed/random) | t | verdict |
 |---|---|---|---|---|---|---|
 | positive control (`leakyOp`, harness self-test) | 1,000,000 | 993,072 / 996,943 | 9,985 | 3,924.95 / 1,973.95 | **953.87** | FAIL (expected) |
 | `sello/private/backend.signDetached` | 1,000,000 | 994,990 / 995,010 | 10,000 | 240,608.19 / 240,633.23 | **-0.27** | PASS |
 | `sello/scalar.geScalarmultBase` | 1,000,000 | 995,003 / 994,997 | 10,000 | 118,143.62 / 118,099.61 | **0.92** | PASS |
 | `sello/x25519.x25519Base` | 1,000,000 | 995,023 / 994,978 | 9,999 | 363,862.83 / 363,758.15 | **0.59** | PASS |
+
+### RFC-002 slice 4 run (five targets, adds the ephemeral construct+consume target)
+
+Re-run in full (not incremental) after adding the fifth target, on the
+same container image/pinning/cropping/threshold methodology described
+above; absolute cycle counts differ from the RFC-001 run above (different
+run, different moment on the same shared host -- see the environment
+caveats), which is expected and does not affect the PASS/FAIL comparison,
+itself always fixed-vs-random WITHIN this run.
+
+| target | samples/class | kept (fixed/random) | cropped | mean cycles (fixed/random) | t | verdict |
+|---|---|---|---|---|---|---|
+| positive control (`leakyOp`, harness self-test) | 1,000,000 | 993,140 / 996,892 | 9,968 | 3,975.38 / 1,984.63 | **950.93** | FAIL (expected) |
+| `sello/private/backend.signDetached` | 1,000,000 | 994,843 / 995,157 | 10,000 | 184,800.80 / 184,878.10 | **-1.75** | PASS |
+| `sello/scalar.geScalarmultBase` | 1,000,000 | 995,090 / 994,910 | 10,000 | 90,602.72 / 90,573.99 | **1.15** | PASS |
+| `sello/x25519.x25519Base` | 1,000,000 | 995,002 / 994,999 | 9,999 | 216,256.04 / 216,207.63 | **1.10** | PASS |
+| `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 1,000,000 | 994,995 / 995,005 | 10,000 | 232,823.57 / 232,911.25 | **-1.42** | PASS |
+
+### The fifth target: construct+consume, not fixed-vs-random secret
+
+`x25519(sink X25519EphemeralSecret, peer)` cannot follow the same
+fixed-vs-random-secret recipe as the other four targets:
+`X25519EphemeralSecret` has, by design, no from-bytes constructor
+(`sello/x25519`'s module doc: freshness-by-construction is the whole
+point of the type) and does not expose its scalar bytes outside
+`x25519.nim`, so `tests/ct/ct_main.nim` has no way to pin a "fixed" class
+secret the way the other four targets' `fixedSeed`/`fixedScalar`/
+`fixedSecret` do. Both dudect classes for this target therefore do the
+IDENTICAL thing every sample: draw a fresh ephemeral secret from the OS
+CSPRNG via `x25519EphemeralSecret()` and consume it (the sink-consuming
+`x25519` overload) against the same fixed public peer point. The `bool`
+class label the harness threads through carries no information about
+what the sampled operation does -- there is no secret value left to
+classify by.
+
+A clean (low-|t|) result here is therefore EXPECTED BY CONSTRUCTION
+(both classes are drawn from the identical generative process), not
+evidence that "this secret's value doesn't leak" the way the other four
+targets' results are -- there is no fixed secret value to ask that
+question about for this type. What it DOES check: that the full sink-
+consuming call chain (fresh construction, the Montgomery ladder, the
+all-zero/small-order check, the `Option` wrap, and the `=destroy` wipe
+that fires when the secret goes out of scope) introduces no timing
+artifact statistically correlated with an arbitrary bisection of
+otherwise-identical samples -- a calibration/self-consistency check on
+the wrapper's own machinery, not a leak test on a value that cannot be
+pinned. See `tests/ct/ct_main.nim`'s module doc comment for the full
+design rationale, including the two empirical constraints
+(`X25519EphemeralSecret` has no from-bytes constructor and does not
+export its `bytes` field) that ruled out the classic recipe before this
+one was chosen.
+
+The result (t = -1.42) sits comfortably inside the pass band, same as
+the other three real targets -- no timing-leak finding to escalate.
 
 ### Positive control (harness self-test)
 
@@ -96,43 +171,52 @@ fixed-class secret is chosen even (always the slow path); the random-class
 secret is even roughly half the time. This is this slice's RED-equivalent
 check -- before trusting a clean (low-|t|) result on a real target, the
 harness must first be shown capable of detecting a real, deliberately
-introduced leak. It is: **t = 953.87**, several orders of magnitude past
-the fail threshold, confirming the measurement pipeline (interleaving,
-rdtsc timing, cropping, Welch's t-test) is sensitive enough to catch a
-secret-dependent branch of this size. A FAIL verdict on the positive
-control is the correct, passing outcome for the harness sanity check
-itself; `tests/ct/ct_main.nim` treats it as such (only a *pass* on the
-positive control, or a *fail* on a real target, is treated as a harness
-failure with a nonzero exit code).
+introduced leak. It is: **t = 950.93** in the current (RFC-002 slice 4,
+five-target) run, **t = 953.87** in the earlier RFC-001 four-target run --
+both several orders of magnitude past the fail threshold, confirming the
+measurement pipeline (interleaving, rdtsc timing, cropping, Welch's
+t-test) is sensitive enough to catch a secret-dependent branch of this
+size, consistently across runs. A FAIL verdict on the positive control is
+the correct, passing outcome for the harness sanity check itself;
+`tests/ct/ct_main.nim` treats it as such (only a *pass* on the positive
+control, or a *fail* on a real target, is treated as a harness failure
+with a nonzero exit code).
 
 ### Real targets
 
-All three sello targets pass comfortably inside the `|t| <= 4.5` band,
-nowhere near the 4.5 warn threshold, let alone the 10 fail threshold:
+All four sello real targets in the current (RFC-002 slice 4) run pass
+comfortably inside the `|t| <= 4.5` band, nowhere near the 4.5 warn
+threshold, let alone the 10 fail threshold:
 
 - `backend.signDetached` (the full RFC 8032 sign operation: seed
-  expansion, clamping, two fixed-base scalarmults, `scMulAdd`): t = -0.27.
+  expansion, clamping, two fixed-base scalarmults, `scMulAdd`): t = -1.75.
 - `scalar.geScalarmultBase` (the fixed-base scalarmult in isolation --
   this RFC's new secret-facing arithmetic: radix-16 recoding +
-  `cmovCached` select): t = 0.92.
+  `cmovCached` select): t = 1.15.
 - `x25519.x25519Base` (the RFC 7748 Montgomery ladder over a secret
-  scalar): t = 0.59.
+  scalar): t = 1.10.
+- `x25519(sink X25519EphemeralSecret, peer)` construct+consume (RFC-002
+  slice 4's new fifth target; see "The fifth target" above for why this
+  one is a construct+consume calibration check rather than a fixed-vs-
+  random-secret test): t = -1.42.
 
-A smaller pilot run (20,000 samples/class, same environment and pinning)
-produced the same qualitative picture -- positive control t = 137.04
-(FAIL), and all three real targets under |t| = 1 -- so the full run is a
-confirmation, not a one-off.
+The earlier RFC-001 four-target run (`backend.signDetached` t = -0.27,
+`scalar.geScalarmultBase` t = 0.92, `x25519.x25519Base` t = 0.59) and a
+smaller pilot run (20,000 samples/class, same environment and pinning:
+positive control t = 137.04 (FAIL), all three real targets under |t| = 1)
+produced the same qualitative picture -- each full run is a confirmation,
+not a one-off.
 
 ## Interpretation
 
-No target exceeded the warn threshold, so there is nothing in the
-4.5-10 band requiring the investigation writeup the RFC calls for. The
-clean pass on all three real targets, combined with the positive control
-firmly failing, is the intended shape of evidence: the harness is
-demonstrably capable of detecting a leak of this class and size, and does
-not detect one in `signDetached`, `geScalarmultBase`, or `x25519Base`
-under 2,000,000 interleaved, pinned, cropped samples each in this
-container.
+No target exceeded the warn threshold in either run, so there is nothing
+in the 4.5-10 band requiring the investigation writeup the RFC calls for.
+The clean pass on all four real targets in the current run, combined with
+the positive control firmly failing, is the intended shape of evidence:
+the harness is demonstrably capable of detecting a leak of this class and
+size, and does not detect one in `signDetached`, `geScalarmultBase`,
+`x25519Base`, or the ephemeral construct+consume path under 2,000,000
+interleaved, pinned, cropped samples each in this container.
 
 This is evidence, not proof, for three reasons stated plainly:
 
@@ -148,6 +232,14 @@ This is evidence, not proof, for three reasons stated plainly:
 3. **A single core, a single CPU model, a single compiler.** Prompt.md's
    long-term goal of evidence "across x86 and ARM and >1 cc version" is
    not attempted here; this run is x86_64/GCC-in-container only.
+4. **Shared host, not exclusively quiet (RFC-002 slice 4 run only).** See
+   the "Measurement environment" section above -- an otherwise-idle
+   unrelated container was present on the host for part of this run's
+   duration. This is disclosed as a caveat on the RFC-002 slice 4 run
+   specifically; it did not visibly inflate variance in the results
+   obtained (all four real targets stayed under |t| = 2), but a policy of
+   "no concurrent container load" is the stronger precondition and was
+   not perfectly achieved here.
 
 Consumers who need a stronger guarantee than "a statistical harness found
 nothing in one container on one CPU" have the `-d:selloLibsodium` adapter

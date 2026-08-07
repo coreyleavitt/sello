@@ -21,8 +21,10 @@
 import std/unittest
 
 when defined(selloLibsodium):
+  import proptest
   import sello/signing
   import sello/ed25519
+  import sello/private/backend
   import sello/private/backend_sodium
 
   # RFC 8032 §7.1 TEST 1 seed -- reused here purely as a convenient fixed
@@ -73,6 +75,40 @@ when defined(selloLibsodium):
       check backend_sodium.sodiumVerifyDetached(array[64, byte](pureSig), emptyMsg,
         array[32, byte](kp.public))
       check verify(kp.public, emptyMsg, Signature(sodiumSig))
+
+  # RFC-002 slice 4 item 1: random-seed backend parity property. The fixed
+  # tests above pin exactly one seed (RFC 8032's TEST 1 seed); this
+  # generalizes to a `forAll` over random seeds AND random messages,
+  # calling the two backends' seed-level primitives directly
+  # (`sello/private/backend` vs. `sello/private/backend_sodium`) rather
+  # than going through `Keypair`/`sign` -- both backends share the
+  # identical `derivePublic`/`signDetached(seed, publicBytes, msg)`
+  # contract (RFC-001 ledger finding 13) precisely so this kind of
+  # cross-backend comparison is a direct call-for-call match, with no
+  # `Keypair` wrapping needed on either side. Homed here (not a
+  # `test_properties_*` file) because this suite is already the
+  # established location for cross-backend agreement coverage, and it
+  # already carries the `when defined(selloLibsodium)` skip pattern that
+  # keeps plain `scripts/test.sh` green without libsodium installed.
+  proc randByte(): Strategy[byte] =
+    integers(0, 255).map(proc(x: int): byte = byte(x))
+
+  proc seedBytes32(): Strategy[array[32, byte]] =
+    arrays[32, byte](randByte())
+
+  proc paritySettings(): Settings =
+    result = defaultSettings()
+    result.maxExamples = 50
+
+  suite "libsodium interop property: random-seed/message backend parity":
+    property "derivePublic and signDetached agree byte-for-byte across backends":
+      with paritySettings()
+      given sb in seedBytes32(), msg in bytes(0, 256)
+      let purePub = backend.derivePublic(sb)
+      let sodiumPub = backend_sodium.derivePublic(sb)
+      let pureSig = backend.signDetached(sb, purePub, msg)
+      let sodiumSig = backend_sodium.signDetached(sb, sodiumPub, msg)
+      ensure purePub == sodiumPub and pureSig == sodiumSig
 else:
   suite "libsodium interop (skipped)":
     test "skipped: build with -d:selloLibsodium (scripts/test-libsodium.sh) to run this suite":

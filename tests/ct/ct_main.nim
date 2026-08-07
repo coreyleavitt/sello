@@ -37,13 +37,49 @@
 ##     `X25519StaticSecret`/`X25519Public`/`X25519Shared`) -- identical
 ##     construction cost for both classes, so it does not perturb the
 ##     measurement.
+##   - `x25519(sink X25519EphemeralSecret, peer)` -- the ephemeral
+##     construct-and-consume path (RFC-002 slice 4 item 2), covering the
+##     one secret-holding entry point the first four targets above do not
+##     reach: `X25519EphemeralSecret`'s move-only, single-use API.
 ##
-## For every real target, only the SECRET varies between classes (fixed
-## vs. per-sample random); any public input (message, peer point) is
-## held identically fixed in both classes, so a detected timing
+## For every one of the first FOUR targets, only the SECRET varies between
+## classes (fixed vs. per-sample random); any public input (message, peer
+## point) is held identically fixed in both classes, so a detected timing
 ## difference can only be attributed to the secret.
+##
+## The FIFTH target (`x25519` over `X25519EphemeralSecret`) cannot follow
+## that same recipe, and says so plainly rather than quietly reusing the
+## same class-construction idiom for a type it does not fit:
+## `X25519EphemeralSecret` has, by design, no from-bytes constructor
+## (`sello/x25519`'s module doc: freshness-by-construction is the whole
+## point of the type) and does not even expose its scalar bytes outside
+## `x25519.nim` -- there is no way for this file to build a "fixed" class
+## whose secret is actually held fixed across samples the way the other
+## four targets' `fixedSeed`/`fixedScalar`/`fixedSecret` do. Both classes
+## therefore do the IDENTICAL thing every sample: draw a fresh ephemeral
+## secret from the OS CSPRNG via `x25519EphemeralSecret()` and consume it
+## (`x25519(secret, peer)`, the sink overload) against the same fixed
+## public peer point. The `bool` class label `runDudect` threads through
+## carries no information at all about what `operate` does for this
+## target -- there is no secret value left to classify by, so the honest
+## design is to not pretend one exists.
+##
+## What this still checks, and what it does not: a clean (low-|t|) result
+## here is EXPECTED by construction (both classes are literally drawn
+## from the same generative process), so it is not evidence that "this
+## secret's value doesn't leak" the way the other four targets' results
+## are -- there is no fixed secret value to ask that question about. What
+## it does check is that the sink-consuming call chain itself (fresh
+## construction, the Montgomery ladder, the all-zero/small-order check,
+## the `Option` wrap, and the `=destroy` wipe that fires when `secret`
+## goes out of scope) introduces no timing artifact statistically
+## correlated with an arbitrary bisection of otherwise-identical samples
+## -- a calibration/self-consistency check on the wrapper's own
+## machinery, not a leak test on a value that cannot be pinned. See
+## `docs/ct-results.md` for the same caveat recorded next to this
+## target's numbers.
 
-import std/[os, parseutils, strutils, random]
+import std/[os, parseutils, strutils, random, options]
 import sello/private/backend
 import sello/field
 import sello/scalar
@@ -122,6 +158,40 @@ proc opX25519Base(secret: array[32, byte]): uint64 =
   acc
 
 # ---------------------------------------------------------------------------
+# Target 4: x25519(sink X25519EphemeralSecret, peer) -- ephemeral construct
+# + consume path. See the module doc comment above for why this target's
+# two "classes" do identical work rather than differing by secret value.
+# ---------------------------------------------------------------------------
+
+## An arbitrary fixed public peer u-coordinate (RFC 7748 accepts any
+## 32-byte value here, no on-curve check). Held identical across every
+## sample of both classes, same as the other targets' fixed public
+## inputs -- it is not part of what this target is classifying by (see
+## module doc comment), just the peer the ephemeral exchange completes
+## against.
+const fixedPeerBytes: array[32, byte] = block:
+  var b: array[32, byte]
+  for i in 0 ..< 32: b[i] = byte(i * 7 + 1)
+  b
+
+let fixedPeer = toX25519Public(fixedPeerBytes)
+
+proc opX25519EphemeralConsume(unusedClassLabel: bool): uint64 =
+  ## `unusedClassLabel` is exactly that -- unused. Both classes draw a
+  ## fresh ephemeral secret and consume it against `fixedPeer`; see the
+  ## module doc comment for why no class-distinguishing secret value
+  ## exists for this type. Sole reference to `secret` before its one
+  ## consuming call, so ordinary last-use inference lets this compile
+  ## without `move()` (see `x25519.nim`'s doc comment on the sink
+  ## overload).
+  let secret = x25519EphemeralSecret()
+  let shared = x25519(secret, fixedPeer)
+  var acc: uint64 = 0
+  if shared.isSome:
+    for b in toBytes(shared.get()): acc = (acc shl 1) or uint64(b and 1'u8)
+  acc
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -162,6 +232,14 @@ when isMainModule:
   block:
     let fixedSecret = randomBytes32()
     reports.add runDudect("x25519.x25519Base", n, fixedSecret, randomBytes32, opX25519Base)
+
+  block:
+    # Both classes do identical work (see module doc comment and
+    # opX25519EphemeralConsume's own doc comment) -- `true`/`false` here
+    # are arbitrary, unread labels, not a fixed-vs-random secret pair.
+    proc makeDummyRandomLabel(): bool = true
+    reports.add runDudect("x25519(ephemeral) construct+consume", n, true,
+      makeDummyRandomLabel, opX25519EphemeralConsume)
 
   for r in reports:
     report(r)

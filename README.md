@@ -42,12 +42,13 @@ API is built around that split rather than papering over it:
   (`tests/fuzz/`, run via `scripts/fuzz.sh`) -- unstructured mutation
   testing the ground the curated vectors don't cover by construction.
   Separately, `recodeScalarRadix16`'s digit-range invariant (previously
-  only sampled) now has a machine-checked Z3 proof for its per-iteration
-  arithmetic step (`tests/verify/`, run via `scripts/bmc.sh`) -- see that
-  harness's module doc comment for the honest scope: the per-step lemma is
-  exhaustively proved, but the 63-step composition is a manual induction
-  argument, not itself Z3-checked, because the naive whole-function attempt
-  did not complete in this environment's resource budget.
+  only sampled) now has a machine-checked Z3 proof, both for its
+  per-iteration arithmetic step and for the full 63-step composition in
+  one query over a generalized free-nibble input domain (`tests/verify/`,
+  run via `scripts/bmc.sh`) -- see that harness's module doc comment for
+  the exact scope: the literal whole-function attempt over a symbolic
+  32-byte array did not complete in this environment's resource budget
+  and remains an inert, opt-in retry.
 
 - **`sign`/`keygen` hold the secret scalar.** This is the roll-your-own-
   crypto half, and it carries the trust tax that implies:
