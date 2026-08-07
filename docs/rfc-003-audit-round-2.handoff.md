@@ -193,7 +193,17 @@
 ## test.sh/test-libsodium.sh via shared lib. ct.sh full run passed (all real targets
 ## worst-case |t| <= 1.85) but in the NOISIEST disclosed environment yet (load 23.97,
 ## 3 containers) — control loop will re-run ct.sh once on a quiet host after batch C
-## as the final record. Batch Z (Z3 follow-ons) in progress; C pending.
+## as the final record. Batch Z (Z3 follow-ons: feCMove/feCSwap mask algebra, scReduce
+## carry bounds, scMulAdd intermediate bounds — new harness under tests/verify/, wired
+## into bmc.sh) is RUNNING as of this refresh (2026-08-07 ~15:30; its agent stalled
+## once on the background-wait failure mode and was resumed with synchronous orders;
+## work uncommitted until its gates — bmc.sh all-sxUnsat-or-honestly-documented +
+## test.sh — pass and the control loop commits). Then batch C (docs/packaging/tags),
+## then the control loop's final quiet-host ct.sh re-run. If resuming after a dead
+## session: `git status` — uncommitted tests/verify/ + bmc.sh changes belong to batch
+## Z (verify gates, commit as "Round-3 fixes Z"); then launch batch C per the batch
+## list above; then re-run scripts/ct.sh on a quiet host and fold the result into
+## docs/ct-results.md as the current record.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium

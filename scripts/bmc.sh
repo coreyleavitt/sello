@@ -1,18 +1,30 @@
 #!/usr/bin/env bash
-# Machine-checked (Z3) proof of scalar.recodeScalarRadix16's digit-range
-# invariant (RFC-001 review finding 22) via tests/verify/symex_recode.nim,
-# using COREY'S proptest library's symbolic-execution engine
-# (proptest/symex). See that file's module doc comment for exactly what is
-# and isn't proved (the digit-RANGE invariant, exhaustively, over the
-# whole bit-255-clear input domain; NOT the digit-reconstruction identity,
-# which stays sampled -- see B4a's property tests).
+# Machine-checked (Z3) proofs, via COREY'S proptest library's symbolic-
+# execution engine (proptest/symex), run in one invocation:
+#   - tests/verify/symex_recode.nim: scalar.recodeScalarRadix16's
+#     digit-range invariant (RFC-001 review finding 22).
+#   - tests/verify/symex_mask.nim: field.feCMove/feCSwap's arithmetic-
+#     masking algebra (round-3 fix batch Z, item Z1).
+#   - tests/verify/symex_reduce.nim: scalar.scReduce/scMulAdd's shared
+#     carry-propagation macro's per-step bound invariant, plus (gated
+#     behind -d:selloBmcReduceFullChain, OFF by default -- see that
+#     file's own RESOURCE WALL section) an attempted, empirically
+#     intractable-in-this-environment whole-body composition (round-3
+#     fix batch Z, items Z2/Z3).
+# See each file's own module doc comment for exactly what is and isn't
+# proved -- do not assume parity between them; each documents its own
+# scope, encoding choices, and honest limits.
 #
 # HARD KILL TIMEOUT, like proptest's own scripts/dt-bounded.sh: Z3 queries
 # can hang the solver outright on pathological mixed-theory shapes (a
 # documented proptest incident spun a full core for 24+ minutes on one
 # query). A hung solver here must never peg a box indefinitely -- this
 # script `timeout --signal=KILL`s the whole podman run and tears down the
-# container even if the podman client itself is what gets killed.
+# container even if the podman client itself is what gets killed. The
+# three files below run as three SEPARATE `nim c -r` invocations chained
+# with `&&`, not one combined binary -- so a kill mid-way still shows,
+# via each file's own stdout already flushed, which ones completed before
+# the timeout hit, rather than losing all progress to one opaque kill.
 #
 # Usage:  scripts/bmc.sh [timeout_secs]      # default 300s
 #
@@ -53,7 +65,12 @@ timeout --signal=KILL "$timeout_secs" podman run --rm --name "$cname" \
   -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
   -w /workspace \
   "$img" \
-  bash -c "nim c --threads:on --hints:off -r tests/verify/symex_recode.nim"
+  bash -c "
+    set -e
+    nim c --threads:on --hints:off -r tests/verify/symex_recode.nim
+    nim c --threads:on --hints:off -r tests/verify/symex_mask.nim
+    nim c --threads:on --hints:off -r tests/verify/symex_reduce.nim
+  "
 rc=$?
 
 if [ "$rc" -eq 137 ] || [ "$rc" -eq 124 ]; then
