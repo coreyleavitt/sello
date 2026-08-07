@@ -41,11 +41,24 @@
 ##     construct-and-consume path (RFC-002 slice 4 item 2), covering the
 ##     one secret-holding entry point the first four targets above do not
 ##     reach: `X25519EphemeralSecret`'s move-only, single-use API.
+##   - `x25519(X25519StaticSecret, peer)` -- RFC-003 slice 5 item 1: a
+##     REAL fixed-vs-random-secret leak test of the arbitrary-peer DH path
+##     (ladder + zero-check + `Option` wrap + `=destroy` wipe), which the
+##     fifth target above cannot be, because `X25519StaticSecret` (unlike
+##     `X25519EphemeralSecret`) HAS a from-bytes constructor
+##     (`toX25519StaticSecret`) -- so this target pins a genuine fixed
+##     secret across the whole fixed class, the same recipe as the first
+##     four targets, just run through the two-party `x25519(secret, peer)`
+##     overload instead of `x25519Base`'s single-party derivation. Static
+##     and ephemeral secrets share the identical `ladder()`
+##     (`sello/x25519.nim`), so this also stands in as evidence for the
+##     ladder call as exercised through the DH (not just base-point)
+##     entry point.
 ##
-## For every one of the first FOUR targets, only the SECRET varies between
-## classes (fixed vs. per-sample random); any public input (message, peer
-## point) is held identically fixed in both classes, so a detected timing
-## difference can only be attributed to the secret.
+## For every one of the first FOUR targets, and the SIXTH, only the
+## SECRET varies between classes (fixed vs. per-sample random); any public
+## input (message, peer point) is held identically fixed in both classes,
+## so a detected timing difference can only be attributed to the secret.
 ##
 ## The FIFTH target (`x25519` over `X25519EphemeralSecret`) cannot follow
 ## that same recipe, and says so plainly rather than quietly reusing the
@@ -55,7 +68,7 @@
 ## point of the type) and does not even expose its scalar bytes outside
 ## `x25519.nim` -- there is no way for this file to build a "fixed" class
 ## whose secret is actually held fixed across samples the way the other
-## four targets' `fixedSeed`/`fixedScalar`/`fixedSecret` do. Both classes
+## targets' `fixedSeed`/`fixedScalar`/`fixedSecret` do. Both classes
 ## therefore do the IDENTICAL thing every sample: draw a fresh ephemeral
 ## secret from the OS CSPRNG via `x25519EphemeralSecret()` and consume it
 ## (`x25519(secret, peer)`, the sink overload) against the same fixed
@@ -67,17 +80,23 @@
 ## What this still checks, and what it does not: a clean (low-|t|) result
 ## here is EXPECTED by construction (both classes are literally drawn
 ## from the same generative process), so it is not evidence that "this
-## secret's value doesn't leak" the way the other four targets' results
-## are -- there is no fixed secret value to ask that question about. What
-## it does check is that the sink-consuming call chain itself (fresh
+## secret's value doesn't leak" the way the other targets' results are --
+## there is no fixed secret value to ask that question about. What it
+## does check is that the sink-consuming call chain itself (fresh
 ## construction, the Montgomery ladder, the all-zero/small-order check,
 ## the `Option` wrap, and the `=destroy` wipe that fires when `secret`
 ## goes out of scope) introduces no timing artifact statistically
 ## correlated with an arbitrary bisection of otherwise-identical samples
 ## -- a calibration/self-consistency check on the wrapper's own
-## machinery, not a leak test on a value that cannot be pinned. See
-## `docs/ct-results.md` for the same caveat recorded next to this
-## target's numbers.
+## machinery, not a leak test on a value that cannot be pinned. **The
+## fixed-vs-random-secret leak question this target structurally cannot
+## answer -- does the arbitrary-peer DH path's timing depend on the
+## SECRET's actual value, not just on the shape of the call -- IS answered
+## by the sixth target above,** which runs the identical `ladder()` +
+## zero-check + `Option` wrap + wipe machinery through `X25519StaticSecret`,
+## a type that does have a from-bytes constructor and therefore can be
+## held genuinely fixed. See `docs/ct-results.md` for the same caveat
+## recorded next to this target's numbers.
 
 import std/[os, parseutils, strutils, random, options]
 import sello/private/backend
@@ -192,6 +211,23 @@ proc opX25519EphemeralConsume(unusedClassLabel: bool): uint64 =
   acc
 
 # ---------------------------------------------------------------------------
+# Target 5: x25519(X25519StaticSecret, peer) -- arbitrary-peer DH path,
+# fixed-vs-random SECRET (RFC-003 slice 5 item 1). Mirrors target 3's
+# (`x25519Base`) fixed-vs-random structure exactly, just through the
+# two-party DH overload against the same fixed peer the ephemeral target
+# above uses -- this is the real leak test the ephemeral target's own doc
+# comment says it cannot be, since `X25519StaticSecret` has a from-bytes
+# constructor and so CAN be held genuinely fixed across the whole class.
+# ---------------------------------------------------------------------------
+
+proc opX25519StaticDH(secret: array[32, byte]): uint64 =
+  let shared = x25519(toX25519StaticSecret(secret), fixedPeer)
+  var acc: uint64 = 0
+  if shared.isSome:
+    for b in toBytes(shared.get()): acc = (acc shl 1) or uint64(b and 1'u8)
+  acc
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -240,6 +276,10 @@ when isMainModule:
     proc makeDummyRandomLabel(): bool = true
     reports.add runDudect("x25519(ephemeral) construct+consume", n, true,
       makeDummyRandomLabel, opX25519EphemeralConsume)
+
+  block:
+    let fixedSecret = randomBytes32()
+    reports.add runDudect("x25519(static) vs peer", n, fixedSecret, randomBytes32, opX25519StaticDH)
 
   for r in reports:
     report(r)

@@ -6,8 +6,8 @@
   spot-checked against source before drafting.
 - **Resume:** `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 2/6 done, 4
-  remaining"); stop when every slice is implemented` — slices 1-4 done and committed;
-  next is slice 5, then 6 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are done by
+  remaining"); stop when every slice is implemented` — slices 1-5 done and committed;
+  next is slice 6, the last (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are done by
   sonnet subagents (TDD, gates run synchronously in-agent per the RFC-002 ops lesson);
   the control loop verifies, commits, and updates this doc.
 - **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
@@ -101,9 +101,23 @@
       written paper proof, not machine-checked. **Gates:** bmc.sh all three queries
       sxUnsat, exit 0; test.sh green incl. both reconstruction properties;
       check-readme.sh 5/5.
-- [ ] 5 CT hardening (sixth dudect target: static-secret DH fixed-vs-random; ct.sh
-      environment preflight banner; full run + ct-results.md) — timing run LAST, quiet
-      machine, synchronous-foreground container rule (RFC-002 ops lesson)
+- [x] 5 CT hardening (subject: "RFC-003 slice 5: CT hardening") — (1) sixth dudect
+      target `x25519(X25519StaticSecret, peer)` fixed-vs-random in ct_main.nim
+      (`opX25519StaticDH`), reusing the ephemeral target's `fixedPeer` deliberately so
+      targets 5/6 compare the same ladder+peer path; ephemeral target's doc updated to
+      point its unanswerable leak question at target six. (2) ct.sh environment
+      preflight banner: governor + `podman ps` count + `/proc/loadavg` echoed
+      unconditionally into the captured log (fixing the hand-transcription mechanism
+      that failed in RFC-002 slice 4); WARNs (never hard-fails) on powersave / nonzero
+      containers / 1-min load ≥ 4 (fixed threshold, disclosed heuristic). (3) Full
+      campaign, 1e6 samples/class × 2 classes × 7 rows: positive control t=921.79 FAIL
+      (expected); signDetached −0.60, geScalarmultBase 1.97, x25519Base 0.34, ephemeral
+      construct+consume −1.18, NEW static DH −0.36 — all six real targets PASS, max
+      |t|=1.97 ≪ 4.5. Banner observed: governor powersave (WARN), 1 unrelated idle
+      container (amoxtli-dev, WARN, known disclosed shared-host condition), load
+      3.27/4.85/4.58 (no WARN). docs/ct-results.md updated per convention (prior runs
+      preserved; new table + sixth-target subsection + banner values quoted verbatim).
+      ~13 min wall-clock. **Gates:** campaign clean as above; test.sh green.
 - [ ] 6 docs/packaging (CHANGELOG + 0.3.0 bump in sello.nimble + milpa.kdl; README/
       CLAUDE.md/x25519.nim drift fixes; F12/F14 gap note; mutation.sh estimate)
 
