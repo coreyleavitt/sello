@@ -3,9 +3,12 @@
 - **Stage:** 4 (review) — implementation complete. All five slices land; RFC approved by
   Corey 2026-08-06 with all decisions resolved (no architect rounds needed — the RFC *is*
   the output of a three-lens architect audit, and Corey approved the full scope).
-- **Resume:** RFC-002 stage 4: `/code-review`. All five slices (`docs/rfc-002-audit-
-  remediation.md`) are done — see the slice list below for what each changed, its
-  judgment calls, and its gate results. Nothing left to implement for this RFC.
+- **Resume:** `/code-review docs/rfc-002-audit-remediation.md` (stage 4; awaiting Corey to
+  invoke it). All five slices are done and verified by the control loop 2026-08-07 —
+  master history `ecdb8e6` (slice 4) → `8449b06` (3) → `1458abd` (5) → `72610d9` (2) →
+  `02e0005` (1), working tree clean; see the slice list below for what each changed, its
+  judgment calls, and its gate results. Nothing left to implement for this RFC; this is a
+  safe `/compact` point. No open forks.
   - **Phase A — slice 2 alone** — DONE (see the slice list below for what changed and its
     one judgment call). It relocated the modules every later slice's test code imports
     (`types.nim` → `wire.nim`/`wipe.nim`, `challenge.nim` extraction), so nothing ran
