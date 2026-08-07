@@ -271,6 +271,41 @@ remains sensitive to a deliberate leak of this size at every crop setting
 in the battery, not merely at the one 99.5th-percentile threshold the
 prior single-crop harness checked.
 
+### Round-3 closing run (six targets, percentile battery, quiet host -- the current record)
+
+Because the batch B run above was taken in the noisiest environment this
+document has ever disclosed (1-minute load 23.97, three concurrent
+containers), the round-3 control loop re-ran the identical campaign --
+same code, same six targets, same battery methodology, byte-identical
+harness -- once the shared host quieted down, so the standing record is
+not anchored to the worst measurement conditions on file. Verbatim from
+this run's preflight banner: governor `powersave` (standing WARN, no
+passwordless root to change it); running containers `2` (the two
+long-lived, otherwise-idle `amoxtli-dev` containers -- `exciting_nash`,
+up 12 hours; `hungry_khayyam`, up 5 hours -- the known shared-host
+condition, no third transient container this time); load average
+`1.88 6.35 14.22` -- no WARN (1-minute load well under the banner's 4.0
+threshold; the elevated 5/15-minute tails are the earlier round-3 batch
+work still decaying out of the averages, not concurrent activity during
+the run).
+
+| target | samples/class | worst-case &#124;t&#124; | worst crop% | verdict | battery: 100% / 99.9% / 99.5% / 99.0% / 95.0% / 90.0% |
+|---|---|---|---|---|---|
+| positive control (`leakyOp`, harness self-test) | 1,000,000 | **1048.88** | 90.0% | FAIL (expected) | 824.82 / 889.88 / 903.95 / 916.00 / 1011.64 / 1048.88 |
+| `sello/private/backend.signDetached` | 1,000,000 | **0.79** | 95.0% | PASS | -0.56 / -0.24 / -0.17 / -0.76 / -0.79 / 0.64 |
+| `sello/scalar.geScalarmultBase` | 1,000,000 | **1.29** | 90.0% | PASS | -1.16 / -0.50 / -0.56 / -0.57 / 0.21 / -1.29 |
+| `sello/x25519.x25519Base` | 1,000,000 | **1.40** | 100.0% (no crop) | PASS | 1.40 / 1.25 / 0.80 / 0.82 / 0.37 / 0.83 |
+| `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 1,000,000 | **1.10** | 95.0% | PASS | -0.84 / -0.35 / -1.03 / -0.71 / -1.10 / 0.46 |
+| `x25519(X25519StaticSecret, peer)` fixed-vs-random | 1,000,000 | **2.43** | 99.0% | PASS | -1.00 / -1.49 / -2.10 / -2.43 / -1.34 / 0.09 |
+
+All five real targets PASS with worst-case |t| = 2.43 (static DH at the
+99.0% crop) -- inside the `|t| <= 4.5` pass band at every battery entry
+-- and the positive control FAILs at every crop (lowest entry 824.82,
+~82x the fail threshold). Read together with the batch B run above, the
+same code has now passed the identical battery on both the noisiest and
+the quietest disclosed environments in this document's history, which is
+a stronger statement than either run alone.
+
 ### The sixth target: x25519(X25519StaticSecret, peer) -- a real fixed-vs-random-secret leak test of the DH path
 
 The fifth target (construct+consume over `X25519EphemeralSecret`, above)

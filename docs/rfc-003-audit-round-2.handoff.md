@@ -205,10 +205,14 @@
 ## reproducibility statement honest about milpa/GHCR being author tooling with the
 ## manual --path equivalent documented, SECURITY.md, threat-model README section,
 ## CHANGELOG breaking-changes reorg folding all four batches into 0.3.0). ALL FOUR
-## BATCHES COMPLETE. Remaining: the control loop's final quiet-host ct.sh re-run
-## folded into ct-results.md as the current record (batch B's run passed but at load
-## 23.97 / 3 containers). Then the combined RFC-002+003+round-3 /code-review remains
-## the recorded next step for Corey.
+## BATCHES COMPLETE. The closing quiet-host ct.sh re-run is DONE and committed as the
+## current record in ct-results.md (load 1.88, only the two idle amoxtli containers;
+## all five real targets PASS, worst-case |t|=2.43 static DH @99% crop, positive
+## control FAIL at every crop >= 824) — same code now battery-clean on both the
+## noisiest and quietest disclosed environments. ROUND-3 FIX-NOW WORK IS FULLY
+## COMPLETE (commits d36078b A, 78508a4 B, a2f4f7e Z, c2c5033 C + ct-results closing
+## commit; tags v0.1.0/v0.2.0/v0.3.0). Remaining next step for Corey: the ONE combined
+## /code-review over RFC-002 + RFC-003 + round-3 scope.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
