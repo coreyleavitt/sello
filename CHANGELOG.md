@@ -10,8 +10,11 @@ until 1.0.0.
 ## [0.3.0] - 2026-08-07
 
 Nothing was released between 0.2.0 and this version, so this single entry
-covers both RFC-002 (design-audit remediation) and RFC-003 (round-2
-compromise audit remediation) in full.
+covers RFC-002 (design-audit remediation), RFC-003 (round-2 compromise
+audit remediation), and the subsequent round-3 fix batches A (src design
+and CT hygiene, `d36078b`), B (verification infrastructure, `78508a4`),
+Z (machine-checked mask-algebra and carry-bound proofs, `a2f4f7e`), and
+C (docs/packaging/consumer experience, this batch) in full.
 
 ### Added
 
@@ -53,9 +56,15 @@ compromise audit remediation) in full.
   without `system.move`. `x25519EphemeralSecret()` plus the non-consuming
   `x25519Base` overload remain for flows that need the two steps apart.
   README's primary X25519 example now leads with the pair.
-- **`toBytes(kp: Keypair): array[32, byte]`** (RFC-002 slice 1 item 2) --
+- **`toSeedBytes(kp: Keypair): array[32, byte]`** (RFC-002 slice 1 item 2) --
   raw seed bytes for persistence, caller-owned copy, same wipe-guidance
-  doc register as `X25519StaticSecret.toBytes`.
+  doc register as `X25519StaticSecret.toBytes`. Named `toBytes(kp)` when
+  first added in this same unreleased cycle; renamed to `toSeedBytes`
+  before shipping (round-3 fix batch A, finding A7 -- see Breaking
+  changes, below, for why) -- since `toBytes(kp)` itself never appeared
+  in a released version, this is a same-cycle correction, not a breaking
+  change for any real consumer, though it is called out there for anyone
+  who checked out sello mid-cycle under the old name.
 - **Mutation-testing harness** (`tests/mutation/`, `scripts/mutation.sh`,
   RFC-002 slice 5 / RFC-003 slice 3): a curated, patch-based exact-string
   mutant catalog (proptest's own `mutation.nim` v1 is `int -> int` only and
@@ -130,14 +139,6 @@ compromise audit remediation) in full.
 
 ### Changed
 
-- **`verify` is actor-first.** New shape:
-  `verify(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool`
-  (+ `string` overload), call shape `pk.verify(msg, sig)` -- matches RFC
-  8032's own VERIFY(pk, M, sig) notation and ed25519-dalek's
-  `VerifyingKey::verify(message, signature)`, and now matches `sign`'s and
-  `x25519`'s own actor-first argument order (RFC-002 slice 1 item 1). The
-  old `verify(sig, msg, pk)` order, and the facade/README's "known,
-  deliberate asymmetry" notes explaining it, are gone.
 - Internal module layering split further: `sello/types.nim` is gone,
   replaced by `sello/wire.nim` (`PublicKey`/`Signature` plus their
   converters/`==`/`$`/`hash`; no `private/ct` import -- these types hold
@@ -169,14 +170,150 @@ compromise audit remediation) in full.
   fifth/sixth dudect targets and the 46-mutant catalog respectively (see
   Added, above); both timing runs disclose a shared, not exclusively
   quiet, host (RFC-002 slice 4 and RFC-003 slice 5).
+- **X25519 wipe parity with the ed25519 signing backend** (round-3 fix
+  batch A): the Montgomery ladder's temporaries (`x2`/`z2`/`x3`/`z3`, its
+  per-iteration scratch, and `zInv`) are now hoisted and wiped alongside
+  the clamped scalar, not left to fall out of scope unwiped; the raw
+  ladder output is wiped in both `x25519` overloads on both the `Some`
+  and `None` result paths; a defensive `try`/`finally` net was added so a
+  wipe still fires if an exception unwinds through the call.
+- **Purity casts removed from both signing backends** (round-3 fix batch
+  A, finding A4): `backend.nim`'s and `backend_sodium.nim`'s
+  `derivePublic`/`signDetached`, and the sodium verify adapter, are now
+  honest `proc`s instead of `func`s wrapped in a
+  `{.cast(noSideEffect).}` lie -- the sodium adapter genuinely has FFI/
+  global-state side effects (`ensureSodiumInit`'s atomic guard) it can no
+  longer hide. `signing.nim`'s backend dispatch is unaffected (still one
+  local name, still call-site agnostic); `keypair`/`sign` were already
+  `proc`, so this is not visible at the public facade.
+- **`secretHooks`/`secretHooksMoveOnly` templates** (round-3 fix batch A,
+  finding A5, `sello/private/secret_hooks.nim`) consolidate the
+  `=destroy`-wipe/`=copy {.error.}` boilerplate previously hand-written
+  once per secret type (`Seed` plus the three X25519 secret types) into
+  one audited `{.dirty.}` template pair, so ORC still recognizes the
+  hooks at each type's own declaration site. No behavior change --
+  same wipe, same move-only restriction, one fewer hand-copied
+  implementation to keep in sync.
+- **`feFromLimbs` gains the established debug-only per-limb range
+  assert** (round-3 fix batch A), matching the precondition-checking
+  pattern already used elsewhere (`geScalarmultBase`'s bit-255-clear
+  assert, `signDetached`'s re-derivation check) -- `when not
+  defined(release)`, absent from the dudect-measured release build.
+- **Bool-vs-`Option` return-shape rationale documented** on the `x25519`
+  overloads (round-3 fix batch A): why the peer-key-rejection path
+  returns `Option[X25519Shared]` rather than raising or returning a
+  sentinel value.
+- **Differential adversarial testing against libsodium**, under
+  `-d:selloLibsodium` (round-3 fix batch B): the full Wycheproof ed25519
+  corpus run through both sello's own `verify` and libsodium's
+  `crypto_sign_verify_detached` (138/150 vectors comparable; 12 excluded
+  because libsodium's C API rejects non-64-byte signatures outright,
+  which the excluded vectors specifically probe), and all 518 Wycheproof
+  X25519 vectors run through both sello's ladder and libsodium's
+  `crypto_scalarmult` via a new adapter -- zero verdict mismatches in
+  either corpus. JSON vector loaders were extracted to a shared
+  `wycheproof_vectors.nim` to back both the existing single-verifier
+  suites and this new differential one.
+- **Fuzz campaigns now seed known-good vectors into the mutation corpus**
+  (round-3 fix batch B), via proptest's `initialIRCorpus` (3 seeds per
+  target, 0 dropped, asserted in the harness) -- so mutation explores
+  the accept boundary around a valid input instead of starting cold.
+- **`tests/mutation/` gains four new `private/backend.nim` mutants**
+  (round-3 fix batch B, finding B3 -- the signing backend's first
+  mutation coverage): `scMulAdd`'s secret-operand swap, the SHA-512
+  seed-expansion upper/lower-half confusion, the nonce-hash update-order
+  swap, and a dropped `clampScalar` call in `derivePublic`. All four
+  killed by `test_signing.nim`'s RFC 8032 SS7.1 KAT vectors. Catalog is
+  now 50 mutants total (up from 46), still 0 survivors, still the one
+  confirmed-equivalent retiree (`F05`) -- see `docs/mutation-results.md`.
+- **`tests/ct/` dudect harness now evaluates a six-crop percentile
+  battery per target** (round-3 fix batch B) instead of a single
+  threshold, keying its pass/fail verdict off the worst-case `|t|` across
+  the battery; `tests/ct/ct_main.nim` now wraps its scalar via
+  `toSecretScalar` to match `geScalarmultBase`'s new `SecretScalar`
+  parameter (see Breaking changes, below). Results regenerated in
+  `docs/ct-results.md`, which also newly discloses a high-load
+  environment for this particular run (load average 23.97, three
+  concurrent containers) -- worst-case `|t| <= 1.85` across all five real
+  targets even so.
+- **`geAdd` gains explicit P+P and P+(-P) edge-case tests** (round-3 fix
+  batch B) -- verified red under a deliberate local perturbation during
+  authoring, then reverted, confirming the tests actually exercise the
+  code path they claim to.
+- **`scripts/test.sh`/`scripts/test-libsodium.sh` print a shared
+  end-of-run tier summary** (round-3 fix batch B, `scripts/lib/
+  tier-summary.sh`) -- a one-screen rollup of which validation tiers
+  (RFC vectors, Wycheproof, differential, property tests, mutation) ran
+  and their headline results, rather than requiring a reader to scroll
+  the full test log.
+- **Machine-checked (Z3) proof of the mask-construction/masked-select
+  algebra** underlying `feCMove`/`feCSwap` (round-3 fix batch Z,
+  `tests/verify/symex_mask.nim`): mask construction (`-int32(b)`) is
+  proved to yield exactly `0` or `-1` for both booleans, and masked
+  select/swap is proved to yield exactly the selected operand, over the
+  FULL `int32` domain (three `sxUnsat` lemmas, no composition needed --
+  the per-limb formula has no inter-limb dependency, so one-limb
+  coverage already extends to the whole 10-limb `Fe`); cross-checked
+  against the real primitives on 1124 boundary-plus-random cases.
+- **Machine-checked (Z3) per-step bound proof for `scReduce`/`scMulAdd`'s
+  shared carry-propagation macro** (round-3 fix batch Z, `tests/verify/
+  symex_reduce.nim`), both the biased and unbiased forms, `sxUnsat` over
+  the full domain. The whole-body free-variable composition (the
+  analogous full-chain step `symex_recode.nim` completed for
+  `recodeScalarRadix16`) was attempted against real Z3 and hit a genuine
+  resource wall (~515s/~550s, externally killed, across two runs) --
+  reported honestly as attempted-and-inconclusive, preserved inert
+  behind `-d:selloBmcReduceFullChain` (off by default), matching
+  `symex_recode.nim`'s own precedent for its first unsuccessful
+  whole-array attempt. `scMulAdd`'s nonlinear multiply pyramid was never
+  attempted symbolically (a scoping decision, not a wall) -- its
+  magnitude bound remains a written argument, cross-checked byte-exact
+  against the real function on concrete vectors. `scripts/bmc.sh` now
+  chains all three symex harnesses (`symex_recode`, `symex_mask`,
+  `symex_reduce`) in one invocation.
+- **Packaging and consumer-experience fixes** (round-3 fix batch C, this
+  batch): a new "Threat model / when not to use this" section in
+  `README.md` consolidates the timing/memory/malleability/audit caveats
+  that were previously scattered across the trust-story prose into one
+  skimmable list; a reproducibility paragraph in the Building section
+  states plainly that milpa and the `ghcr.io/coreyleavitt/nim:2.2.10`
+  base image are the author's own tooling with no public-availability
+  claim made here, and documents the manual `--path`-flag equivalent for
+  building without milpa; a tested-Nim-version note distinguishes
+  `sello.nimble`'s `>= 2.2.10` compatibility floor from the single
+  version (2.2.10) every claim in this document was actually gathered
+  against; `X25519BasePoint` added to the X25519 API tour, which had
+  omitted it; `NOTICE`'s Wycheproof paragraph reworded to state plainly
+  that the vendored JSON fixtures ARE redistributed in the source tree
+  (under Apache-2.0) and are simply not part of the *built library
+  artifact*, replacing a sentence that had asserted both "not
+  redistributed" and "beyond the checked-in fixtures" at once. New
+  top-level `SECURITY.md`. Annotated retroactive tags `v0.1.0`
+  (`c9b4ac9`) and `v0.2.0` (`710fbe7`) added against this document's own
+  historical entries below.
 
-### Removed (breaking)
+### Breaking changes
 
-- **`seed()` accessor on `Keypair` deleted**, replaced by `toBytes(kp)`
-  (see Added, above). `seed()` returned a `Seed` the public API provided
-  no way to extract bytes from -- an unfinished corner masquerading as a
-  persistence escape hatch (RFC-002 slice 1 item 2). No migration path:
-  construct via `toBytes(kp)` instead.
+- **`verify` is actor-first.** New shape:
+  `verify(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool`
+  (+ `string` overload), call shape `pk.verify(msg, sig)` -- matches RFC
+  8032's own VERIFY(pk, M, sig) notation and ed25519-dalek's
+  `VerifyingKey::verify(message, signature)`, and now matches `sign`'s and
+  `x25519`'s own actor-first argument order (RFC-002 slice 1 item 1). The
+  old `verify(sig, msg, pk)` order, and the facade/README's "known,
+  deliberate asymmetry" notes explaining it, are gone. No migration path
+  beyond reordering call sites; this argument-order flip is the one
+  behavioral break most likely to bite an existing caller silently (same
+  three argument types, swapped positions, no compile error if a caller
+  happened to have variables typed identically at both positions), which
+  is why it is called out here rather than left in Changed, above.
+- **`seed()` accessor on `Keypair` deleted**, replaced by `toSeedBytes(kp)`
+  (see Added, above -- named `toBytes(kp)` earlier in this same
+  unreleased cycle; renamed to `toSeedBytes` by round-3 fix batch A,
+  finding A7, before ever shipping). `seed()` returned a `Seed` the
+  public API provided no way to extract bytes from -- an unfinished
+  corner masquerading as a persistence escape hatch (RFC-002 slice 1
+  item 2). No migration path: construct via `toSeedBytes(kp)` instead.
 - **`Seed` is now move-only** (`=copy` is a compile error), matching
   `Keypair`'s rationale now that nothing in the public API needs `Seed`
   copies; `keypair(toSeed(bytes))` remains the construction idiom
@@ -187,8 +324,26 @@ compromise audit remediation) in full.
 - **`Seed.==` deleted.** The X25519 secret family already enforced "no
   vartime equality on secrets" at the type layer (no `==` at all);
   ed25519's `Seed` enforced the same policy only at the facade export
-  list. One principle, one layer now -- compare via `toBytes(kp)` or a
-  local helper in tests (RFC-002 slice 1 item 4).
+  list. One principle, one layer now -- compare via `toSeedBytes(kp)` or
+  a local helper in tests (RFC-002 slice 1 item 4).
+- **`field.feIsNonZero` renamed `feIsNonZeroVartime`** (round-3 fix batch
+  A) -- an early-return equality check is vartime, and this codebase's
+  naming law (`scalarmultVartime`, see `CLAUDE.md`) requires that suffix
+  on any function whose timing depends on secret data, so a caller
+  cannot mistake this for a constant-time primitive. Breaking only for
+  direct `sello/field` submodule importers (the facade never exported
+  the old name); no migration beyond the rename itself.
+- **`scalar.geScalarmultBase`/`scMulAdd` now take `SecretScalar`, not a
+  bare `array[32, byte]`, in their secret-scalar positions** (round-3 fix
+  batch A, finding A3, `scalar.nim`'s new `SecretScalar` distinct type).
+  `scalarmultVartime` deliberately still accepts only plain bytes, so
+  passing a `SecretScalar` to the vartime verify-path function, or a bare
+  array to the two constant-time signing functions, is now a compile
+  error either way -- proven by a negative fixture, not just documented.
+  Breaking only for direct `sello/scalar` submodule importers calling
+  these two functions (the facade never exposed raw scalar bytes at this
+  layer); construct a `SecretScalar` via the new `toSecretScalar(bytes)`
+  to migrate.
 
 ### Correction to the 0.2.0 entry
 

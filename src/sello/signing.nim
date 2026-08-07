@@ -74,9 +74,16 @@
 ##   footnote; legitimate transfers move (Nim inserts moves at last use).
 ##   No custom `=sink` is needed. `Seed` follows the same pattern (see
 ##   above).
-## - **`keypair()` is the only function in sello's public surface that can
-##   raise** (`OSError`, on CSPRNG failure) — fail fast on a broken source
-##   of randomness. It fills the stack `Seed` in place via
+## - **`keypair()` raises `OSError` on CSPRNG failure**, one of five
+##   fresh-secret constructors across the public surface that share this
+##   fail-fast policy (`keypair()`; `x25519.x25519StaticSecret`,
+##   `x25519EphemeralSecret`, `x25519StaticPair`, `x25519EphemeralPair` —
+##   see `x25519.nim`). Nothing else in the pure-Nim public surface raises.
+##   Under `-d:selloLibsodium`, `keypair(seed)`/`keypair()`/`sign` can also
+##   raise `SodiumInitError` (`private/backend_sodium.nim`) if libsodium's
+##   one-time `sodium_init()` call fails — reachable through this module's
+##   dispatch, not merely an internal detail of that backend. `keypair()`
+##   fills the stack `Seed` in place via
 ##   `std/sysrand`'s `urandom(dest: var openArray[byte]): bool` overload;
 ##   the `urandom(size)` convenience overload is never used here because it
 ##   returns a heap `seq`, which would route the fresh seed through
@@ -213,9 +220,11 @@ proc keypair*(seed: sink Seed): Keypair =
 
 proc keypair*(): Keypair =
   ## Fresh identity via `std/sysrand`'s in-place `urandom`. Raises
-  ## `OSError` if the OS CSPRNG call fails — the only function in sello's
-  ## public surface that can raise; callers let it propagate uncaught
-  ## (fail-fast on a broken CSPRNG is correct). Never `std/random`.
+  ## `OSError` if the OS CSPRNG call fails, the same fail-fast policy
+  ## shared by every fresh-secret constructor in the public surface
+  ## (see the module doc comment above); callers let it propagate
+  ## uncaught (fail-fast on a broken CSPRNG is correct). Never
+  ## `std/random`.
   ##
   ## RFC-001's "Seed sourcing" contract requires filling the stack `Seed`
   ## directly via `urandom`'s in-place `openArray[byte]` overload — never a

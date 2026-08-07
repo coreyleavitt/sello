@@ -103,6 +103,40 @@ audited implementation, use the `-d:selloLibsodium` backend for signing,
 and treat `verify`'s Wycheproof-clean record as the strongest claim this
 library makes on its own.
 
+## Threat model / when not to use this
+
+The prose above states these caveats in context; this section pulls them
+into one skimmable list for anyone deciding whether sello fits their
+threat model:
+
+- **Timing evidence is statistical, not a proof of constant-time
+  behavior.** The dudect-style harness (`tests/ct/`) reports a t-statistic
+  under Welch's t-test, not a formal guarantee -- and its own honest
+  limits matter: this environment's runs were in a container (not bare
+  metal), under the `powersave` frequency governor (not `performance`),
+  on a single CPU model and compiler, and -- for the three most recent
+  runs -- on a host shared with another, otherwise-idle container rather
+  than an exclusively quiet one. Full methodology, numbers, and this
+  reasoning in detail are in [`docs/ct-results.md`](docs/ct-results.md).
+- **No defense against a memory-dumping attacker beyond destructor-driven
+  wipes.** Every secret-holding type volatile-store-wipes itself on scope
+  exit (`sello/private/ct`), but sello does not `mlock` its stack pages or
+  use a guarded-heap allocator -- an attacker who can read process memory
+  or a core dump *while a secret is live* is not defended against by this
+  library, only by the OS/runtime environment you run it in.
+- **Signature malleability.** RFC 8032's cofactorless verification
+  equation admits a second, distinct valid signature for the same message
+  and key; never use signature bytes as a uniqueness or dedup key (see
+  `verify`'s and `Signature`'s own doc comments).
+- **The pure-Nim signer is unaudited.** It carries the roll-your-own-
+  crypto trust tax described above; if that is not acceptable for your use
+  case, `-d:selloLibsodium` dispatches `sign`/`keypair` to libsodium's
+  audited C implementation instead, through the identical `Keypair` API.
+  `verify` is pure-Nim on both backends and carries no such asterisk.
+- **All timing evidence is from one machine.** No cross-CPU-model or
+  cross-architecture (x86 vs. ARM) timing comparison has been run; see the
+  point above and `docs/ct-results.md` for the exact environment.
+
 ## Install
 
 ```
@@ -115,14 +149,29 @@ resolves and pins `nimcrypto` via milpa (`milpa.kdl`/`milpa.lock`, commit SHA
 + content hash); nimble-ecosystem consumers resolve it normally via
 `sello.nimble`'s `requires` floor.
 
+`nim >= 2.2.10` in `sello.nimble` is a compatibility floor, not a tested
+matrix: every claim in this README (RFC vectors, Wycheproof, the timing
+harness, mutation testing, the Z3 proofs) was gathered against exactly
+Nim 2.2.10, the version pinned in `Containerfile`/`scripts/*.sh`'s
+container image. Newer 2.x releases are expected to work but have not
+been separately verified.
+
+Source-tree builds and the test suite (`scripts/test.sh` and friends)
+require milpa; a plain `nimble install` consumer gets the library only,
+resolved through `sello.nimble`'s `requires` floor as above -- see
+"Building and testing" below for what milpa does and the manual
+equivalent for an environment without it.
+
 ## Usage
 
 ```nim
 import sello
 
-# Fresh identity. keypair() is the only function in sello's public
-# surface that can raise (OSError, on a broken CSPRNG) -- let it
-# propagate; failing fast on bad randomness is correct.
+# Fresh identity. keypair() raises OSError on a broken CSPRNG, the
+# same fail-fast policy shared by every fresh-secret constructor in
+# sello's public surface (keypair, x25519StaticSecret,
+# x25519EphemeralSecret, x25519StaticPair, x25519EphemeralPair) --
+# let it propagate; failing fast on bad randomness is correct.
 let kp = keypair()
 
 let sig = kp.sign("hello")               # deterministic, total, constant-time
@@ -238,8 +287,10 @@ persisted key); pair `x25519Base(...)` with it yourself in that case --
 `x25519StaticPair()` is only for a fresh secret.
 
 X25519's public/shared roles round out the type family: `X25519Public` (a
-public u-coordinate; `toX25519Public(bytes)` from a peer's wire value) and
-`X25519Shared` (a completed DH output -- feed it to a KDF, never use it
+public u-coordinate; `toX25519Public(bytes)` from a peer's wire value),
+`X25519BasePoint` (the RFC 7748 base point as an `X25519Public` constant --
+`x25519Base`'s implicit peer, exposed for callers who need it explicitly),
+and `X25519Shared` (a completed DH output -- feed it to a KDF, never use it
 directly as a key). Every secret-holding type (`X25519StaticSecret`,
 `X25519EphemeralSecret`, `X25519Shared`) wipes itself on scope exit and on
 explicit `wipe(...)`, the same as `Seed`; `toBytes` converts the other
@@ -269,6 +320,27 @@ nimble: `milpa.kdl` declares `nimcrypto` as a pinned git dependency,
 `milpa fetch` clones it into `_deps/` and emits `nim.cfg`, and `milpa.lock`
 records the exact commit SHA + content hash resolved (see
 [`NOTICE`](NOTICE)). Run `milpa fetch` once after cloning.
+
+**Reproducibility note:** milpa is the author's own tool, and this
+repository does not reference a public URL for it (unlike its
+dependencies, e.g. `nimcrypto`, `proptest`, which are ordinary public git
+repositories pinned in `milpa.lock`); the container image the dev scripts
+build against, `ghcr.io/coreyleavitt/nim:2.2.10`, is likewise not
+established here as publicly pullable. Neither is required to verify
+sello's claims, though: everything milpa generates for this project is
+`nim.cfg`'s `--path` lines (one for `src/`, one per resolved dependency
+directory -- `nim.cfg` itself is gitignored/regenerated, not checked in;
+`config.nims`, which milpa never touches, is the other file Nim reads).
+The manual equivalent in any Nim 2.2.10 environment (plus
+`libsodium-devel`/`z3-devel` for the optional backend and proofs) is:
+clone `nimcrypto` at the commit `milpa.lock` records
+(`b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08`, tag `v0.7.3`) and, for the
+property tests, `proptest` similarly, then pass `--path:src`
+plus `--path:<each clone>` to `nim c`/`nim check` in place of running
+`milpa fetch` first. The exact invocations themselves (what flags, what
+image, what mounts) are documented in `scripts/*.sh`, so the build is
+reproducible from the scripts' own text even without milpa or the
+container image.
 
 The property-based tests (`tests/unit/test_properties_*.nim`) need
 [proptest](https://github.com/coreyleavitt/proptest), declared as an

@@ -193,17 +193,22 @@
 ## test.sh/test-libsodium.sh via shared lib. ct.sh full run passed (all real targets
 ## worst-case |t| <= 1.85) but in the NOISIEST disclosed environment yet (load 23.97,
 ## 3 containers) — control loop will re-run ct.sh once on a quiet host after batch C
-## as the final record. Batch Z (Z3 follow-ons: feCMove/feCSwap mask algebra, scReduce
-## carry bounds, scMulAdd intermediate bounds — new harness under tests/verify/, wired
-## into bmc.sh) is RUNNING as of this refresh (2026-08-07 ~15:30; its agent stalled
-## once on the background-wait failure mode and was resumed with synchronous orders;
-## work uncommitted until its gates — bmc.sh all-sxUnsat-or-honestly-documented +
-## test.sh — pass and the control loop commits). Then batch C (docs/packaging/tags),
-## then the control loop's final quiet-host ct.sh re-run. If resuming after a dead
-## session: `git status` — uncommitted tests/verify/ + bmc.sh changes belong to batch
-## Z (verify gates, commit as "Round-3 fixes Z"); then launch batch C per the batch
-## list above; then re-run scripts/ct.sh on a quiet host and fold the result into
-## docs/ct-results.md as the current record.
+## as the final record. Batch Z DONE (committed a2f4f7e): symex_mask.nim (feCMove/
+## feCSwap proved over full int32 domain, 3 sxUnsat lemmas, no composition needed) +
+## symex_reduce.nim (biased+unbiased carry-macro step bounds sxUnsat; whole-body
+## compositions hit a real resource wall at ~515-550s, preserved behind
+## -d:selloBmcReduceFullChain; multiply pyramid scoped out with written derivation);
+## bmc.sh runs all 8 default queries, exit 0; test.sh green; 3rd+4th empirical symex
+## limitations documented in symex_mask.nim. Batch C DONE (committed; raise-claim
+## fixed with honest SodiumInitError qualification, retroactive tags v0.1.0@c9b4ac9 +
+## v0.2.0@710fbe7 with recorded reasoning, v0.3.0 tagged at the batch-C commit,
+## reproducibility statement honest about milpa/GHCR being author tooling with the
+## manual --path equivalent documented, SECURITY.md, threat-model README section,
+## CHANGELOG breaking-changes reorg folding all four batches into 0.3.0). ALL FOUR
+## BATCHES COMPLETE. Remaining: the control loop's final quiet-host ct.sh re-run
+## folded into ct-results.md as the current record (batch B's run passed but at load
+## 23.97 / 3 containers). Then the combined RFC-002+003+round-3 /code-review remains
+## the recorded next step for Corey.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
