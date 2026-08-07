@@ -42,13 +42,19 @@ API is built around that split rather than papering over it:
   (`tests/fuzz/`, run via `scripts/fuzz.sh`) -- unstructured mutation
   testing the ground the curated vectors don't cover by construction.
   Separately, `recodeScalarRadix16`'s digit-range invariant (previously
-  only sampled) now has a machine-checked Z3 proof, both for its
-  per-iteration arithmetic step and for the full 63-step composition in
-  one query over a generalized free-nibble input domain (`tests/verify/`,
-  run via `scripts/bmc.sh`) -- see that harness's module doc comment for
-  the exact scope: the literal whole-function attempt over a symbolic
-  32-byte array did not complete in this environment's resource budget
-  and remains an inert, opt-in retry.
+  only sampled) now has a machine-checked Z3 proof: the per-iteration
+  arithmetic step, the full 63-step composition in one query over a
+  generalized free-nibble domain, and -- via a written composition
+  argument, not a further solver run -- the literal byte-array-in
+  function itself, since its nibbles are mask-bounded by construction
+  into the exact domain the free-nibble proof already covers. The
+  companion reconstruction identity (that the emitted digits actually
+  reconstruct the original scalar) is a separate property, proved by a
+  written paper induction and backed by a sampled property test. See
+  `tests/verify/symex_recode.nim`'s module doc comment (run via
+  `scripts/bmc.sh`) for the full writeup, including the historical
+  whole-byte-array single-query attempt this composition argument
+  supersedes.
 
 - **`sign`/`keygen` hold the secret scalar.** This is the roll-your-own-
   crypto half, and it carries the trust tax that implies:

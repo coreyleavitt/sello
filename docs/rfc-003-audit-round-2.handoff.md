@@ -6,8 +6,8 @@
   spot-checked against source before drafting.
 - **Resume:** `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 2/6 done, 4
-  remaining"); stop when every slice is implemented` — slices 1, 2, 3 done and committed;
-  next is slice 4 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are implemented by
+  remaining"); stop when every slice is implemented` — slices 1-4 done and committed;
+  next is slice 5, then 6 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are done by
   sonnet subagents (TDD, gates run synchronously in-agent per the RFC-002 ops lesson);
   the control loop verifies, commits, and updates this doc.
 - **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
@@ -81,8 +81,26 @@
       **Gates:** mutation.sh 46/46 killed, 0 survivors, 0 compile-error kills;
       test.sh green (14 files); test-libsodium.sh green (real interop assertions
       confirmed active).
-- [ ] 4 proof completion (written telescoping-carry induction for the reconstruction
-      identity; literal-function composition argument; RESOURCE WALL reframe)
+- [x] 4 proof completion (subject: "RFC-003 slice 4: proof completion") — doc-level, no
+      new solver machinery, exactly per RFC. (1) Written inductive proof of the
+      reconstruction identity added to symex_recode.nim's module doc: invariant P(k):
+      Σ_{j<k} digits[j]·16^j + carry_k·16^k == Σ_{j<k} nibbles[j]·16^j; base P(0)
+      trivial; step uses digit_i = nibble_i + carry_i − 16·carry_{i+1} (derived from the
+      literal three-line loop body) with exact telescoping cancellation; final step via
+      digits[63] = nibbles[63] + carry_63; composes with base-16 positional decomposition
+      to Σ digits·16^i == s. Unconditional integer algebra, independent of the Z3 range
+      proof (independence noted explicitly). Control loop re-derived the algebra and
+      confirmed it against the code. Cross-referenced both ways with the sampled
+      property (which stays). (2) Composition argument closes the literal-function gap:
+      byte→nibble decode is mask-bounded to [0,15] ([0,7] top nibble under
+      bit-255-clear) by construction, so every real scalar's nibble tuple lies in the
+      free-nibble sxUnsat query's proven domain; RESOURCE WALL reframed (OOM was the
+      byte-array encoding; nothing awaits a bigger box), `-d:selloBmcFullUnroll` kept as
+      historical record. CLAUDE.md (tests/verify/ bullet + validation-bar Z3 bullet
+      only) and README's Z3 paragraph updated; both state plainly the induction is a
+      written paper proof, not machine-checked. **Gates:** bmc.sh all three queries
+      sxUnsat, exit 0; test.sh green incl. both reconstruction properties;
+      check-readme.sh 5/5.
 - [ ] 5 CT hardening (sixth dudect target: static-secret DH fixed-vs-random; ct.sh
       environment preflight banner; full run + ct-results.md) — timing run LAST, quiet
       machine, synchronous-foreground container rule (RFC-002 ops lesson)

@@ -21,6 +21,13 @@
 ## Previously this was only SAMPLED: `tests/unit/test_properties_scalar.nim`
 ## checks 200 scalars (100 clamped-domain, 100 reduced-mod-L) drawn from
 ## proptest's PBT generator, against 2^255 possible bit-255-clear inputs.
+## (A separate, related property -- the RECONSTRUCTION identity, Σ
+## digits[i]*16^i == s -- is also checked by that same test file's sampled
+## property, and is additionally now proved for ALL bit-255-clear inputs
+## by a WRITTEN, paper-checked induction, not a Z3 run; see "WRITTEN
+## INDUCTIVE PROOF" below, after the whole-chain proof code, for the full
+## argument and why it is a different property from the range invariant
+## this harness's Z3 queries target.)
 ##
 ## THIS HARNESS DOES NOT MACHINE-CHECK THE LITERAL FUNCTION, BYTE ARRAY IN,
 ## DIGIT ARRAY OUT, IN ONE SHOT. The natural approach -- symbolically
@@ -29,13 +36,21 @@
 ## see the RESOURCE WALL note) -- was attempted first and did not
 ## complete: killed by `scripts/bmc.sh`'s hard timeout after 300s
 ## wall-clock, with no sat/unsat/unknown verdict ever produced. That is a
-## resource-exhaustion result, not a proof of infeasibility -- it may well
-## complete given a longer budget or more RAM/CPU than this environment
-## provides -- but "ran for 5 minutes and was killed" is not a finding
-## this harness gets to round up to "proved." The attempted code is
-## preserved, inert, at the bottom of this file (behind
-## `-d:selloBmcFullUnroll`) for exactly that reason: a future run with
-## more resources can flip it on without reconstructing it from scratch.
+## resource-exhaustion result, not a proof of infeasibility. RFC-002 slice
+## 4's `wholeChainRecode` success (below) narrowed WHERE the exhaustion
+## came from: the identical carry-propagation arithmetic, run over 64
+## already-independent free symbolic nibbles with no array anywhere,
+## completed cleanly in ~84s -- so the byte-array SYMBOLIC DECODE step
+## (`s[i] and 0xF` / `(s[i] shr 4) and 0xF` as bit-shift+mask extraction
+## into a mutated `array[64, int32]` local), not the 63-step carry chain
+## itself, is the far more likely cause. RFC-003 slice 4's COMPOSITION
+## ARGUMENT (below, after the whole-chain section) then closed the range-
+## invariant gap for the literal function entirely WITHOUT needing that
+## question resolved -- a written argument, not a further solver run. The
+## attempted full-unroll code is still preserved, inert, at the bottom of
+## this file (behind `-d:selloBmcFullUnroll`) as a historical record of
+## the encoding that hit the wall, not because anything in this project's
+## validation story is waiting on a bigger box to re-run it.
 ##
 ## RFC-002 slice 4 item 3 (`wholeChainRecode`, see "Z3 WHOLE-CHAIN
 ## ATTEMPT" below) DOES machine-check the full 63-step composition, but
@@ -49,7 +64,12 @@
 ## superset implies it for every real bit-255-clear scalar too -- but it
 ## is worth stating precisely rather than blurring into "the whole
 ## function is now machine-checked in one shot," which would overclaim
-## what was actually proved.
+## what was actually proved. RFC-003 slice 4 formalizes this one-sentence
+## claim into a full composition argument (see "COMPOSITION ARGUMENT"
+## below, after the whole-chain proof code) that spells out exactly why
+## the real function's nibbles land inside the proved free-nibble domain
+## -- closing the literal-function gap for the range invariant by written
+## argument rather than a new solver run.
 ##
 ## What DOES run, and complete, below: the **per-iteration inductive
 ## lemma** the mission's own fallback names as the strongest tractable
@@ -181,6 +201,173 @@ import sello/scalar  # for the cross-check only, not entered by symex (see below
 # entry and docs/rfc-001-signing.md; docs/rfc-002-audit-remediation.md's
 # slice-4 text is left as-is per that RFC's own instruction, since it
 # records the plan, not the outcome).
+
+# -----------------------------------------------------------------------
+# WRITTEN INDUCTIVE PROOF (RFC-003 slice 4 item 1): the reconstruction
+# identity Σ digits[i]*16^i == s
+# -----------------------------------------------------------------------
+# A property distinct from the range invariant proved by Z3 above: that
+# the 64 signed digits `recodeScalarRadix16` emits actually RECONSTRUCT
+# the original 32-byte scalar, Σ_{i=0}^{63} digits[i]*16^i == s (s
+# read as a 256-bit unsigned integer, little-endian). This module used to
+# frame that identity as symbolically out of reach ("symex's integer
+# model tops out at machine-width ints") -- the wrong frame. It is a
+# telescoping-carry identity, provable by ordinary paper induction over
+# exactly the arithmetic `oneStep`/`finalStep` below already isolate; no
+# solver and no 256-bit symbolic model are needed. This proof is WRITTEN,
+# NOT MACHINE-CHECKED -- say so plainly, do not round it up. It is belt
+# to the sampled property's suspenders in `test_properties_scalar.nim`
+# (which stays, unchanged, cross-referencing this proof), not a
+# replacement for it.
+#
+# Notation, keyed to `recodeScalarRadix16`'s own source (scalar.nim):
+#   nibbles[k]  for k in 0..63 -- the PRE-LOOP value of `result[k]`, i.e.
+#               `result[2*i] = s[i] and 0xF` (low nibble) and
+#               `result[2*i+1] = (s[i] shr 4) and 0xF` (high nibble) for
+#               i in 0..31. By construction this is the ordinary
+#               little-endian base-16 digit decomposition of `s`:
+#                 s == Σ_{k=0}^{63} nibbles[k] * 16^k        (BASE FACT)
+#               (byte s[i] contributes s[i]*256^i == s[i]*16^(2i) to the
+#               integer value of s; s[i] == nibbles[2i] + 16*nibbles[2i+1]
+#               splits that contribution into its two nibble terms. This
+#               is what "byte array as integer" / "nibble array as
+#               integer" mean, not a fact requiring further proof.)
+#   carry_i     for i in 0..63 -- the value of the loop-local `carry`
+#               variable at the moment iteration i's body BEGINS
+#               (carry_0 == 0, per `var carry: int32 = 0` before the
+#               loop). carry_{i+1} is `carry`'s value immediately after
+#               iteration i's three statements run, for i in 0..62;
+#               carry_63 is `carry`'s value when the loop exits (after
+#               iteration i=62) -- exactly what the standalone
+#               `result[63] += carry` statement reads.
+#   digits[k]   for k in 0..63 -- the FINAL value of `result[k]`, i.e.
+#               what `recodeScalarRadix16` returns.
+#
+# For i in 0..62, the loop body is, verbatim:
+#   result[i] += carry              -- result[i] becomes nibbles[i] + carry_i
+#   carry = (result[i] + 8) shr 4   -- this becomes carry_{i+1}
+#   result[i] -= carry shl 4        -- result[i] becomes digits[i]
+# i.e. (exactly `oneStep`'s arithmetic: `digit = nibble + carryIn;
+# carryOut = (digit+8) shr 4; digit -= carryOut shl 4`):
+#   digits[i] == nibbles[i] + carry_i - 16 * carry_{i+1}          (STEP i)
+# Rearranged -- the form the induction below actually uses:
+#   nibbles[i] == digits[i] - carry_i + 16 * carry_{i+1}         (STEP i')
+# For i == 63 (`result[63] += carry`, no truncation -- `finalStep`'s
+# arithmetic):
+#   digits[63] == nibbles[63] + carry_63                          (FINAL)
+#   nibbles[63] == digits[63] - carry_63                         (FINAL')
+# (STEP i)/(FINAL) are plain algebraic rearrangements of the source
+# lines' assignments, true for ANY integer values of nibbles[i]/carry_i
+# -- they do NOT depend on the [0,15]/{0,1}/[-8,7] range facts
+# `oneStep`/`finalStep`/`wholeChainRecode` prove elsewhere in this file.
+# The reconstruction identity below is unconditional arithmetic, not
+# something the range proof is a prerequisite for (nor vice versa).
+#
+# INVARIANT P(k), for k in 0..63:
+#   Σ_{j=0}^{k-1} digits[j]*16^j + carry_k*16^k
+#     == Σ_{j=0}^{k-1} nibbles[j]*16^j
+# (an empty sum, for k == 0, reads as 0).
+#
+# BASE CASE, P(0): LHS == (empty sum) + carry_0*16^0 == 0 + 0 == 0 (since
+# carry_0 == 0). RHS == (empty sum) == 0. LHS == RHS. Holds.
+#
+# INDUCTIVE STEP, P(i) implies P(i+1), for i in 0..62 (using STEP i'):
+#   Σ_{j=0}^{i} nibbles[j]*16^j
+#     == Σ_{j=0}^{i-1} nibbles[j]*16^j + nibbles[i]*16^i
+#     == [Σ_{j=0}^{i-1} digits[j]*16^j + carry_i*16^i]            (P(i))
+#        + (digits[i] - carry_i + 16*carry_{i+1}) * 16^i            (STEP i')
+#     == Σ_{j=0}^{i-1} digits[j]*16^j + carry_i*16^i + digits[i]*16^i
+#        - carry_i*16^i + carry_{i+1}*16^{i+1}
+#     == Σ_{j=0}^{i-1} digits[j]*16^j + digits[i]*16^i + carry_{i+1}*16^{i+1}
+#     == Σ_{j=0}^{i} digits[j]*16^j + carry_{i+1}*16^{i+1}
+# which is exactly P(i+1)'s statement (the carry_i*16^i terms cancel by
+# direct substitution). By ordinary induction, P(63) holds:
+#   Σ_{j=0}^{62} digits[j]*16^j + carry_63*16^63
+#     == Σ_{j=0}^{62} nibbles[j]*16^j                                (*)
+#
+# FINAL-STEP CASE, closing i == 63 (using FINAL'):
+#   Σ_{j=0}^{63} nibbles[j]*16^j
+#     == Σ_{j=0}^{62} nibbles[j]*16^j + nibbles[63]*16^63
+#     == [Σ_{j=0}^{62} digits[j]*16^j + carry_63*16^63]              (by *)
+#        + (digits[63] - carry_63) * 16^63                            (FINAL')
+#     == Σ_{j=0}^{62} digits[j]*16^j + carry_63*16^63 + digits[63]*16^63
+#        - carry_63*16^63
+#     == Σ_{j=0}^{62} digits[j]*16^j + digits[63]*16^63
+#     == Σ_{j=0}^{63} digits[j]*16^j
+#
+# Combining with (BASE FACT) (s == Σ nibbles[j]*16^j by construction):
+#   Σ_{j=0}^{63} digits[j]*16^j == Σ_{j=0}^{63} nibbles[j]*16^j == s
+# -- the reconstruction identity. QED.
+#
+# This proof never used the [-8,7]/[-8,8]/{0,1} RANGE facts `oneStep`/
+# `finalStep`/`wholeChainRecode` machine-check elsewhere in this file --
+# it is a pure algebraic consequence of the carry-propagation recurrence,
+# valid for the actual `int32` values the real loop produces regardless
+# of their range. The range invariant and the reconstruction identity are
+# two separate properties of the same function, established by two
+# separate methods (Z3 for the former, paper induction for the latter);
+# neither implies the other.
+#
+# `tests/unit/test_properties_scalar.nim`'s "recodeScalarRadix16
+# reconstruction" suite carries a short comment pointing back to this
+# proof; its sampled property (200 random scalars against an independent
+# bignum oracle) STAYS, unchanged -- belt and suspenders, not superseded.
+
+# -----------------------------------------------------------------------
+# COMPOSITION ARGUMENT (RFC-003 slice 4 item 2): closing the
+# literal-function range-invariant gap
+# -----------------------------------------------------------------------
+# `wholeChainRecode`'s sxUnsat verdict (proved further down this file) is
+# a UNIVERSAL statement over its 64 free symbolic parameters: for EVERY
+# choice of (n0,...,n62) each in [0,15] and n63 in [0,7] (the ranges
+# `oneStepChain`/`finalStepChain` themselves `symexAssume`), chaining
+# them through the carry-propagation arithmetic produces digits
+# satisfying the range invariant (digits[0..62] in [-8,7], digit[63] in
+# [-8,8]). No counterexample exists anywhere in that 64-parameter space
+# -- that is what an `sxUnsat` verdict on a `tAssertionViolation()` query
+# means.
+#
+# The literal `recodeScalarRadix16(s)`, for any real 32-byte `s` with bit
+# 255 clear, produces exactly one point in that space: its 64 nibbles are
+#   nibbles[2*i]   == s[i] and 0xF          for i in 0..31
+#   nibbles[2*i+1] == (s[i] shr 4) and 0xF  for i in 0..31
+# Both expressions are a 4-bit mask (`and 0xF`) applied to a `byte` value
+# -- BY CONSTRUCTION, independent of what `s` contains, the result is in
+# [0,15]. That bounds nibbles[0..62] (and covers nibbles[63]'s general
+# case too). nibbles[63] == (s[31] shr 4) and 0xF is additionally bounded
+# to [0,7] under this function's stated bit-255-clear precondition: bit
+# 255 of the scalar is bit 7 of `s[31]` (the top bit of the last byte),
+# so "bit 255 clear" means `(s[31] and 0x80) == 0`, which means `s[31]
+# shr 4` (the top nibble of s[31]) has ITS top bit clear too, i.e. is in
+# [0,7] -- exactly the bound `finalStepChain`/`finalStep` assume.
+#
+# So: the real function's 64-nibble tuple, for any bit-255-clear `s`, is
+# one instance of "n0..n62 in [0,15], n63 in [0,7]" -- precisely the
+# domain `wholeChainRecode` was proved over, with the mask bounds exact
+# (not merely typical). Since `wholeChainRecode`'s sxUnsat verdict holds
+# for every point in that domain, it holds in particular for the point
+# the real `s` maps to. And the arithmetic `wholeChainRecode` threads
+# those nibbles through is not a fourth transcription: `oneStepChain`/
+# `finalStepChain` are exhaustively cross-checked against `oneStep`/
+# `finalStep` above (`crossCheckChainVariants`), and `oneStep`/`finalStep`
+# are themselves exhaustively cross-checked, on concrete vectors, against
+# the real `recodeScalarRadix16` above that
+# (`crossCheckAgainstRealImplementation`) -- so the chained arithmetic IS
+# the real loop's arithmetic, not a lookalike.
+#
+# Composing the three links -- (1) the real function's nibbles are
+# mask-bounded into the proved domain by construction, (2) the proved
+# domain's sxUnsat verdict covers every point in it, including the real
+# one, (3) the chained arithmetic is cross-checked identical to the real
+# loop's arithmetic -- closes the literal-function gap this file's
+# introduction describes: the range invariant is established for the
+# literal byte-array-in, digit-array-out function, by composing an
+# already machine-checked universal result with an unconditional
+# by-construction bound. No new solver run over the literal function's
+# own byte-array encoding is needed to reach this conclusion, and none is
+# attempted here -- see the RESOURCE WALL note above and the retired
+# `-d:selloBmcFullUnroll` code at the bottom of this file for the
+# historical attempt this argument supersedes.
 
 proc oneStep(nibble: int32, carryIn: int32): tuple[digit, carryOut: int32] =
   ## Verbatim body of one non-final loop iteration of
@@ -501,11 +688,20 @@ echo "wholeChainRecode PROVED sxUnsat: the full 63-step composition is " &
      "the \"Z3 WHOLE-CHAIN ATTEMPT\" section above for the full writeup."
 
 # -----------------------------------------------------------------------
-# Retired: the full whole-loop, whole-domain attempt (RESOURCE WALL above).
-# Preserved so a future run with more time/RAM can retry it without
-# reconstructing it from scratch. NOT compiled by default -- opt in with
-# `-d:selloBmcFullUnroll` (and expect it to need much more than 300s; see
-# scripts/bmc.sh's usage comment for how to pass a larger timeout).
+# Historical (RFC-003 slice 4 reframe): the original whole-loop,
+# whole-byte-array single-query attempt (RESOURCE WALL above) that
+# motivated the free-nibble generalization (`wholeChainRecode`) above.
+# The COMPOSITION ARGUMENT section (above `oneStep`) has since closed the
+# range-invariant gap this attempt was trying to close directly, by
+# composing `wholeChainRecode`'s already-proved free-nibble result with
+# the byte-decode mask-bound observation -- so this code is no longer
+# "the path forward" for anything in this project's validation story; it
+# is kept only as an inert historical record of the encoding that hit
+# the resource wall (zero build/CI cost, per RFC-003's own non-goals
+# list: "kept -- reframed by slice 4, not removed"), not a pending task
+# awaiting more RAM. Still opt-in via `-d:selloBmcFullUnroll` for anyone
+# curious whether it now completes with more resources -- but nothing
+# here is blocked on, or waiting for, that answer.
 # -----------------------------------------------------------------------
 when defined(selloBmcFullUnroll):
   proc recodeRangeCheckBody(s: array[32, byte]): array[64, int32] =

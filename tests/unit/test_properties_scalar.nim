@@ -126,6 +126,13 @@ suite "scIsCanonical (pinned)":
 # negative digit contributions are accumulated into separate unsigned
 # accumulators `pos`/`neg` and compared via `pos == neg + s`, avoiding
 # signed bignum subtraction entirely.
+#
+# RFC-003 slice 4: this SAMPLED property (200 scalars) now has a companion
+# WRITTEN, paper-checked induction proving the identical identity for
+# EVERY bit-255-clear scalar -- see the "WRITTEN INDUCTIVE PROOF" section
+# of tests/verify/symex_recode.nim's module doc (not machine-checked by
+# Z3; a paper proof over oneStep/finalStep's exact carry arithmetic). This
+# sampled property stays as-is: belt and suspenders, not superseded.
 # ---------------------------------------------------------------------------
 
 type BigNum = array[10, uint32]  # 320 bits -- comfortable headroom over the
