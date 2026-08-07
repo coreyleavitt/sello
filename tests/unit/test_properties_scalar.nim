@@ -15,6 +15,7 @@ import std/unittest
 import proptest
 import sello/field
 import sello/scalar
+import sello/ed25519
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -247,3 +248,25 @@ suite "scalar property: geScalarmultBase is additive over scMulAdd":
     var rhs: GeP3
     geP1P1ToP3(rhs, sum)
     ensure pointEncode(lhs) == pointEncode(rhs)
+
+# ---------------------------------------------------------------------------
+# pointEncode/pointDecode round-trip (RFC-003 slice 2 item 2): random VALID
+# curve points (via geScalarmultBase over a random clamped scalar -- the
+# same "genuine group element, not an arbitrary 32-byte string" domain the
+# group-law properties above already use) must decode back to themselves.
+# This is the accept-side identity property fuzz_external_target.nim's
+# `handlePointDecode` now also pins as an executable invariant (RFC-003
+# slice 2 item 1); here it is checked with a shrinking source strategy
+# rather than mutation, and against a domain guaranteed on-curve rather
+# than "whatever bytes happen to decode".
+# ---------------------------------------------------------------------------
+
+suite "scalar/ed25519 property: pointEncode/pointDecode round-trip":
+  property "pointDecode(pointEncode(p)) round-trips to the identical encoding, for p = geScalarmultBase(s)":
+    with propertySettings50
+    given s in clampedScalar()
+    let p = geScalarmultBase(s)
+    let encoded = pointEncode(p)
+    let decoded = pointDecode(encoded)
+    ensure decoded.isSome
+    ensure pointEncode(decoded.get) == encoded

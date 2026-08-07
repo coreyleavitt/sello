@@ -274,6 +274,11 @@ scripts/test.sh                          # full suite, pure-Nim backend
 nim c -r tests/unit/test_field.nim       # one test module (after milpa fetch)
 ```
 
+A fresh clone's plain `milpa fetch` (no `--features proptest`) is enough to
+run `scripts/test.sh` green: the four `test_properties_*.nim` files are
+detected as unavailable and print a loud `SKIPPED (proptest not fetched --
+run: milpa fetch --features proptest)` line instead of failing the build.
+
 The libsodium backend and the timing harness need extra setup and are
 separate scripts, not part of `scripts/test.sh`:
 

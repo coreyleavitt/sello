@@ -62,6 +62,15 @@ for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
   cmd+=$'\n'"nim c ${extra_defines[*]:-} -r $f"
 done
+# Property suites skipped because _deps/proptest is absent (RFC-003 slice 2
+# item 4) -- same loud self-skip register as test_libsodium_interop's
+# runtime skip(), but decided here in bash since the failure mode being
+# avoided (a missing `import proptest`) is a compile error, not something
+# a runtime skip() inside the test binary could ever reach.
+for f in "${skipped_property_files[@]}"; do
+  cmd+=$'\n'"echo '=== $f ==='"
+  cmd+=$'\n'"echo 'SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)'"
+done
 
 podman run --rm \
   -v "$PWD:/workspace" \

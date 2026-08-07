@@ -30,9 +30,19 @@
 ##                          payload[96..^1] = msg (may be empty)
 ##   mode 2 (x25519):      payload[0..31]            -- peer u-coordinate
 ##
-## Oracle (both directions, RFC-002 slice 3 item 2):
-##   - accept implies canonical re-encode (pre-existing direction, kept):
-##     pointDecode(b).isSome => feBytesCanonical(pointEncode(pointDecode(b).get))
+## Oracle (both directions, RFC-002 slice 3 item 2; identity check added
+## RFC-003 slice 2 item 1):
+##   - accept implies IDENTITY re-encode: pointDecode(b).isSome =>
+##     pointEncode(pointDecode(b).get) == b. This is strictly stronger than
+##     (and supersedes) the old "accept implies SOME canonical re-encode"
+##     check -- the doc comment used to claim the identity property while
+##     the code only checked `feBytesCanonical(e1)` and determinism
+##     (`e1 == e2`), never `e1 == b`. A sign-bit-ignoring pointDecode (e.g.
+##     one that silently normalized the sign bit instead of rejecting a
+##     mismatched one) would satisfy canonicity + determinism but fail this
+##     identity check; canonicity of the re-encode is now a direct
+##     corollary (b was already required canonical below), asserted
+##     separately for a clearer failure message.
 ##   - reject direction, new: not feBytesCanonical(b) => pointDecode(b).isNone
 ##     (a direct corollary of pointDecode's own first line, but pinned here
 ##     as an executable invariant a future refactor could silently break)
@@ -88,6 +98,9 @@ proc handlePointDecode(payload: openArray[byte]) =
     doAssert e1 == e2, "pointDecode nondeterministic (re-encode mismatch)"
     doAssert feBytesCanonical(e1),
       "pointDecode accepted an input whose canonical re-encode isn't canonical"
+    doAssert e1 == b,
+      "pointDecode accepted a canonical input but re-encoded to a different value " &
+      "(identity oracle failure -- accept must imply pointEncode(pointDecode(b)) == b)"
 
 proc handleVerify(payload: openArray[byte]) =
   if payload.len < 96: return

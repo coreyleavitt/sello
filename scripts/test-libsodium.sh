@@ -50,6 +50,13 @@ for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
   cmd+=$'\n'"nim c -d:selloLibsodium -r $f"
 done
+# Property suites skipped because _deps/proptest is absent (RFC-003 slice 2
+# item 4) -- see scripts/test.sh's matching comment / scripts/lib/
+# unit-test-files.sh for the detection logic shared by both scripts.
+for f in "${skipped_property_files[@]}"; do
+  cmd+=$'\n'"echo '=== $f ==='"
+  cmd+=$'\n'"echo 'SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)'"
+done
 
 podman run --rm \
   -v "$PWD:/workspace" \

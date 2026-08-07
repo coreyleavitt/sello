@@ -6,8 +6,8 @@
   spot-checked against source before drafting.
 - **Resume:** `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 2/6 done, 4
-  remaining"); stop when every slice is implemented` — slice 1 done and committed; next
-  is slice 2 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are implemented by
+  remaining"); stop when every slice is implemented` — slices 1 and 2 done and committed;
+  next is slice 3 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are implemented by
   sonnet subagents (TDD, gates run synchronously in-agent per the RFC-002 ops lesson);
   the control loop verifies, commits, and updates this doc.
 - **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
@@ -41,9 +41,27 @@
       OK / 0 fail. CLAUDE.md drift from the moves (SqrtM1 home, feFromLimbs/
       feSqrtRatioVartime, pair constructors in facade list) fixed by the control loop
       in-slice.
-- [ ] 2 fuzz oracle identity check + encode/decode round-trip property + X25519
-      DH-agreement property (new test_properties_x25519.nim, joins unit_test_files) +
-      test.sh graceful proptest skip
+- [x] 2 fuzz oracle honesty + properties + fresh-clone ergonomics (subject: "RFC-003
+      slice 2: fuzz oracle and property coverage"). (1) `handlePointDecode` now asserts
+      re-encode == original input for accepted inputs (kept as a third `doAssert`, not a
+      replacement, so canonicity/identity failures stay distinguishable); doc comment
+      states exactly what is enforced. (2) pointEncode/pointDecode round-trip property in
+      test_properties_scalar.nim (random points via `geScalarmultBase`). (3) New
+      test_properties_x25519.nim: DH agreement `x25519(a, x25519Base(b)) ==
+      x25519(b, x25519Base(a))` over random static secrets, both Options
+      `ensure`d isSome (small-order hit fails loudly, documented as astronomically
+      unlikely, not assumed impossible); joins `unit_test_files`. (4) Graceful proptest
+      skip: `_deps/proptest` detected in `unit-test-files.sh` (path relative to
+      `BASH_SOURCE`, since two scripts source it); property files filtered to a
+      `skipped_property_files` array; both test.sh and test-libsodium.sh print the loud
+      `SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)` line per
+      skipped file (resolved in bash pre-compile — a missing import is a compile error a
+      runtime skip() can't reach); one-line footnotes in README + CLAUDE.md.
+      **Gates:** test.sh with proptest 177 OK / 0 fail (all four property suites ran);
+      test.sh without proptest (simulated by renaming `_deps/proptest`, then restored +
+      re-verified) green with exactly the four SKIPPED lines; fuzz.sh 30 → 0 crashes,
+      edges 358/558/289 all ≫ MinEdgesGate 50, new identity oracle survived 1991
+      pointDecode iterations; check-readme.sh 5/5; test-libsodium.sh 183 OK / 0 fail.
 - [ ] 3 mutation scope extension (challenge.nim ordering, pointDecode conditionals,
       ladder zero-check, pointEncode sign bit; ~10-15 mutants; strictly after slice 1)
 - [ ] 4 proof completion (written telescoping-carry induction for the reconstruction
