@@ -1,0 +1,14 @@
+id: B03
+target: src/sello/private/backend.nim
+desc: signDetached: RFC 8032 5.1.6 step 2 nonce derivation r = SHA-512(prefix || msg) computed as SHA-512(msg || prefix) instead -- the two `nonceSha.update` calls swapped, corrupting the per-message nonce r (and therefore R = [r]B and S = k*a + r) for every message except the degenerate empty-prefix-or-empty-msg case.
+====OLD====
+    nonceSha.init()
+    nonceSha.update(prefix)
+    nonceSha.update(msg)
+    nonceSha.finish(nonceHash)
+====NEW====
+    nonceSha.init()
+    nonceSha.update(msg)
+    nonceSha.update(prefix)
+    nonceSha.finish(nonceHash)
+====END====

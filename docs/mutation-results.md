@@ -4,13 +4,13 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 
 ## Summary
 
-- **Mutants:** 46
-- **Killed (test, red suite):** 46
+- **Mutants:** 50
+- **Killed (test, red suite):** 50
 - **Killed (compile error):** 0
 - **Survived:** 0
-- **Overall kill rate:** 100.0% (46/46)
+- **Overall kill rate:** 100.0% (50/50)
 - **Retired (confirmed-equivalent, excluded from the above):** 1
-- **Wall clock:** 624s
+- **Wall clock:** 556s
 
 **Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red or by a compile error.
 
@@ -30,6 +30,10 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 
 | id | target | description | outcome | first failing file |
 |----|--------|--------------|---------|---------------------|
+| B01 | private/backend.nim | signDetached: scMulAdd's two SecretScalar operands swapped, S = scMulAdd(k, a, r) [S = k*a + r] computed as scMulAdd(k, r, a) [S = k*r + a] instead -- corrupts the EdDSA signature scalar itself (S = r + k*a per RFC 8032 5.1.6 step 4), a real (non-equivalent) mutation since a (the clamped secret key scalar) and r (the per-message nonce) are different values on every real signature. | KILLED (test) | tests/unit/test_signing.nim |
+| B02 | private/backend.nim | signDetached: RFC 8032 5.1.5/5.1.6's SHA-512(seed) split confused -- the clamped secret scalar `a` is built from h[32..63] (the nonce-derivation half) instead of h[0..31], and `prefix` (fed into nonce derivation) is built from h[0..31] instead of h[32..63]. Upper/lower half swap of the one-time seed expansion. | KILLED (test) | tests/unit/test_signing.nim |
+| B03 | private/backend.nim | signDetached: RFC 8032 5.1.6 step 2 nonce derivation r = SHA-512(prefix \|\| msg) computed as SHA-512(msg \|\| prefix) instead -- the two `nonceSha.update` calls swapped, corrupting the per-message nonce r (and therefore R = [r]B and S = k*a + r) for every message except the degenerate empty-prefix-or-empty-msg case. | KILLED (test) | tests/unit/test_signing.nim |
+| B04 | private/backend.nim | derivePublic: RFC 8032 5.1.5 clamp step dropped entirely -- the raw SHA-512(seed)[0..31] bytes are used as the secret scalar `a` unclamped (bit 254 not forced set, bits 0-2 not cleared, bit 255 not cleared), so A = [a]B is derived from the wrong scalar for every seed. | KILLED (test) | tests/unit/test_signing.nim |
 | C01 | challenge.nim | challenge: hash-input order swap, SHA-512(R \|\| A \|\| msg) computed as SHA-512(A \|\| R \|\| msg) instead -- the one formula shared byte-for-byte by verify and signDetached, so this cannot be caught by a sign/verify self-consistency roundtrip (both sides call the SAME mutated function); only RFC 8032 known-answer vectors with fixed expected signature bytes pin the real R\|\|A\|\|msg order. | KILLED (test) | tests/unit/test_signing.nim |
 | C02 | challenge.nim | challenge: dropped hash component, A (the public key) removed from the SHA-512(R \|\| A \|\| msg) input entirely -- the classic key-substitution-attack shape (a challenge hash that doesn't bind the signer's identity). Like C01, a sign/verify self-consistency roundtrip cannot catch this (both sides share the one mutated function); only RFC 8032/Wycheproof known-answer vectors with fixed expected bytes pin the real three-component hash. | KILLED (test) | tests/unit/test_signing.nim |
 | E01 | ed25519.nim | pointDecode: RFC 8032 §5.1.3 step 4 reject condition inverted, 'sign and not feIsNonZero(x)' -> 'sign and feIsNonZero(x)' (the 'not' dropped), so the invalid x=0-with-sign-bit-set encoding is silently accepted while ordinary nonzero-x points with the sign bit set are wrongly rejected. | KILLED (test) | tests/unit/test_signing.nim |
@@ -73,7 +77,7 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 | S17 | scalar.nim | L (subgroup order) constant corrupted: the top byte of the 32-byte little-endian encoding changed from 0x10 to 0x20, doubling the encoded modulus. | KILLED (test) | tests/unit/test_wycheproof.nim |
 | S18 | scalar.nim | scReduce: shift-amount off-by-one in the top-limb (s23) extraction, 'load4(s, 60) shr 3' -> 'shr 2'. | KILLED (test) | tests/unit/test_signing.nim |
 | S19 | scalar.nim | scMulAdd: shift-amount off-by-one in the 'a' operand's top-limb (a11) extraction, 'load4(a, 28) shr 7' -> 'shr 6'. | KILLED (test) | tests/unit/test_scalar.nim |
-| S20 | scalar.nim | pointEncode: sign-bit condition flip, 'if feIsNegative(x)' -> 'if not feIsNegative(x)' -- the one comparison-flip family the original S-series missed (RFC-003 slice 3): sets the wire sign bit on every non-negative x and clears it on every negative x, the exact opposite of RFC 8032 §5.1.2's encoding rule. | KILLED (test) | tests/unit/test_signing.nim |
+| S20 | scalar.nim | pointEncode: sign-bit condition flip, 'if feIsNegative(x)' -> 'if not feIsNegative(x)' -- the one comparison-flip family the original S-series missed (RFC-003 slice 3): sets the wire sign bit on every non-negative x and clears it on every negative x, the exact opposite of RFC 8032 §5.1.2's encoding rule. | KILLED (test) | tests/unit/test_scalar.nim |
 | X01 | x25519.nim | x25519(X25519StaticSecret, peer): RFC 7748 §6.1 zero-output small-order-peer check inverted, 'if acc == 0' -> 'if acc != 0', so an attacker-supplied small-order peer point (all-zero DH output) is returned as Some(X25519Shared) instead of rejected, and every genuine nonzero shared secret is dropped as None. | KILLED (test) | tests/unit/test_facade.nim |
 | X02 | x25519.nim | x25519(sink X25519EphemeralSecret, peer): the same RFC 7748 §6.1 zero-output small-order-peer check inverted at the ephemeral-secret call site, 'if acc == 0' -> 'if acc != 0', independently of X01's static-secret overload (the two are separate functions sharing no code past the ladder call). | KILLED (test) | tests/unit/test_facade.nim |
 

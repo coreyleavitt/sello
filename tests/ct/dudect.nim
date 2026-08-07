@@ -42,7 +42,7 @@
 ## here exist only to feed a timing measurement, are discarded after
 ## classification, and carry no security meaning of their own.
 
-import std/[random, math, algorithm]
+import std/[random, math, algorithm, strutils]
 
 type
   Verdict* = enum
@@ -50,19 +50,59 @@ type
     vWarn = "WARN"
     vFail = "FAIL"
 
-  DudectReport* = object
-    name*: string
-    samplesPerClass*: int
+  BatteryEntry* = object
+    ## One crop threshold's Welch t-test result (round-3 fix batch B,
+    ## finding B4). `percentile = 100.0` is "no crop": `percentileOf` at
+    ## p=100 returns the pooled sample's maximum, so the `x <= cutoff`
+    ## filter in `runDudect` keeps every sample -- no special-casing
+    ## needed to fold "no crop" into the same battery loop as the real
+    ## percentile cuts.
+    percentile*: float64
     keptFixed*, keptRandom*: int
-    croppedTotal*: int
-    meanFixedCycles*, meanRandomCycles*: float64
     tStat*: float64
     verdict*: Verdict
 
+  DudectReport* = object
+    name*: string
+    samplesPerClass*: int
+    battery*: seq[BatteryEntry]
+      ## One entry per `BatteryPercentiles` threshold, same order.
+    worst*: BatteryEntry
+      ## The battery entry with the largest `abs(tStat)` -- PASS/WARN/FAIL
+      ## for the whole target keys off THIS entry (B4: "worst-case |t|
+      ## across the battery"), not any single fixed crop. A target that
+      ## looks clean at the traditional 99.5th-percentile crop but leaks
+      ## at, say, no-crop or the 90th percentile is a WARN/FAIL, not a
+      ## false PASS.
+    meanFixedCycles*, meanRandomCycles*: float64
+      ## Reported at `worst.percentile`'s crop -- the same population the
+      ## verdict itself was computed from, so the printed means and the
+      ## printed verdict always describe the same kept samples.
+    croppedTotal*: int
+      ## Also at `worst.percentile`'s crop, for the same reason.
+    tStat*: float64
+      ## `worst.tStat`, kept as a top-level field so `report()`'s
+      ## existing single-line shape (`t = ... verdict = ...`) needs no
+      ## restructuring -- it already prints the worst-case figure.
+    verdict*: Verdict
+      ## `worst.verdict`.
+
 const
   DefaultSamplesPerClass* = 1_000_000
-  CropPercentile* = 99.5 ## dudect-style upper-percentile cropping cutoff,
-                         ## applied once to the pooled sample (see module doc)
+  BatteryPercentiles*: array[6, float64] =
+    [100.0, 99.9, 99.5, 99.0, 95.0, 90.0]
+    ## dudect percentile battery (round-3 fix batch B, finding B4):
+    ## no-crop plus the 90th/95th/99th/99.5th/99.9th percentiles, each a
+    ## separate upper-percentile cropping cutoff computed from the SAME
+    ## pooled (both-classes-together) sample the single-crop harness used
+    ## -- see the module doc comment for why pooling (not a per-class
+    ## cutoff) is what keeps cropping itself from introducing bias.
+    ## Ordered loosest-crop (100.0, keeps every sample including extreme
+    ## outliers) to tightest (90.0), so the report's battery line reads
+    ## in a consistent, meaningful direction. 99.5 (the prior single-crop
+    ## harness's fixed cutoff) is kept as one entry in this list, not
+    ## dropped, so the new battery strictly generalizes the old behavior
+    ## rather than replacing it outright.
   WarnThreshold* = 4.5
   FailThreshold* = 10.0
 
@@ -195,38 +235,72 @@ proc runDudect*[T](name: string;
     if isFixed: timesFixed.add(delta)
     else: timesRandom.add(delta)
 
-  # Phase 3 -- upper-percentile cropping from the pooled sample, then
-  # Welch's t-test on the cropped populations.
+  # Phase 3 -- upper-percentile cropping battery (B4): the pooled sample
+  # is built once (as before); each `BatteryPercentiles` threshold then
+  # crops it, computes its OWN Welch t-test, and the worst-case |t|
+  # across the whole battery decides the verdict. This adds no extra
+  # measurement passes (the expensive part -- Phase 2's timed calls --
+  # already happened once, above) and each crop pass over the collected
+  # samples is cheap relative to it.
   var pooled = newSeq[float64](timesFixed.len + timesRandom.len)
   for i, x in timesFixed: pooled[i] = x
   for i, x in timesRandom: pooled[timesFixed.len + i] = x
   sort(pooled)
-  let cutoff = percentileOf(pooled, CropPercentile)
 
-  var keptFixed = newSeqOfCap[float64](timesFixed.len)
+  var battery = newSeq[BatteryEntry](BatteryPercentiles.len)
+  for i, pct in BatteryPercentiles:
+    let cutoff = percentileOf(pooled, pct)
+    var keptFixed = newSeqOfCap[float64](timesFixed.len)
+    for x in timesFixed:
+      if x <= cutoff: keptFixed.add(x)
+    var keptRandom = newSeqOfCap[float64](timesRandom.len)
+    for x in timesRandom:
+      if x <= cutoff: keptRandom.add(x)
+    let t = welchT(keptFixed, keptRandom)
+    battery[i] = BatteryEntry(
+      percentile: pct,
+      keptFixed: keptFixed.len,
+      keptRandom: keptRandom.len,
+      tStat: t,
+      verdict: classifyVerdict(t),
+    )
+
+  var worstIdx = 0
+  for i in 1 ..< battery.len:
+    if abs(battery[i].tStat) > abs(battery[worstIdx].tStat): worstIdx = i
+  let worst = battery[worstIdx]
+
+  # Recompute the worst entry's kept populations (cheap; not carried out
+  # of the loop above) purely to report means/croppedTotal for the SAME
+  # population the verdict came from.
+  let worstCutoff = percentileOf(pooled, worst.percentile)
+  var worstKeptFixed = newSeqOfCap[float64](timesFixed.len)
   for x in timesFixed:
-    if x <= cutoff: keptFixed.add(x)
-  var keptRandom = newSeqOfCap[float64](timesRandom.len)
+    if x <= worstCutoff: worstKeptFixed.add(x)
+  var worstKeptRandom = newSeqOfCap[float64](timesRandom.len)
   for x in timesRandom:
-    if x <= cutoff: keptRandom.add(x)
+    if x <= worstCutoff: worstKeptRandom.add(x)
 
-  let t = welchT(keptFixed, keptRandom)
   result = DudectReport(
     name: name,
     samplesPerClass: samplesPerClass,
-    keptFixed: keptFixed.len,
-    keptRandom: keptRandom.len,
-    croppedTotal: total - keptFixed.len - keptRandom.len,
-    meanFixedCycles: meanOf(keptFixed),
-    meanRandomCycles: meanOf(keptRandom),
-    tStat: t,
-    verdict: classifyVerdict(t),
+    battery: battery,
+    worst: worst,
+    meanFixedCycles: meanOf(worstKeptFixed),
+    meanRandomCycles: meanOf(worstKeptRandom),
+    croppedTotal: total - worst.keptFixed - worst.keptRandom,
+    tStat: worst.tStat,
+    verdict: worst.verdict,
   )
 
 proc report*(r: DudectReport) =
   echo "== ", r.name, " =="
   echo "  samples/class: ", r.samplesPerClass,
-       "  kept: ", r.keptFixed, "/", r.keptRandom,
+       "  kept(worst crop ", r.worst.percentile, "%): ", r.worst.keptFixed, "/", r.worst.keptRandom,
        "  cropped: ", r.croppedTotal
   echo "  mean cycles  fixed=", r.meanFixedCycles, "  random=", r.meanRandomCycles
-  echo "  t = ", r.tStat, "  verdict = ", r.verdict
+  echo "  t = ", r.tStat, "  verdict = ", r.verdict, "  (worst-case across percentile battery)"
+  var batteryLine = "  battery (crop%: t):"
+  for e in r.battery:
+    batteryLine.add "  " & $e.percentile & "%=" & formatFloat(e.tStat, ffDecimal, 3)
+  echo batteryLine

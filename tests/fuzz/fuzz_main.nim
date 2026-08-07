@@ -13,19 +13,31 @@
 ## `build/fuzz_external_target` FIRST (instrumented) and only then
 ## compiles and runs this driver.
 ##
-## Corpus seeding: proptest's `fuzz`/IR-mode corpus self-seeds by
-## generating one random input through the strategy (`initialIRCorpus`
-## empty is the default path here) and grows it via IR-level mutation +
-## external-coverage admission (a new sancov edge in the CHILD process,
-## not an in-process bitmap); there is no direct "seed from raw bytes"
-## hook for IR mode. Rather than fight the grain of the IR-mode API to
-## splice existing RFC 8032/Wycheproof vector bytes in as literal byte
-## seeds, this harness relies on proptest's generative IR mutation
-## (perturb-integer, kind-boundary, span-splice/delete/duplicate --
-## fuzz.nim's five mutators) plus the fact that the known-good/known-bad
-## structured vectors are already exhaustively covered by
-## tests/unit/test_wycheproof*.nim and test_ed25519.nim; this harness's
-## job is the UNSTRUCTURED space those miss by construction.
+## Corpus seeding (round-3 fix batch B, finding B2 -- SPIKE VERDICT: YES):
+## `FuzzSettings.initialIRCorpus: seq[seq[ChoiceNode]]` (`_deps/proptest/
+## src/proptest/fuzz.nim`) DOES support seeding IR-mode's corpus with
+## concrete inputs -- not via a raw-bytes hook (there genuinely is none
+## for IR mode), but via the typed choice-IR itself: a hand-built
+## `seq[ChoiceNode]` matching a strategy's own draw shape (`fuzz_common.
+## nim`'s `byteChoices`/`listChoices`, built on `proptest/choice`'s
+## `integerChoice`/`booleanChoice` constructors -- deliberately NOT
+## re-exported by the top-level `proptest` module, reached via the
+## submodule import per that module's own doc comment) replays correctly
+## through `captureIR` and is admitted as a real seed, per `datasource.
+## nim`'s documented "replay clamps the recorded value" contract. Each of
+## the three campaigns below is seeded with a handful of known-valid
+## concrete inputs (RFC 8032 §7.1 TEST 1/2/3 for `pointDecode`/`verify`,
+## RFC 7748 §4.1/§5.2 for `x25519`'s peer u-coordinate -- see `fuzz_common.
+## nim`'s `pointDecodeSeeds`/`verifySeeds`/`x25519Seeds`) so mutation
+## explores the ACCEPT boundary from real accepted structure outward,
+## instead of only ever approaching it from the reject side (the prior
+## framing's actual gap: self-seeding from one random input starts, on
+## expectation, at a REJECTED point -- a random 32/64-byte string almost
+## never decodes/verifies -- so every earlier campaign's mutation pressure
+## was structurally biased toward the reject side of the boundary).
+## `runExternalTarget` asserts `report.droppedSeeds == 0` so a future
+## strategy-shape change that silently breaks a seed's replay fails the
+## build instead of quietly losing this coverage.
 import std/[os, parseutils]
 import ./fuzz_common
 
@@ -43,10 +55,10 @@ when isMainModule:
        "s budget per target, ", perTarget * 3, "s total, external target: ", targetBin
 
   runExternalTarget("ed25519.pointDecode", bytes32(), encodePointDecode,
-                     targetBin, perTarget, 0xC0FFEE'u64)
+                     targetBin, perTarget, 0xC0FFEE'u64, pointDecodeSeeds())
   runExternalTarget("ed25519.verify", verifyInputs(), encodeVerify,
-                     targetBin, perTarget, 0xBADF00D'u64)
+                     targetBin, perTarget, 0xBADF00D'u64, verifySeeds())
   runExternalTarget("x25519 (attacker peer u-coordinate)", bytes32(), encodeX25519,
-                     targetBin, perTarget, 0xDEADBEEF'u64)
+                     targetBin, perTarget, 0xDEADBEEF'u64, x25519Seeds())
 
   echo "fuzz campaign complete -- no crashes found on any target, coverage gate passed"

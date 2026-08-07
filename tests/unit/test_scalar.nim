@@ -389,6 +389,79 @@ suite "geP2Dbl (RFC-002 slice 5 finding: single-call isolation)":
 # reasoning.
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# geAdd edge cases (round-3 fix batch B, finding B5): P+P and P+(-P) through
+# the unified-addition formula directly. `geScalarmultBase`'s radix-16 loop
+# and `scalarmultVartime`'s 4-bit-window loop never feed `geAdd` an operand
+# equal (or equal-and-negated) to its accumulator by construction (doubling
+# always goes through the separate `geP2Dbl` path; a digit of exactly 0
+# short-circuits to the identity via `cmovCached`, never calling `geAdd` at
+# all) -- so these two edge cases go untouched by every other test in this
+# suite, including the mutation-testing catalog's S04/S05 `geAdd` sign-flip
+# mutants (killed via other call paths, not this one). `Ed25519D2` (the
+# "2d*Tq*T" term) and the "2*Z*Zq" term are exactly the two additions
+# `geAdd`'s doc comment above marks as ref10's unified-addition trick for
+# handling P+P without a separate doubling formula; a broken sign on either
+# is invisible unless something calls `geAdd` with equal or negated inputs.
+# ---------------------------------------------------------------------------
+
+proc negateP3(p: GeP3): GeP3 =
+  ## -P = (-x, y, z, -t) in extended coordinates -- still on the curve
+  ## (t' = (-x)*y/z = -(x*y/z) = -t stays consistent with the extended
+  ## coordinate invariant).
+  feNeg(result.x, p.x)
+  result.y = p.y
+  result.z = p.z
+  feNeg(result.t, p.t)
+
+proc geAddP3(p, q: GeP3): GeP3 =
+  var cachedQ: GeCached
+  geP3ToCached(cachedQ, q)
+  var r: GeP1P1
+  geAdd(r, p, cachedQ)
+  geP1P1ToP3(result, r)
+
+proc geP2DblP3(p: GeP3): GeP3 =
+  var p2: GeP2
+  geP3ToP2(p2, p)
+  var d: GeP1P1
+  geP2Dbl(d, p2)
+  geP1P1ToP3(result, d)
+
+const IdentityEncoded: array[32, byte] = block:
+  var b: array[32, byte]
+  b[0] = 1
+  b
+
+suite "geAdd edge cases (round-3 fix batch B, finding B5)":
+  test "P + P via geAdd agrees with geP2Dbl's doubling of the base point":
+    let p = geBasePoint()
+    check pointEncode(geAddP3(p, p)) == pointEncode(geP2DblP3(p))
+
+  test "P + P via geAdd agrees with geP2Dbl's doubling, over 20 random points":
+    var checked = 0
+    for i in 0'u64 ..< 20:
+      let s = prngScalar32(i)
+      var p: GeP3
+      scalarmultVartime(p, s, geBasePoint())
+      check pointEncode(geAddP3(p, p)) == pointEncode(geP2DblP3(p))
+      inc checked
+    check checked == 20
+
+  test "P + (-P) via geAdd encodes to the identity, for the base point":
+    let p = geBasePoint()
+    check pointEncode(geAddP3(p, negateP3(p))) == IdentityEncoded
+
+  test "P + (-P) via geAdd encodes to the identity, over 20 random points":
+    var checked = 0
+    for i in 0'u64 ..< 20:
+      let s = prngScalar32(i)
+      var p: GeP3
+      scalarmultVartime(p, s, geBasePoint())
+      check pointEncode(geAddP3(p, negateP3(p))) == IdentityEncoded
+      inc checked
+    check checked == 20
+
 suite "SecretScalar - scalarmultVartime type boundary (compile-time)":
   test "SecretScalar has no implicit converter to array[32, byte]":
     ## `compiles()` CAN see this one (an ordinary type mismatch, unlike the

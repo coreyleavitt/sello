@@ -161,7 +161,11 @@ proc clampedRandomScalar(): array[32, byte] =
   clampScalar(result)  # bit 255 clear, bit 254 set -- valid domain
 
 proc opGeScalarmultBase(s: array[32, byte]): uint64 =
-  let enc = pointEncode(geScalarmultBase(s))
+  ## `geScalarmultBase` takes `SecretScalar`, not a bare
+  ## `array[32, byte]`, since batch A's `SecretScalar` distinct type
+  ## (round-3 fix batch A, finding A3) -- wrapped here via
+  ## `toSecretScalar` at the one call site this target needs it.
+  let enc = pointEncode(geScalarmultBase(toSecretScalar(s)))
   var acc: uint64 = 0
   for b in enc: acc = (acc shl 1) or uint64(b and 1'u8)
   acc

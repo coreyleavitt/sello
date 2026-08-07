@@ -42,6 +42,10 @@ source "$(dirname "$0")/lib/unit-test-files.sh"
 source "$(dirname "$0")/lib/milpa-preflight.sh"
 milpa_preflight
 
+# End-of-run validation-tier visibility (round-3 fix batch B, finding B6,
+# shared with scripts/test.sh -- see scripts/lib/tier-summary.sh).
+source "$(dirname "$0")/lib/tier-summary.sh"
+
 img=localhost/sello-dev:latest
 podman image exists "$img" || podman build -t "$img" -f Containerfile .
 
@@ -65,3 +69,5 @@ podman run --rm \
   -w /workspace \
   "$img" \
   bash -c "$cmd"
+
+print_tier_summary "scripts/test-libsodium.sh (-d:selloLibsodium)"

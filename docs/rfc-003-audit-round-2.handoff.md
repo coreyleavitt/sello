@@ -184,7 +184,16 @@
 ## hoisted out of loop to be wipeable once, keypair/sign became proc with backends).
 ## KNOWN FALLOUT for batch B: tests/ct/ct_main.nim's geScalarmultBase call needs a
 ## toSecretScalar wrap (not in unit gates; ct.sh not yet re-run — batch B owns it).
-## Batch B in progress; Z, C pending.
+## Batch B DONE (committed): differential Wycheproof vs libsodium (ed25519 138/150
+## comparable — 12 excluded, libsodium's C verify API can't take non-64-byte sigs;
+## X25519 518/518; 0 mismatches), fuzz corpus seeding real (proptest initialIRCorpus,
+## 3 seeds/target, 0 dropped, edges 358/558/364), 4 backend mutants B01-B04 (50/50
+## killed), dudect 6-crop percentile battery (worst-case |t| verdicts), geAdd P+P and
+## P+(-P) tests (verified red under a local perturbation, reverted), tier summary in
+## test.sh/test-libsodium.sh via shared lib. ct.sh full run passed (all real targets
+## worst-case |t| <= 1.85) but in the NOISIEST disclosed environment yet (load 23.97,
+## 3 containers) — control loop will re-run ct.sh once on a quiet host after batch C
+## as the final record. Batch Z (Z3 follow-ons) in progress; C pending.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium

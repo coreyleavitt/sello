@@ -63,7 +63,7 @@
 ## winner publishes `done` (or, on the winner's hard-error path, until it
 ## resets to not-started and a fresh caller may retry).
 
-import std/atomics
+import std/[atomics, options]
 import sello/private/ct
 
 {.passL: "-lsodium".}
@@ -98,6 +98,9 @@ proc c_crypto_sign_verify_detached(sig: ptr UncheckedArray[byte];
                                     m: ptr UncheckedArray[byte]; mlen: culonglong;
                                     pk: ptr UncheckedArray[byte]): cint
   {.importc: "crypto_sign_verify_detached", header: "<sodium.h>".}
+
+proc c_crypto_scalarmult(q, n, p: ptr UncheckedArray[byte]): cint
+  {.importc: "crypto_scalarmult", header: "<sodium.h>".}
 
 var sodiumInitState: Atomic[int]
   ## 0 = not started, 1 = in progress, 2 = done. See module doc comment.
@@ -214,3 +217,28 @@ proc sodiumVerifyDetached*(sig: array[64, byte]; msg: openArray[byte]; pk: array
     culonglong(msg.len),
     cast[ptr UncheckedArray[byte]](unsafeAddr pk[0]))
   result = rc == 0
+
+proc sodiumScalarmult*(priv: array[32, byte]; pub: array[32, byte]): Option[array[32, byte]] =
+  ## Exposed for the differential X25519 test only (round-3 fix batch B,
+  ## finding B1): calls libsodium's OWN `crypto_scalarmult` (RFC 7748
+  ## X25519), independent of `sello/x25519.x25519`, so the differential
+  ## suite can confirm the two backends agree on every Wycheproof xdh_comp
+  ## vector -- not just against a shared paper spec. Not part of
+  ## `signing.nim`'s dispatch (that contract is ed25519-only); X25519 has
+  ## no backend-swap knob in the public facade.
+  ##
+  ## `crypto_scalarmult` returns -1 (mapped to `none` here) when the
+  ## computed point is the all-zero identity -- libsodium's documented
+  ## small-order-input rejection, the same contract `x25519`'s `none`
+  ## return uses (Wycheproof's "ZeroSharedSecret" flag). `priv` is clamped
+  ## internally by libsodium exactly as `sello/field.clampScalar` clamps
+  ## it, so both backends apply RFC 7748 §5 to the identical raw scalar
+  ## bytes with no pre-clamping needed here.
+  var q: array[32, byte]
+  ensureSodiumInit()
+  let rc = c_crypto_scalarmult(
+    cast[ptr UncheckedArray[byte]](addr q[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr priv[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr pub[0]))
+  if rc != 0: none(array[32, byte])
+  else: some(q)

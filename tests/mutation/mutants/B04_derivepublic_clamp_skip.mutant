@@ -1,0 +1,15 @@
+id: B04
+target: src/sello/private/backend.nim
+desc: derivePublic: RFC 8032 5.1.5 clamp step dropped entirely -- the raw SHA-512(seed)[0..31] bytes are used as the secret scalar `a` unclamped (bit 254 not forced set, bits 0-2 not cleared, bit 255 not cleared), so A = [a]B is derived from the wrong scalar for every seed.
+====OLD====
+    for i in 0 ..< 32: aBytes[i] = h[i]
+    clampScalar(aBytes)
+    a = toSecretScalar(aBytes)
+
+    result = pointEncode(geScalarmultBase(a))
+====NEW====
+    for i in 0 ..< 32: aBytes[i] = h[i]
+    a = toSecretScalar(aBytes)
+
+    result = pointEncode(geScalarmultBase(a))
+====END====

@@ -1,0 +1,8 @@
+id: B01
+target: src/sello/private/backend.nim
+desc: signDetached: scMulAdd's two SecretScalar operands swapped, S = scMulAdd(k, a, r) [S = k*a + r] computed as scMulAdd(k, r, a) [S = k*r + a] instead -- corrupts the EdDSA signature scalar itself (S = r + k*a per RFC 8032 5.1.6 step 4), a real (non-equivalent) mutation since a (the clamped secret key scalar) and r (the per-message nonce) are different values on every real signature.
+====OLD====
+    let S = scMulAdd(k, a, r)
+====NEW====
+    let S = scMulAdd(k, r, a)
+====END====

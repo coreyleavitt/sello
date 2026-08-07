@@ -55,6 +55,10 @@ source "$(dirname "$0")/lib/unit-test-files.sh"
 source "$(dirname "$0")/lib/milpa-preflight.sh"
 milpa_preflight
 
+# End-of-run validation-tier visibility (round-3 fix batch B, finding B6) --
+# see scripts/lib/tier-summary.sh's own header comment.
+source "$(dirname "$0")/lib/tier-summary.sh"
+
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
 cmd="set -e"
@@ -79,3 +83,5 @@ podman run --rm \
   -w /workspace \
   "$img" \
   bash -c "$cmd"
+
+print_tier_summary "scripts/test.sh"

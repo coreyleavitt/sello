@@ -5,49 +5,39 @@
 ## set must be rejected; every valid one must verify. This is the
 ## adversarial half of the validation bar (RFC 8032 vectors are the
 ## functional half).
+##
+## JSON parsing lives in `wycheproof_vectors.nim` (round-3 fix batch B,
+## finding B1) -- shared with `test_libsodium_interop.nim`'s differential
+## suite, which walks this same typed vector list against libsodium's own
+## verifier instead of (or in addition to) the `expectedValid` this file
+## checks.
 
-import std/[unittest, json, strutils]
+import std/unittest
 import sello
+import ./wycheproof_vectors
 
 const rawVectors = staticRead("../vectors/ed25519_test.json")
 
-proc hexToBytes(s: string): seq[byte] =
-  doAssert s.len mod 2 == 0
-  result = newSeq[byte](s.len div 2)
-  for i in 0 ..< result.len:
-    result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
-
 suite "Wycheproof ed25519 verify":
   test "all vectors give the expected verdict":
-    let root = parseJson(rawVectors)
+    let vectors = loadEd25519Vectors(rawVectors)
     var checked = 0
     var failures = 0
-    for g in root["testGroups"]:
-      let pkBytes = hexToBytes(g["publicKey"]["pk"].getStr)
-      doAssert pkBytes.len == 32
-      var pkArr: array[32, byte]
-      for i in 0 ..< 32: pkArr[i] = pkBytes[i]
-      let pk = toPublicKey(pkArr)
+    for v in vectors:
+      # A signature is 64 bytes by definition; anything else is rejected
+      # before it can reach verify's fixed-size API.
+      var got = false
+      if v.sig.len == 64:
+        var sigArr: array[64, byte]
+        for i in 0 ..< 64: sigArr[i] = v.sig[i]
+        got = verify(toPublicKey(v.pk), v.msg, toSignature(sigArr))
 
-      for t in g["tests"]:
-        let msg = hexToBytes(t["msg"].getStr)
-        let sigBytes = hexToBytes(t["sig"].getStr)
-        let expected = t["result"].getStr == "valid"
-
-        # A signature is 64 bytes by definition; anything else is
-        # rejected before it can reach verify's fixed-size API.
-        var got = false
-        if sigBytes.len == 64:
-          var sigArr: array[64, byte]
-          for i in 0 ..< 64: sigArr[i] = sigBytes[i]
-          got = verify(pk, msg, toSignature(sigArr))
-
-        if got != expected:
-          inc failures
-          echo "  MISMATCH tcId=", t["tcId"].getInt,
-               " expected=", expected, " got=", got,
-               " comment=", t["comment"].getStr
-        inc checked
+      if got != v.expectedValid:
+        inc failures
+        echo "  MISMATCH tcId=", v.tcId,
+             " expected=", v.expectedValid, " got=", got,
+             " comment=", v.comment
+      inc checked
 
     check failures == 0
-    check checked == root["numberOfTests"].getInt
+    check checked == vectors.len

@@ -1,0 +1,18 @@
+id: B02
+target: src/sello/private/backend.nim
+desc: signDetached: RFC 8032 5.1.5/5.1.6's SHA-512(seed) split confused -- the clamped secret scalar `a` is built from h[32..63] (the nonce-derivation half) instead of h[0..31], and `prefix` (fed into nonce derivation) is built from h[0..31] instead of h[32..63]. Upper/lower half swap of the one-time seed expansion.
+====OLD====
+    for i in 0 ..< 32: aBytes[i] = h[i]
+    clampScalar(aBytes)
+    a = toSecretScalar(aBytes)
+
+    for i in 0 ..< 32: prefix[i] = h[32 + i]
+    ct.wipe(h)
+====NEW====
+    for i in 0 ..< 32: aBytes[i] = h[32 + i]
+    clampScalar(aBytes)
+    a = toSecretScalar(aBytes)
+
+    for i in 0 ..< 32: prefix[i] = h[i]
+    ct.wipe(h)
+====END====
