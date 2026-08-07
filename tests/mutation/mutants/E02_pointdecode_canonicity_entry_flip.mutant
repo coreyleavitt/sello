@@ -1,0 +1,8 @@
+id: E02
+target: src/sello/ed25519.nim
+desc: pointDecode: canonicity-gate entry condition inverted, 'if not feBytesCanonical(bytes)' -> 'if feBytesCanonical(bytes)' (the 'not' dropped), so decoding rejects every canonical y-coordinate encoding and (vacuously) would only proceed on non-canonical ones.
+====OLD====
+  if not feBytesCanonical(bytes):
+====NEW====
+  if feBytesCanonical(bytes):
+====END====

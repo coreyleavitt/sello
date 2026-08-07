@@ -4,13 +4,13 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 
 ## Summary
 
-- **Mutants:** 36
-- **Killed (test, red suite):** 36
+- **Mutants:** 46
+- **Killed (test, red suite):** 46
 - **Killed (compile error):** 0
 - **Survived:** 0
-- **Overall kill rate:** 100.0% (36/36)
+- **Overall kill rate:** 100.0% (46/46)
 - **Retired (confirmed-equivalent, excluded from the above):** 1
-- **Wall clock:** 318s
+- **Wall clock:** 385s
 
 **Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red or by a compile error.
 
@@ -18,9 +18,11 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 
 This is a curated, hand-written mutant catalog, not an exhaustive operator sweep: proptest's own `mutation.nim` v1 is `int -> int` only and cannot target Nim source directly, so sello builds this thin patch-based harness in its place (RFC-002 slice 5). Each mutant is an exact-string OLD -> NEW replacement (see `tests/mutation/run_mutation.py`'s module doc comment for the full format and rationale for exact-match over a fuzzy context diff), applied to a disposable scratch copy of the source tree -- the real working tree is never touched. Every mutant's OLD block is verified to occur in the real source EXACTLY ONCE, both when the catalog was written and again on every run (a 0- or multiple-occurrence match aborts the run loudly rather than silently mis-targeting).
 
-For each mutant, the full unit suite (the same 13 files `scripts/test.sh` runs, from `scripts/lib/unit-test-files.sh`) is compiled and run against the mutated tree. A mutant is KILLED if any file fails to compile (compile-error kill -- reported separately, since a mutant that never got a chance to run proves nothing about the suite's sensitivity) or if any test fails once compiled (test kill -- a real red suite). A mutant SURVIVES only if every file in the suite compiles and passes. Verdicts short-circuit on the first failing file for wall-clock reasons; a SURVIVED verdict still requires the entire suite to pass.
+For each mutant, the full unit suite (the same 14 files `scripts/test.sh` runs, from `scripts/lib/unit-test-files.sh`) is compiled and run against the mutated tree. A mutant is KILLED if any file fails to compile (compile-error kill -- reported separately, since a mutant that never got a chance to run proves nothing about the suite's sensitivity) or if any test fails once compiled (test kill -- a real red suite). A mutant SURVIVES only if every file in the suite compiles and passes. Verdicts short-circuit on the first failing file for wall-clock reasons; a SURVIVED verdict still requires the entire suite to pass.
 
-Scope, per the RFC: `field.nim`/`scalar.nim`'s highest-risk spots -- carry-chain operator swaps, shift-amount off-by-ones, boundary constants (19, 0x7FFFFF, RFC 7748's 121666, clamp masks, ...), comparison flips in `feBytesCanonical`/`scIsCanonical`, and digit-range constants in `recodeScalarRadix16`/`cmovCached`. This is quality-over-exhaustiveness curation, not a claim of exhaustive operator coverage over every line of either file.
+Scope, per RFC-002 slice 5: `field.nim`/`scalar.nim`'s highest-risk spots -- carry-chain operator swaps, shift-amount off-by-ones, boundary constants (19, 0x7FFFFF, RFC 7748's 121666, clamp masks, ...), comparison flips in `feBytesCanonical`/`scIsCanonical`, and digit-range constants in `recodeScalarRadix16`/`cmovCached`. RFC-003 slice 3 extended the catalog beyond field/scalar to the highest-stakes boundary logic elsewhere in the verify/decode surface: `challenge.nim`'s shared sign/verify hash-input ordering (a survivor there would be forgery-adjacent), `ed25519.pointDecode`'s RFC 8032 §5.1.3 reject conditions, `field.feSqrtRatioVartime`'s sqrt-ratio retry/reject branches, `x25519.nim`'s RFC 7748 §6.1 zero-output small-order-peer check at both call sites, and `scalar.pointEncode`'s sign-bit condition (the one comparison-flip family the original S-series missed). This is quality-over-exhaustiveness curation throughout, not a claim of exhaustive operator coverage over every line of any of these files.
+
+**Catalog numbering note:** the `field.nim`/`scalar.nim` mutant IDs skip F05 (retired to `equivalent/`, see below), and also skip F12 and F14 outright -- those two were abandoned during the original RFC-002 slice 5 authoring pass (candidate mutants that didn't survive the catalog's own curation, before ever being written to a checked-in `.mutant` file) and are not missing or lost entries; the surviving F-series simply never renumbered around the gap.
 
 A mutant that turns out to be behaviorally indistinguishable from the real source across its whole valid input domain (an "equivalent mutant") is retired to `tests/mutation/mutants/equivalent/` rather than left SURVIVED or forced to pass via a test that doesn't actually pin any real behavioral difference -- per the RFC's own guidance for a survivor that "reveals something deeper". Retired mutants are excluded from the active catalog this script executes (and thus from the kill-rate above) but are listed for transparency below, each with the empirical evidence for equivalence recorded in its own `note:` header field.
 
@@ -28,6 +30,11 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 
 | id | target | description | outcome | first failing file |
 |----|--------|--------------|---------|---------------------|
+| C01 | challenge.nim | challenge: hash-input order swap, SHA-512(R \|\| A \|\| msg) computed as SHA-512(A \|\| R \|\| msg) instead -- the one formula shared byte-for-byte by verify and signDetached, so this cannot be caught by a sign/verify self-consistency roundtrip (both sides call the SAME mutated function); only RFC 8032 known-answer vectors with fixed expected signature bytes pin the real R\|\|A\|\|msg order. | KILLED (test) | tests/unit/test_signing.nim |
+| C02 | challenge.nim | challenge: dropped hash component, A (the public key) removed from the SHA-512(R \|\| A \|\| msg) input entirely -- the classic key-substitution-attack shape (a challenge hash that doesn't bind the signer's identity). Like C01, a sign/verify self-consistency roundtrip cannot catch this (both sides share the one mutated function); only RFC 8032/Wycheproof known-answer vectors with fixed expected bytes pin the real three-component hash. | KILLED (test) | tests/unit/test_signing.nim |
+| E01 | ed25519.nim | pointDecode: RFC 8032 §5.1.3 step 4 reject condition inverted, 'sign and not feIsNonZero(x)' -> 'sign and feIsNonZero(x)' (the 'not' dropped), so the invalid x=0-with-sign-bit-set encoding is silently accepted while ordinary nonzero-x points with the sign bit set are wrongly rejected. | KILLED (test) | tests/unit/test_signing.nim |
+| E02 | ed25519.nim | pointDecode: canonicity-gate entry condition inverted, 'if not feBytesCanonical(bytes)' -> 'if feBytesCanonical(bytes)' (the 'not' dropped), so decoding rejects every canonical y-coordinate encoding and (vacuously) would only proceed on non-canonical ones. | KILLED (test) | tests/unit/test_signing.nim |
+| E03 | ed25519.nim | pointDecode: sign-bit reconciliation comparison flip, 'if feIsNegative(x) != sign' -> 'if feIsNegative(x) == sign' -- negates x on the branch where the candidate root's sign ALREADY matches the wire sign bit, and leaves it un-negated when it doesn't, decoding every valid point to its negation. | KILLED (test) | tests/unit/test_signing.nim |
 | F01 | field.nim | feFromBytes: shift amount off-by-one, 'h1 shl 6' -> 'h1 shl 5' (limb-boundary shift for the 2nd input limb). | KILLED (test) | tests/unit/test_field.nim |
 | F02 | field.nim | feFromBytes: boundary constant, top-limb truncation mask 8388607 (0x7FFFFF) widened to 16777215 (0xFFFFFF), letting an extra high bit of the input leak into h9 before the clamp. | KILLED (test) | tests/unit/test_signing.nim |
 | F03 | field.nim | feFromBytes: reduction-by-p constant swapped, 'carry9 * 19' -> 'carry9 * 18' (p = 2^255 - 19; this is the wraparound coefficient the RFC calls out by name). | KILLED (test) | tests/unit/test_field.nim |
@@ -45,6 +52,8 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 | F18 | field.nim | clampScalar: boundary constant widened, 's[0] and 248' -> 's[0] and 240' (clears bit 3 in addition to RFC 8032/7748's low 3 bits). | KILLED (test) | tests/unit/test_scalar.nim |
 | F19 | field.nim | clampScalar: boundary constant changed, '(s[31] and 127) or 64' -> '... or 32', setting bit 253 instead of bit 254. | KILLED (test) | tests/unit/test_signing.nim |
 | F20 | field.nim | feCMove: constant-time mask construction broken, 'let mask = -int32(b)' -> 'let mask = int32(b)' (mask becomes 0/1 instead of 0/all-ones, so the XOR-select only ever touches each limb's least significant bit). | KILLED (test) | tests/unit/test_scalar.nim |
+| F21 | field.nim | feSqrtRatioVartime: retry-branch condition inverted, 'if feIsNonZero(vxx)' -> 'if not feIsNonZero(vxx)' (the first check, deciding whether the initial candidate root already satisfies v*x^2 == u) -- retries with sqrt(-1) exactly when the candidate was ALREADY correct, and skips the retry exactly when it was needed. | KILLED (test) | tests/unit/test_field.nim |
+| F22 | field.nim | feSqrtRatioVartime: final reject condition inverted, 'if feIsNonZero(vxx): return none[Fe]()' -> 'if not feIsNonZero(vxx): return none[Fe]()' (the second check, after the sqrt(-1) retry) -- rejects the genuinely valid sqrt-ratio cases (where the retried root now checks out) and accepts the genuinely invalid ones (no square root exists). | KILLED (test) | tests/unit/test_field.nim |
 | S01 | scalar.nim | geP3ToCached: sign flip, 't2d = 2*d*T' computed via feSub instead of feAdd. | KILLED (test) | tests/unit/test_scalar.nim |
 | S02 | scalar.nim | geP2Dbl: sign flip in point doubling, 'X+Y' computed via feSub instead of feAdd. | KILLED (test) | tests/unit/test_scalar.nim |
 | S03 | scalar.nim | geP2Dbl: sign flip in point doubling, 'Y^2 - X^2' computed via feAdd instead of feSub. | KILLED (test) | tests/unit/test_scalar.nim |
@@ -64,6 +73,9 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 | S17 | scalar.nim | L (subgroup order) constant corrupted: the top byte of the 32-byte little-endian encoding changed from 0x10 to 0x20, doubling the encoded modulus. | KILLED (test) | tests/unit/test_wycheproof.nim |
 | S18 | scalar.nim | scReduce: shift-amount off-by-one in the top-limb (s23) extraction, 'load4(s, 60) shr 3' -> 'shr 2'. | KILLED (test) | tests/unit/test_signing.nim |
 | S19 | scalar.nim | scMulAdd: shift-amount off-by-one in the 'a' operand's top-limb (a11) extraction, 'load4(a, 28) shr 7' -> 'shr 6'. | KILLED (test) | tests/unit/test_scalar.nim |
+| S20 | scalar.nim | pointEncode: sign-bit condition flip, 'if feIsNegative(x)' -> 'if not feIsNegative(x)' -- the one comparison-flip family the original S-series missed (RFC-003 slice 3): sets the wire sign bit on every non-negative x and clears it on every negative x, the exact opposite of RFC 8032 §5.1.2's encoding rule. | KILLED (test) | tests/unit/test_signing.nim |
+| X01 | x25519.nim | x25519(X25519StaticSecret, peer): RFC 7748 §6.1 zero-output small-order-peer check inverted, 'if acc == 0' -> 'if acc != 0', so an attacker-supplied small-order peer point (all-zero DH output) is returned as Some(X25519Shared) instead of rejected, and every genuine nonzero shared secret is dropped as None. | KILLED (test) | tests/unit/test_facade.nim |
+| X02 | x25519.nim | x25519(sink X25519EphemeralSecret, peer): the same RFC 7748 §6.1 zero-output small-order-peer check inverted at the ephemeral-secret call site, 'if acc == 0' -> 'if acc != 0', independently of X01's static-secret overload (the two are separate functions sharing no code past the ladder call). | KILLED (test) | tests/unit/test_facade.nim |
 
 ## Retired (equivalent) mutants
 

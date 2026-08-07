@@ -10,7 +10,12 @@
 # suite", following the same shape as scripts/test.sh and scripts/fuzz.sh.
 #
 # Layout:
-#   tests/mutation/mutants/*.mutant   — the curated catalog (36 mutants),
+#   tests/mutation/mutants/*.mutant   — the curated catalog (46 mutants as of
+#                                        RFC-003 slice 3, up from RFC-002
+#                                        slice 5's original 36 — file-
+#                                        addressed, so growing it to cover a
+#                                        new source file is just adding more
+#                                        *.mutant files, no harness changes),
 #                                        one plain-text exact-string-patch
 #                                        file per mutant.
 #   tests/mutation/run_mutation.py    — the driver that actually applies,
@@ -20,17 +25,25 @@
 # Usage:  scripts/mutation.sh
 #
 # Wall clock: this compiles and runs the FULL unit suite once per mutant
-# (36 container-internal `nim c -r` passes per test file) — the RFC calls
-# for exactly this ("one container run per mutant is expected... full unit
-# suite per the RFC — do not silently subset"). Everything happens inside
-# ONE podman invocation, not one per mutant: run_mutation.py reuses a single
-# scratch copy of the source tree across the whole campaign, which lets
-# Nim's own nimcache carry unrelated dependencies (nimcrypto, proptest, ...)
-# across mutants instead of paying their full compile cost each time — only
-# the mutated file(s) and their transitive dependents actually recompile
-# per mutant. Expect low tens of minutes for the full catalog; a survivor
-# that needs a new test still requires re-running this script (or a
-# targeted subset while iterating) to confirm the kill.
+# (one container-internal `nim c -r` pass per test file, per mutant) — the
+# RFC calls for exactly this ("one container run per mutant is expected...
+# full unit suite per the RFC — do not silently subset"). Everything happens
+# inside ONE podman invocation, not one per mutant: run_mutation.py reuses a
+# single scratch copy of the source tree across the whole campaign, which
+# lets Nim's own nimcache carry unrelated dependencies (nimcrypto, proptest,
+# ...) across mutants instead of paying their full compile cost each time —
+# only the mutated file(s) and their transitive dependents actually
+# recompile per mutant. Measured, not merely estimated (the original "low
+# tens of minutes" guess was never checked against a real run): 318s for
+# the original 36-mutant catalog (RFC-002 slice 5), 448s for the 46-mutant
+# catalog RFC-003 slice 3 grew it to — both single-digit minutes, scaling
+# roughly linearly with catalog size at a shade over 9s/mutant averaged
+# across the whole campaign (individual mutants range from ~1.5s, killed
+# almost instantly by a cheap unit file, to ~30s when the killing test
+# happens to sit late in the file list). Budget accordingly as the catalog
+# grows further; a survivor that needs a new test still requires
+# re-running this script (or a targeted subset while iterating) to confirm
+# the kill.
 #
 # Needs only the base Nim image (python3 is present there; confirmed
 # empirically, same standard as the rest of this project's toolchain

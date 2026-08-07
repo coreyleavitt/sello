@@ -6,8 +6,8 @@
   spot-checked against source before drafting.
 - **Resume:** `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 2/6 done, 4
-  remaining"); stop when every slice is implemented` — slices 1 and 2 done and committed;
-  next is slice 3 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are implemented by
+  remaining"); stop when every slice is implemented` — slices 1, 2, 3 done and committed;
+  next is slice 4 (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are implemented by
   sonnet subagents (TDD, gates run synchronously in-agent per the RFC-002 ops lesson);
   the control loop verifies, commits, and updates this doc.
 - **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
@@ -62,8 +62,25 @@
       re-verified) green with exactly the four SKIPPED lines; fuzz.sh 30 → 0 crashes,
       edges 358/558/289 all ≫ MinEdgesGate 50, new identity oracle survived 1991
       pointDecode iterations; check-readme.sh 5/5; test-libsodium.sh 183 OK / 0 fail.
-- [ ] 3 mutation scope extension (challenge.nim ordering, pointDecode conditionals,
-      ladder zero-check, pointEncode sign bit; ~10-15 mutants; strictly after slice 1)
+- [x] 3 mutation scope extension (subject: "RFC-003 slice 3: mutation scope extension")
+      — 10 new mutants, all killed by test red on the first campaign: C01/C02
+      (challenge.nim R/A order swap + drop-A — killed by RFC 8032 KAT vectors in
+      test_signing.nim, deliberately NOT by sign/verify roundtrip since both sides share
+      the one mutated formula), E01/E02/E03 (pointDecode sign-bit-with-x=0 reject flip,
+      canonicity-gate entry flip, sign-reconciliation flip), F21/F22 (feSqrtRatioVartime
+      retry + final-reject condition flips — targeted post-slice-1 in field.nim, the
+      whole point of the 3-after-1 ordering), X01/X02 (both x25519 overloads' small-order
+      zero-check flips, killed via test_facade.nim), S20 (pointEncode sign-bit flip).
+      No survivors → no new killing tests needed; F05 stays the only retired-equivalent.
+      run_mutation.py needed zero code changes (already file-addressed); its report
+      template gained the RFC-003 scope paragraph and the explicit F12/F14
+      numbering-gap note (abandoned during authoring, not lost mutants);
+      docs/mutation-results.md confirmed generator-produced, so edits went into the
+      template and the campaign re-ran to regenerate it. mutation.sh header estimate
+      reconciled with measured reality (~9s/mutant; 385-448s in-container for 46).
+      **Gates:** mutation.sh 46/46 killed, 0 survivors, 0 compile-error kills;
+      test.sh green (14 files); test-libsodium.sh green (real interop assertions
+      confirmed active).
 - [ ] 4 proof completion (written telescoping-carry induction for the reconstruction
       identity; literal-function composition argument; RESOURCE WALL reframe)
 - [ ] 5 CT hardening (sixth dudect target: static-secret DH fixed-vs-random; ct.sh

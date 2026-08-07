@@ -1,0 +1,10 @@
+id: C01
+target: src/sello/challenge.nim
+desc: challenge: hash-input order swap, SHA-512(R || A || msg) computed as SHA-512(A || R || msg) instead -- the one formula shared byte-for-byte by verify and signDetached, so this cannot be caught by a sign/verify self-consistency roundtrip (both sides call the SAME mutated function); only RFC 8032 known-answer vectors with fixed expected signature bytes pin the real R||A||msg order.
+====OLD====
+  sha.update(R)
+  sha.update(A)
+====NEW====
+  sha.update(A)
+  sha.update(R)
+====END====

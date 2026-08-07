@@ -1,0 +1,11 @@
+id: C02
+target: src/sello/challenge.nim
+desc: challenge: dropped hash component, A (the public key) removed from the SHA-512(R || A || msg) input entirely -- the classic key-substitution-attack shape (a challenge hash that doesn't bind the signer's identity). Like C01, a sign/verify self-consistency roundtrip cannot catch this (both sides share the one mutated function); only RFC 8032/Wycheproof known-answer vectors with fixed expected bytes pin the real three-component hash.
+====OLD====
+  sha.update(R)
+  sha.update(A)
+  sha.update(msg)
+====NEW====
+  sha.update(R)
+  sha.update(msg)
+====END====

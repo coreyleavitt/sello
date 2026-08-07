@@ -69,10 +69,11 @@ Method: for each mutant, in isolation --
          handled in-slice per the RFC (a new test gets added to kill it,
          and this harness gets re-run to confirm).
   Short-circuits on the first failing file (compile or test) once a
-  mutant is already provably killed -- for a curated 36-mutant catalog
-  with an otherwise-thorough suite, most mutants die early and this
-  matters for wall clock; a SURVIVED verdict still requires running every
-  file (nothing short of the whole suite passing green earns that verdict).
+  mutant is already provably killed -- for a curated catalog (46 mutants
+  as of RFC-003 slice 3) with an otherwise-thorough suite, most mutants
+  die early and this matters for wall clock; a SURVIVED verdict still
+  requires running every file (nothing short of the whole suite passing
+  green earns that verdict).
 
 Never touches the real working tree: everything above operates on a
 throwaway copy under /tmp inside the container, made once at startup and
@@ -80,7 +81,7 @@ reused (mutate-restore in place) across the whole campaign -- reusing the
 scratch copy (rather than re-cloning the repo per mutant) is what lets the
 Nim compiler's own nimcache carry unrelated dependencies (nimcrypto,
 proptest, ...) across mutants within the one container invocation, instead
-of paying their full compile cost 36 times over.
+of paying their full compile cost once per mutant.
 """
 import pathlib
 import shutil
@@ -316,14 +317,35 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
     )
     lines.append("")
     lines.append(
-        "Scope, per the RFC: `field.nim`/`scalar.nim`'s highest-risk "
-        "spots -- carry-chain operator swaps, shift-amount off-by-ones, "
-        "boundary constants (19, 0x7FFFFF, RFC 7748's 121666, clamp "
-        "masks, ...), comparison flips in `feBytesCanonical`/"
-        "`scIsCanonical`, and digit-range constants in "
-        "`recodeScalarRadix16`/`cmovCached`. This is quality-over-"
-        "exhaustiveness curation, not a claim of exhaustive operator "
-        "coverage over every line of either file."
+        "Scope, per RFC-002 slice 5: `field.nim`/`scalar.nim`'s "
+        "highest-risk spots -- carry-chain operator swaps, shift-amount "
+        "off-by-ones, boundary constants (19, 0x7FFFFF, RFC 7748's "
+        "121666, clamp masks, ...), comparison flips in "
+        "`feBytesCanonical`/`scIsCanonical`, and digit-range constants "
+        "in `recodeScalarRadix16`/`cmovCached`. RFC-003 slice 3 extended "
+        "the catalog beyond field/scalar to the highest-stakes boundary "
+        "logic elsewhere in the verify/decode surface: `challenge.nim`'s "
+        "shared sign/verify hash-input ordering (a survivor there would "
+        "be forgery-adjacent), `ed25519.pointDecode`'s RFC 8032 §5.1.3 "
+        "reject conditions, `field.feSqrtRatioVartime`'s sqrt-ratio "
+        "retry/reject branches, `x25519.nim`'s RFC 7748 §6.1 zero-output "
+        "small-order-peer check at both call sites, and "
+        "`scalar.pointEncode`'s sign-bit condition (the one "
+        "comparison-flip family the original S-series missed). This is "
+        "quality-over-exhaustiveness curation throughout, not a claim of "
+        "exhaustive operator coverage over every line of any of these "
+        "files."
+    )
+    lines.append("")
+    lines.append(
+        "**Catalog numbering note:** the `field.nim`/`scalar.nim` "
+        "mutant IDs skip F05 (retired to `equivalent/`, see below), and "
+        "also skip F12 and F14 outright -- those two were abandoned "
+        "during the original RFC-002 slice 5 authoring pass (candidate "
+        "mutants that didn't survive the catalog's own curation, before "
+        "ever being written to a checked-in `.mutant` file) and are not "
+        "missing or lost entries; the surviving F-series simply never "
+        "renumbered around the gap."
     )
     lines.append("")
     lines.append(

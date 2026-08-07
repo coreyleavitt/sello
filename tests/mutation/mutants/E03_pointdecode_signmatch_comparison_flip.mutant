@@ -1,0 +1,8 @@
+id: E03
+target: src/sello/ed25519.nim
+desc: pointDecode: sign-bit reconciliation comparison flip, 'if feIsNegative(x) != sign' -> 'if feIsNegative(x) == sign' -- negates x on the branch where the candidate root's sign ALREADY matches the wire sign bit, and leaves it un-negated when it doesn't, decoding every valid point to its negation.
+====OLD====
+  if feIsNegative(x) != sign:
+====NEW====
+  if feIsNegative(x) == sign:
+====END====
