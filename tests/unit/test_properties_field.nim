@@ -42,12 +42,23 @@ proc fe32(): Strategy[array[32, byte]] =
 
 proc toFe(b: array[32, byte]): Fe = feFromBytes(b)
 
+proc covSettings(): Settings =
+  ## RFC-002 slice 3 item 3: `Settings.coverageGuided` enabled for the
+  ## property suites. `defaultSettings()` plus the one flag flip -- a
+  ## cheap no-op today (no `{.cover.}`-instrumented proc sits in any of
+  ## these properties' call graphs, so `__coverage__` scores stay empty),
+  ## whose value grows once source-level `{.cover.}` instrumentation
+  ## exists to feed it. See docs/rfc-002-audit-remediation.md Slice 3.
+  result = defaultSettings()
+  result.coverageGuided = true
+
 # ---------------------------------------------------------------------------
 # Ring axioms (feAdd/feSub/feMul), compared via canonical encoding.
 # ---------------------------------------------------------------------------
 
 suite "field property: ring axioms":
   property "feAdd is commutative":
+    with covSettings()
     given ab in fe32(), bb in fe32()
     let a = toFe(ab)
     let b = toFe(bb)
@@ -57,6 +68,7 @@ suite "field property: ring axioms":
     ensure feToBytes(r1) == feToBytes(r2)
 
   property "feAdd is associative":
+    with covSettings()
     given ab in fe32(), bb in fe32(), cb in fe32()
     let a = toFe(ab)
     let b = toFe(bb)
@@ -72,6 +84,7 @@ suite "field property: ring axioms":
     ensure feToBytes(lhs) == feToBytes(rhs)
 
   property "feMul is commutative":
+    with covSettings()
     given ab in fe32(), bb in fe32()
     let a = toFe(ab)
     let b = toFe(bb)
@@ -81,6 +94,7 @@ suite "field property: ring axioms":
     ensure feToBytes(r1) == feToBytes(r2)
 
   property "feMul is associative":
+    with covSettings()
     given ab in fe32(), bb in fe32(), cb in fe32()
     let a = toFe(ab)
     let b = toFe(bb)
@@ -96,6 +110,7 @@ suite "field property: ring axioms":
     ensure feToBytes(lhs) == feToBytes(rhs)
 
   property "feMul distributes over feAdd":
+    with covSettings()
     given ab in fe32(), bb in fe32(), cb in fe32()
     let a = toFe(ab)
     let b = toFe(bb)
@@ -112,6 +127,7 @@ suite "field property: ring axioms":
     ensure feToBytes(lhs) == feToBytes(rhs)
 
   property "feSub(a, a) == 0":
+    with covSettings()
     given ab in fe32()
     let a = toFe(ab)
     var r: Fe
@@ -119,6 +135,7 @@ suite "field property: ring axioms":
     ensure feToBytes(r) == feToBytes(FeZero)
 
   property "feMul(a, feInvert(a)) == 1 for nonzero a":
+    with covSettings()
     given ab in fe32()
     let a = toFe(ab)
     assume feIsNonZero(a)
@@ -128,6 +145,7 @@ suite "field property: ring axioms":
     ensure feToBytes(r) == feToBytes(FeOne)
 
   property "feNeg is involutive (double negation is the identity)":
+    with covSettings()
     given ab in fe32()
     let a = toFe(ab)
     var neg, negneg: Fe
@@ -196,11 +214,13 @@ suite "field property: near-p boundary stress (pinned)":
 
 suite "field property: encode/decode roundtrip":
   property "feFromBytes -> feToBytes is exact on canonical inputs":
+    with covSettings()
     given b in fe32()
     let canon = feToBytes(feFromBytes(b))  # first pass always canonicalizes
     ensure feToBytes(feFromBytes(canon)) == canon
 
   property "feFromBytes -> feToBytes always yields a canonical encoding (random inputs)":
+    with covSettings()
     given b in fe32()
     ensure feBytesCanonical(feToBytes(feFromBytes(b)))
 
@@ -210,6 +230,7 @@ suite "field property: encode/decode roundtrip":
 
 suite "field property: feCMove / feCSwap":
   property "feCMove(r, a, false) leaves r unchanged":
+    with covSettings()
     given rb in fe32(), ab in fe32()
     var r = toFe(rb)
     let before = feToBytes(r)
@@ -217,6 +238,7 @@ suite "field property: feCMove / feCSwap":
     ensure feToBytes(r) == before
 
   property "feCMove(r, a, true) sets r := a":
+    with covSettings()
     given rb in fe32(), ab in fe32()
     var r = toFe(rb)
     let a = toFe(ab)
@@ -224,6 +246,7 @@ suite "field property: feCMove / feCSwap":
     ensure feToBytes(r) == feToBytes(a)
 
   property "feCSwap(a, b, false) leaves both unchanged":
+    with covSettings()
     given ab in fe32(), bb in fe32()
     var a = toFe(ab)
     var b = toFe(bb)
@@ -233,6 +256,7 @@ suite "field property: feCMove / feCSwap":
     ensure feToBytes(a) == beforeA and feToBytes(b) == beforeB
 
   property "feCSwap(a, b, true) exchanges both":
+    with covSettings()
     given ab in fe32(), bb in fe32()
     var a = toFe(ab)
     var b = toFe(bb)

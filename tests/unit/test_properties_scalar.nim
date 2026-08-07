@@ -37,18 +37,27 @@ proc reducedScalar(): Strategy[array[32, byte]] =
   scalar64().map(proc(wide: array[64, byte]): array[32, byte] =
     scReduce(result, wide))
 
+proc covSettings(): Settings =
+  ## RFC-002 slice 3 item 3: `Settings.coverageGuided` enabled for the
+  ## property suites -- see test_properties_field.nim's `covSettings`
+  ## doc comment for the full rationale (not repeated here).
+  result = defaultSettings()
+  result.coverageGuided = true
+
 # ---------------------------------------------------------------------------
 # scReduce: idempotence, boundary inputs, output always canonical (< L).
 # ---------------------------------------------------------------------------
 
 suite "scalar property: scReduce":
   property "scReduce output is always canonical (< L)":
+    with covSettings()
     given wide in scalar64()
     var reduced: array[32, byte]
     scReduce(reduced, wide)
     ensure scIsCanonical(reduced)
 
   property "scReduce is idempotent: reduce(zero-extend(reduce(x))) == reduce(x)":
+    with covSettings()
     given wide in scalar64()
     var r1: array[32, byte]
     scReduce(r1, wide)
@@ -161,10 +170,12 @@ proc reconstructsTo(s: array[32, byte]): bool =
 
 suite "scalar property: recodeScalarRadix16 reconstruction":
   property "sum(digits[i] * 16^i) == s, for random bit-255-clear scalars":
+    with covSettings()
     given s in bit255Clear()
     ensure reconstructsTo(s)
 
   property "sum(digits[i] * 16^i) == s, for random reduced-mod-L scalars":
+    with covSettings()
     given s in reducedScalar()
     ensure reconstructsTo(s)
 
@@ -190,9 +201,12 @@ proc settingsWithExamples(n: int): Settings =
   ## reproducible without a committed example DB) with `maxExamples`
   ## dialed down for the costlier elliptic-curve properties in this
   ## suite -- keeps the added wall time bounded without disabling the
-  ## engine's other defaults (shrinking, autoLabels, etc.).
+  ## engine's other defaults (shrinking, autoLabels, etc.). Also flips
+  ## `coverageGuided` on (RFC-002 slice 3 item 3 -- see `covSettings`'s
+  ## doc comment above).
   result = defaultSettings()
   result.maxExamples = n
+  result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)
 

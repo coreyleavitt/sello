@@ -18,8 +18,12 @@ proc seedBytes32(): Strategy[array[32, byte]] =
   arrays[32, byte](randByte())
 
 proc settingsWithExamples(n: int): Settings =
+  ## RFC-002 slice 3 item 3: `coverageGuided` also flipped on here -- see
+  ## test_properties_field.nim's `covSettings` doc comment for the full
+  ## rationale (not repeated here).
   result = defaultSettings()
   result.maxExamples = n
+  result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)
 

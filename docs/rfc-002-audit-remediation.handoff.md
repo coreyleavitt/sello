@@ -13,16 +13,17 @@
     one judgment call). It relocated the modules every later slice's test code imports
     (`types.nim` → `wire.nim`/`wipe.nim`, `challenge.nim` extraction), so nothing ran
     beside it.
-  - **Phase B — slices 3 and 5 in parallel** (slice 5 DONE — merged to master 2026-08-06,
-    subject: "RFC-002 slice 5: mutation testing"; the control loop squash-merged the
-    worktree `worktree-agent-a89f2e8ee4886e233` and re-ran `scripts/test.sh` on the merged
-    tree, 165 OK / 0 failures; `scripts/mutation.sh`'s own 36/36 clean run happened in the
-    worktree on byte-identical content — master had not moved since the worktree branched —
-    so it was not re-run at merge. Slice 3 still IN PROGRESS in worktree branch
-    `worktree-agent-a6c3675ac2b6041c5` under `.claude/worktrees/`, event-driven-waiting on
-    its final test.sh gate; when it lands, rebase/merge it onto the now-moved master,
-    re-run gates on the merged tree — this time content will NOT be identical — commit,
-    update this doc, then clean up both worktrees), each in a worktree-isolated sonnet subagent
+  - **Phase B — slices 3 and 5 in parallel** — DONE. Slice 5 merged 2026-08-06 (subject:
+    "RFC-002 slice 5: mutation testing"; squash-merged, test.sh re-run on merged tree,
+    165 OK; mutation.sh's 36/36 clean run happened in-worktree on byte-identical content).
+    Slice 3 merged 2026-08-07 (subject: "RFC-002 slice 3: fuzz overhaul"; squash-merged
+    onto the post-slice-5 master — genuinely different content this time — and BOTH gates
+    re-run on the merged tree by the control loop: test.sh 165 OK / 0 failures, fuzz.sh 30
+    → pointDecode 351 edges / verify 333 / x25519 291, 0 crashes, gate MinEdgesGate=50
+    passed). Both worktrees removed. Ops lesson recorded: subagents driving long container
+    runs stalled twice by stopping to "wait" on background tasks whose completion never
+    re-woke them (one container even exited unobserved overnight) — Phase C's agent must
+    run every long command SYNCHRONOUSLY in the foreground.
     (disjoint files: tests/fuzz/ + scripts/fuzz.sh vs. scripts/mutation.sh + catalog +
     docs/mutation-results.md; only slice 5's killing-tests-for-survivors can brush
     tests/unit/). Phase-B agents do NOT commit and do NOT touch this handoff — the
@@ -108,9 +109,26 @@
       for both `tests/ct/ct_main.nim` and `tests/fuzz/fuzz_main.nim`. `tests/verify/
       symex_recode.nim` also `nim check`ed as an extra precaution (imports `sello/scalar`
       directly) — clean.
-- [ ] 3 Fuzz overhaul — external SanitizerCoverage target (proptest `externalTarget`, gcc
-      trace-pc + proptest_cov.c), scripts/fuzz.sh rework, edge-count gate (≫2 edges);
-      differential + determinism oracles; `Settings.coverageGuided` on property suites
+- [x] 3 Fuzz overhaul (subject: "RFC-002 slice 3: fuzz overhaul") — coverage guidance is
+      now REAL: mandated spike ran first and passed in the base image (plain-C toy: 6
+      nonzero counters; Nim toy: 78 — recipe exactly as `_deps/proptest/docs/fuzz/USAGE.md`
+      documents). New `tests/fuzz/fuzz_external_target.nim`: single stdin-driven binary,
+      mode-byte dispatch (0=pointDecode, 1=verify, 2=x25519), carrying both new oracle
+      directions (¬feBytesCanonical ⇒ pointDecode none; ¬scIsCanonical(S) ⇒ verify false)
+      plus determinism double-calls; imports only sello modules, zero pragmas added to
+      audited sources. `fuzz_common.nim` rewritten (retired {.cover.} wrappers; now
+      strategies + mode-byte encoders + `runExternalTarget`, no sello import at all — the
+      driver process never touches sello, only the instrumented subprocess does);
+      `fuzz_main.nim` = three campaigns, one CoverageFrontier each; `scripts/fuzz.sh` =
+      three-stage container build (proptest_cov.o, sancov-instrumented target, plain
+      driver), keeps [seconds-per-target] contract + milpa-preflight. Edge gate
+      `MinEdgesGate = 50`, calibrated from three independent runs (291–542 observed;
+      old universe was 1–2 edges). `Settings.coverageGuided = true` wired into all 24
+      properties across the three `test_properties_*` suites (honest no-op today — no
+      {.cover.} anywhere — readies the surface per the RFC's own framing). proptest's
+      real API matched the RFC's assumptions (cosmetic signature diffs vs INTERFACE.md
+      confirmed against fuzz.nim source before use). Campaign at merge: 2108/1603/847
+      iterations, 351/333/291 edges, 0 crashes, exit 0.
 - [ ] 4 Verification deepening — random-seed backend↔sodium parity property; ephemeral
       dudect target + ct-results update; Z3 whole-chain attempt (64 free nibbles; honest
       outcome either way)
