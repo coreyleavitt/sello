@@ -98,6 +98,40 @@ suite "X25519 - three-role API (RFC-001 ledger #29 revisited)":
     check sharedA.isSome and sharedB.isSome
     check toBytes(sharedA.get) == toBytes(sharedB.get)
 
+suite "X25519 - static pair constructor (RFC-003 slice 1 item 5)":
+  ## `x25519StaticPair()` mirrors `x25519EphemeralPair()`'s shape for the
+  ## one X25519 role that was previously left as two loose values
+  ## (`x25519StaticSecret()` + a separate `x25519Base(...)` call).
+  test "x25519StaticPair() generates a usable secret and its own public key":
+    let (secret, public) = x25519StaticPair()
+    check toBytes(public) != default(array[32, byte])
+    check toBytes(public) == toBytes(x25519Base(secret))
+
+  test "pair-vs-pair handshake agrees in both directions":
+    let (secretA, publicA) = x25519StaticPair()
+    let (secretB, publicB) = x25519StaticPair()
+    let sharedA = x25519(secretA, publicB)
+    let sharedB = x25519(secretB, publicA)
+    check sharedA.isSome and sharedB.isSome
+    check toBytes(sharedA.get) == toBytes(sharedB.get)
+
+  test "pair-vs-toX25519StaticSecret handshake agrees in both directions":
+    let (secretA, publicA) = x25519StaticPair()
+    let secretB = toX25519StaticSecret(fromHex(
+      "77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a"))
+    let publicB = x25519Base(secretB)
+    let sharedA = x25519(secretA, publicB)
+    let sharedB = x25519(secretB, publicA)
+    check sharedA.isSome and sharedB.isSome
+    check toBytes(sharedA.get) == toBytes(sharedB.get)
+
+  test "the secret from x25519StaticPair() is a reusable X25519StaticSecret (copyable, no move ceremony)":
+    let (secret, _) = x25519StaticPair()
+    let peerA = x25519Base(x25519StaticSecret())
+    let peerB = x25519Base(x25519StaticSecret())
+    check x25519(secret, peerA).isSome
+    check x25519(secret, peerB).isSome  # same secret, reused -- compiles, no move()
+
 suite "X25519 - secret hygiene (X25519StaticSecret/X25519Shared wipe)":
   ## Same probe-pattern methodology as test_signing.nim's Seed destructor
   ## suite: a raw pointer captured before the wipe, memory re-read after.

@@ -34,9 +34,8 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
   if not feBytesCanonical(bytes):
     return none[GeP3]()
 
-  var D, I: Fe
-  D.limbs = Ed25519D_Raw
-  I = FeOne
+  let D = feFromLimbs(Ed25519D_Raw)
+  let I = FeOne
 
   var u, v: Fe
   var y = feFromBytes(bytes)
@@ -52,37 +51,14 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
   feMul(dy2, dy2, y)
   feAdd(v, dy2, I)
 
-  # x = (u/v)^((p+3)/8) using the sqrtRatioM1 approach
-  var v3: Fe
-  feSq(v3, v)
-  feMul(v3, v3, v)          # v^3
-  var uv3, uv7: Fe
-  feMul(uv3, v3, u)         # u*v^3
-  feMul(uv7, uv3, v3)       # u*v^6
-  feMul(uv7, uv7, v)        # u*v^7
-
-  var x: Fe
-  fePow22523(x, uv7)        # (u*v^7)^((p-5)/8)
-  feMul(x, x, v3)           # * v^3
-  feMul(x, x, u)            # * u
-
-  # Check: v*x^2 == u or v*x^2 == -u
-  var vxx: Fe
-  feSq(vxx, x)
-  feMul(vxx, vxx, v)
-  feSub(vxx, vxx, u)
-
-  if feIsNonZero(vxx):
-    # v*x^2 != u; retry with x*sqrt(-1), which squares to -x^2.
-    # Valid iff v*x^2 == -u; anything else means u/v is not a square.
-    var S: Fe
-    S.limbs = SqrtM1_Raw
-    feMul(x, x, S)
-    feSq(vxx, x)
-    feMul(vxx, vxx, v)
-    feSub(vxx, vxx, u)
-    if feIsNonZero(vxx):
-      return none[GeP3]()
+  # x = sqrt(u/v), retrying with sqrt(-1) if the first candidate root
+  # doesn't check out (RFC 8032 §5.1.3 step 3) -- extracted to
+  # field.feSqrtRatioVartime (RFC-003 slice 1 item 3), so this call is the
+  # entire dance, not just the candidate-root formula.
+  let xOpt = feSqrtRatioVartime(u, v)
+  if xOpt.isNone:
+    return none[GeP3]()
+  var x = xOpt.get
 
   # RFC 8032 §5.1.3 step 4: x = 0 with sign bit set is invalid.
   if sign and not feIsNonZero(x):
@@ -151,12 +127,9 @@ func verify*(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool =
   # 5. Check the group equation [S]B == R + [k]A (RFC 8032 §5.1.7 step 3,
   #    cofactorless form): compare canonical encodings of both sides.
 
-  # Base point
-  var B: GeP3
-  B.x.limbs = Ed25519Gx_Raw
-  B.y.limbs = Ed25519Gy_Raw
-  B.z = FeOne
-  feMul(B.t, B.x, B.y)
+  # Base point (RFC-003 slice 1 item 1: the constructor, not a second
+  # hand-maintained copy of scalar.geBasePoint's byte-identical construction).
+  let B = geBasePoint()
 
   # [S]B
   var SB: GeP3

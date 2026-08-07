@@ -203,20 +203,19 @@ compiler's own last-use check does not see through the earlier, harmless
 `X25519EphemeralSecret` from existing bytes and no way to export one back
 to bytes -- freshness and unpersistability are the whole point.
 
-For a reusable identity, use `X25519StaticSecret` instead:
+For a reusable identity, use `X25519StaticSecret` instead --
+`x25519StaticPair()` gives you a fresh one plus its derived public value in
+one call, mirroring `x25519EphemeralPair()`'s shape:
 
 ```nim
 import std/options
 import sello
 
-let aSecret = x25519StaticSecret()        # fresh, via std/sysrand
-let bSecret = x25519StaticSecret()
+let (aSecret, aPublic) = x25519StaticPair()   # fresh secret + its public value
+let (bSecret, bPublic) = x25519StaticPair()
 
-let aPublic = x25519Base(aSecret)
-let bPublic = x25519Base(bSecret)
-
-let shared = x25519(aSecret, bPublic)     # Option[X25519Shared]
-doAssert shared.isSome                    # None only for a small-order peer key
+let shared = x25519(aSecret, bPublic)         # Option[X25519Shared]
+doAssert shared.isSome                        # None only for a small-order peer key
 doAssert toBytes(shared.get) == toBytes(x25519(bSecret, aPublic).get)
 ```
 
@@ -224,7 +223,8 @@ doAssert toBytes(shared.get) == toBytes(x25519(bSecret, aPublic).get)
 there is no paired invariant a second live copy could violate: `aSecret`
 above is reusable across as many exchanges as you like.
 `toX25519StaticSecret(bytes)` constructs one from existing material (e.g. a
-persisted key).
+persisted key); pair `x25519Base(...)` with it yourself in that case --
+`x25519StaticPair()` is only for a fresh secret.
 
 X25519's public/shared roles round out the type family: `X25519Public` (a
 public u-coordinate; `toX25519Public(bytes)` from a peer's wire value) and

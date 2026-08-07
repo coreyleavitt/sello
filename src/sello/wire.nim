@@ -55,6 +55,17 @@ type
     ## ed25519 compressed public point (RFC 8032 §5.1.5), 32 bytes.
   Signature* = distinct array[64, byte]
     ## ed25519 detached signature R || S (RFC 8032 §5.1.6), 64 bytes.
+    ##
+    ## **Malleability (RFC-003 slice 1 item 4, condensed from
+    ## `ed25519.verify`'s full writeup):** RFC 8032's cofactorless
+    ## verification equation admits a second, distinct, ALSO-valid
+    ## signature for the same `(msg, pk)` pair -- so signature bytes are
+    ## NOT a unique identifier for what was signed. This matters here
+    ## specifically because `hash`/`==` below make `Signature` usable as a
+    ## `Table`/`HashSet` key, and a signature-keyed replay/dedup cache is
+    ## exactly the natural use those operators invite -- do not build one
+    ## keyed on the signature bytes; key on `(msg, pk)` instead. Full
+    ## explanation: `ed25519.verify`'s doc comment.
 
 func toPublicKey*(bytes: array[32, byte]): PublicKey {.inline.} =
   ## Explicit construction from raw bytes (e.g. a decoded wire value).
@@ -75,7 +86,12 @@ func toBytes*(sig: Signature): array[64, byte] {.inline.} =
 func `==`*(a, b: PublicKey): bool {.borrow.}
   ## Comparing two PUBLIC values — no constant-time requirement.
 func `==`*(a, b: Signature): bool {.borrow.}
-  ## Comparing two PUBLIC values — no constant-time requirement.
+  ## Comparing two PUBLIC values — no constant-time requirement. **Byte
+  ## equality is not "same signing event"**: RFC 8032's cofactorless
+  ## verify equation admits a second, distinct signature that also
+  ## verifies for the same `(msg, pk)` — see `Signature`'s own doc
+  ## comment above and `ed25519.verify`'s full writeup. Do not use this to
+  ## decide whether two signatures represent the same signed message.
 func `$`*(pk: PublicKey): string {.borrow.}
 func `$`*(sig: Signature): string {.borrow.}
 
@@ -87,5 +103,10 @@ func hash*(pk: PublicKey): Hash {.inline.} =
 
 func hash*(sig: Signature): Hash {.inline.} =
   ## Hash of the underlying bytes (RFC-002 slice 1). No constant-time
-  ## requirement, same reasoning as `==` above.
+  ## requirement, same reasoning as `==` above. **Do not key a
+  ## replay/dedup cache on this hash**: RFC 8032's cofactorless verify
+  ## equation admits a second, distinct signature for the same `(msg,
+  ## pk)`, which hashes differently despite representing the same signing
+  ## event — see `Signature`'s own doc comment and `ed25519.verify`'s full
+  ## writeup. Key such a cache on `(msg, pk)` instead.
   hash(array[64, byte](sig))

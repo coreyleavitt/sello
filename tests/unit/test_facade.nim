@@ -99,6 +99,15 @@ suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
     check toBytes(secret2) == raw
     check toBytes(public2) == raw
 
+  test "x25519StaticPair() is reachable through the facade (RFC-003 slice 1 item 5)":
+    let (secretA, publicA) = x25519StaticPair()
+    let (secretB, publicB) = x25519StaticPair()
+    check toBytes(publicA) == toBytes(x25519Base(secretA))
+    let sharedA = x25519(secretA, publicB)
+    let sharedB = x25519(secretB, publicA)
+    check sharedA.isSome and sharedB.isSome
+    check toBytes(sharedA.get) == toBytes(sharedB.get)
+
   test "X25519EphemeralSecret / x25519EphemeralSecret are reachable through the facade (static/ephemeral split)":
     var eph = x25519EphemeralSecret()
     let pub = x25519Base(eph)

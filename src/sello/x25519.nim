@@ -317,6 +317,33 @@ func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
   ## neither this nor `move()`.
   toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
 
+proc x25519StaticPair*(): tuple[secret: X25519StaticSecret, public: X25519Public] =
+  ## Fresh static secret plus its derived public value, in one call
+  ## (RFC-003 slice 1 item 5) -- mirrors `x25519EphemeralPair`'s shape and
+  ## doc register. The static role is the one X25519 role where
+  ## `Keypair`'s rationale (no repeated derivation, no
+  ## compiler-unenforced secret/public drift) actually applies: an X25519
+  ## operation takes only the secret -- the public half is sent once, not
+  ## consulted per-op -- so this bundled constructor captures the whole
+  ## benefit without a new nominal type. A full `Keypair`-style invariant
+  ## object was considered and declined for exactly that reason (see this
+  ## module's header doc comment): there is no per-operation invariant for
+  ## a wrapper type to protect the way `Keypair` protects
+  ## public-derived-from-this-secret on every `sign` call.
+  ##
+  ## Unlike `x25519EphemeralPair`, this buys no compile-time ceremony
+  ## relief -- `X25519StaticSecret` is already copyable with no
+  ## single-use/move rules to work around. It exists purely so the common
+  ## case ("I want a reusable identity and its public value together")
+  ## needs one call instead of two, the same ergonomic win
+  ## `x25519EphemeralPair` gives the ephemeral role. The from-bytes reload
+  ## path for an EXISTING secret stays `toX25519StaticSecret` + one
+  ## `x25519Base` call, unchanged: one ladder at load time is not a
+  ## repeated-derivation cost worth a second constructor.
+  if not urandom(result.secret.bytes):
+    raise newException(OSError, "sello.x25519StaticPair: sysrand.urandom failed")
+  result.public = toX25519Public(ladder(result.secret.bytes, toBytes(X25519BasePoint)))
+
 proc x25519EphemeralPair*(): tuple[secret: X25519EphemeralSecret, public: X25519Public] =
   ## Fresh ephemeral secret plus its derived public value, in one call
   ## (RFC-002 slice 1) -- the primary way to get an ephemeral secret.

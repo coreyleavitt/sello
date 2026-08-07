@@ -38,7 +38,10 @@
 ## reusable/static X25519 identity (e.g. a long-lived server key) --
 ## `x25519EphemeralPair()` (fresh secret plus its derived public value in
 ## one call) is the primary way to get one; a fresh ephemeral per exchange
-## is the safer default and costs nothing but one call.
+## is the safer default and costs nothing but one call. `x25519StaticPair()`
+## is the equivalent bundled constructor for the static role (RFC-003
+## slice 1): same fresh-secret-plus-public-value shape, for the cases that
+## do need a reusable identity.
 ##
 ## `toPublicKey`/`toSignature`/`toX25519StaticSecret`/`toX25519Public`/`toBytes`
 ## convert to/from raw bytes at the point a value crosses the wire
@@ -75,6 +78,7 @@ export x25519.`==`, x25519.`$`, x25519.hash
 export x25519.wipe
 export x25519.X25519StaticSecret, x25519.X25519Public, x25519.X25519Shared
 export x25519.x25519StaticSecret, x25519.toX25519StaticSecret, x25519.toX25519Public
+export x25519.x25519StaticPair
 export x25519.X25519EphemeralSecret, x25519.x25519EphemeralSecret
 export x25519.x25519EphemeralPair
 export signing.Seed, signing.Keypair, signing.toSeed

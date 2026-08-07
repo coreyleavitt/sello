@@ -49,10 +49,14 @@ const
     6710886, -13421773, 13421773, -26843546, -6710886
   ]
 
-  SqrtM1_Raw*: array[10, int32] = [
-    -32595792'i32, -7943725, 9377950, 3500415, 12389472,
-    -272473, -25146209, -2005654, 326686, 11406482
-  ]
+# sqrt(-1) mod p (RFC-003 slice 1 item 3) moved to field.nim, not kept
+# here: unlike Ed25519D_Raw/Gx_Raw/Gy_Raw above (which encode the curve
+# equation and base point -- genuinely curve-specific), sqrt(-1) is a
+# property of the field GF(p) alone, with no curve knowledge baked in. Its
+# one consumer, the ed25519 point-decode sqrt-ratio retry step, is now
+# `field.feSqrtRatioVartime` (a field.nim primitive so a future Ristretto
+# decode can reuse it without importing this curve-ops module) -- see that
+# function's doc comment for the constant itself.
 
 # ---------------------------------------------------------------------------
 # Conversions, group operations, and fixed-base scalarmult's table build +
@@ -79,8 +83,7 @@ func geP3ToCached*(r: var GeCached; p: GeP3) {.inline.} =
   feAdd(r.yPlusX, p.y, p.x)
   feSub(r.yMinusX, p.y, p.x)
   r.z = p.z
-  var D: Fe
-  D.limbs = Ed25519D_Raw
+  let D = feFromLimbs(Ed25519D_Raw)
   var tD: Fe
   feMul(tD, p.t, D)
   feAdd(r.t2d, tD, tD)  # t2d = 2*d*T
@@ -213,8 +216,8 @@ func scalarmultVartime*(r: var GeP3; s: array[32, byte]; p: GeP3) =
 
 func geBasePoint*(): GeP3 =
   ## The RFC 8032 base point B, in extended coordinates.
-  result.x.limbs = Ed25519Gx_Raw
-  result.y.limbs = Ed25519Gy_Raw
+  result.x = feFromLimbs(Ed25519Gx_Raw)
+  result.y = feFromLimbs(Ed25519Gy_Raw)
   result.z = FeOne
   feMul(result.t, result.x, result.y)
 

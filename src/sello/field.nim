@@ -33,6 +33,8 @@
 ## something this file computes at runtime and might overflow
 ## unpredictably.
 
+import std/options
+
 type
   Fe* = object
     limbs*: array[10, int32]
@@ -42,6 +44,34 @@ const
   FeOne*  = Fe(limbs: [1'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0])
 
 {.push checks: off.}
+
+# ---------------------------------------------------------------------------
+# Construction
+# ---------------------------------------------------------------------------
+
+func feFromLimbs*(limbs: array[10, int32]): Fe {.inline.} =
+  ## The one audited construction door for an `Fe` built directly from
+  ## limbs (as opposed to `feFromBytes`, which decodes a 32-byte wire
+  ## encoding), matching the `challenge.nim`/`ct.wipe` "one audited
+  ## primitive" pattern (RFC-003 slice 1 item 2). `Fe.limbs` stays a
+  ## public field -- the arithmetic core legitimately mutates it in hot
+  ## paths -- but every OTHER call site that used to hand-assign
+  ## `someFe.limbs = someRawArray` now goes through here instead, so
+  ## construction has a single documented door even though the field
+  ## itself stays open.
+  ##
+  ## Caller's obligation, restated from this module's own doc comment
+  ## above (not checked here -- checks are off for this whole file):
+  ## `limbs` must already satisfy the per-limb range invariant (limb i
+  ## even: [0, 2^26); limb i odd: [0, 2^25)) before calling this. Every
+  ## curve/field constant this codebase hand-decomposes into limbs
+  ## (`Ed25519D_Raw`, `Ed25519Gx_Raw`, `Ed25519Gy_Raw`, the sqrt(-1)
+  ## constant in this module) was verified to satisfy it at authoring
+  ## time (ref10/orlp provenance); passing anything else is a silent
+  ## wrong-arithmetic-result bug with no runtime diagnostic, exactly as
+  ## the module doc comment above already warns for direct `.limbs`
+  ## access.
+  Fe(limbs: limbs)
 
 # ---------------------------------------------------------------------------
 # Decode / Encode
@@ -568,6 +598,77 @@ func fePow22523*(r: var Fe; a: Fe) {.inline.} =
   feSq(t0, t0)
   feSq(t0, t0)
   feMul(r, t0, a)
+
+# ---------------------------------------------------------------------------
+# Sqrt-ratio (RFC-003 slice 1 item 3, extracted from ed25519.pointDecode)
+# ---------------------------------------------------------------------------
+
+const
+  SqrtM1Raw: array[10, int32] = [
+    -32595792'i32, -7943725, 9377950, 3500415, 12389472,
+    -272473, -25146209, -2005654, 326686, 11406482
+  ]
+    ## sqrt(-1) mod p = 2^255 - 19 (ref10 `sqrtm1`, public domain), moved
+    ## here from `scalar.nim` by RFC-003 slice 1: this is a property of the
+    ## field alone, with no curve equation baked in, and its only consumer
+    ## is `feSqrtRatioVartime` below -- unexported, since nothing outside
+    ## this function needs it now that `ed25519.nim` no longer hand-rolls
+    ## the retry step itself.
+
+func feSqrtRatioVartime*(u, v: Fe): Option[Fe] =
+  ## Given field elements `u`, `v` (`v` assumed nonzero by every current
+  ## call site -- ed25519's `v = d*y^2 + 1` is never zero for `d` a
+  ## non-square), returns `some(x)` with `x^2 * v == u` (mod p) if `u/v`
+  ## is a square in GF(p), or `none` if it is not.
+  ##
+  ## Ports the RFC 8032 §5.1.3 point-decode recovery step (candidate root
+  ## via `x = (u*v^7)^((p-5)/8) * u * v^3`, exploiting p = 5 mod 8; retry
+  ## with `x * sqrt(-1)` if the first candidate's square lands on `-u/v`
+  ## instead of `u/v`; reject if neither works) byte-for-byte out of what
+  ## used to be inlined in `ed25519.pointDecode` -- extracted, not
+  ## rewritten, so RFC 8032 + Wycheproof vector coverage carries over
+  ## unchanged (RFC-003 slice 1 item 3's zero-tolerance requirement).
+  ##
+  ## *Vartime* (RFC-001 finding 8 naming convention: self-flag at the
+  ## definition, not just in a doc comment, so no call site can mistake
+  ## this for constant-time): the retry-on-failure branch below is
+  ## data-dependent on `u`/`v`. This is only ever safe because sqrt-ratio
+  ## runs on PUBLIC data -- a point being decoded off the wire, verify-path
+  ## only, never a secret scalar -- at every call site in this codebase,
+  ## today and for any future Ristretto decode built on this primitive
+  ## (the extraction's whole purpose, per this module's own doc comment on
+  ## being a "clean extension point").
+  var v3: Fe
+  feSq(v3, v)
+  feMul(v3, v3, v)          # v^3
+  var uv3, uv7: Fe
+  feMul(uv3, v3, u)         # u*v^3
+  feMul(uv7, uv3, v3)       # u*v^6
+  feMul(uv7, uv7, v)        # u*v^7
+
+  var x: Fe
+  fePow22523(x, uv7)        # (u*v^7)^((p-5)/8)
+  feMul(x, x, v3)           # * v^3
+  feMul(x, x, u)            # * u
+
+  # Check: v*x^2 == u or v*x^2 == -u
+  var vxx: Fe
+  feSq(vxx, x)
+  feMul(vxx, vxx, v)
+  feSub(vxx, vxx, u)
+
+  if feIsNonZero(vxx):
+    # v*x^2 != u; retry with x*sqrt(-1), which squares to -x^2.
+    # Valid iff v*x^2 == -u; anything else means u/v is not a square.
+    let S = feFromLimbs(SqrtM1Raw)
+    feMul(x, x, S)
+    feSq(vxx, x)
+    feMul(vxx, vxx, v)
+    feSub(vxx, vxx, u)
+    if feIsNonZero(vxx):
+      return none[Fe]()
+
+  return some(x)
 
 func feCMove*(r: var Fe; a: Fe; b: bool) {.noinline.} =
   ## Constant-time conditional move: `r := a` iff `b`. Arithmetic masking,

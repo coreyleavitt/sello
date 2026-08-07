@@ -10,7 +10,7 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 - **Survived:** 0
 - **Overall kill rate:** 100.0% (36/36)
 - **Retired (confirmed-equivalent, excluded from the above):** 1
-- **Wall clock:** 298s
+- **Wall clock:** 318s
 
 **Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red or by a compile error.
 
@@ -36,7 +36,7 @@ A mutant that turns out to be behaviorally indistinguishable from the real sourc
 | F07 | field.nim | feBytesCanonical: comparison flip, 'v < p: return true' -> 'v <= p: return true', which would accept one non-canonical encoding (a byte string equal to p in its most-significant differing position) as canonical. | KILLED (test) | tests/unit/test_ed25519.nim |
 | F08 | field.nim | feBytesCanonical: comparison flip, 'v > p: return false' -> 'v >= p: return false', rejecting some canonical encodings whose most-significant differing byte equals p's. | KILLED (test) | tests/unit/test_ed25519.nim |
 | F09 | field.nim | feAdd: carry-chain operator swap, per-limb '+' -> '-', turning field addition into field subtraction. | KILLED (test) | tests/unit/test_field.nim |
-| F10 | field.nim | feSub: carry-chain operator swap, per-limb '-' -> '+', turning field subtraction into field addition. | KILLED (test) | tests/unit/test_scalar.nim |
+| F10 | field.nim | feSub: carry-chain operator swap, per-limb '-' -> '+', turning field subtraction into field addition. | KILLED (test) | tests/unit/test_field.nim |
 | F11 | field.nim | feMul: reduction-by-p coefficient swapped, 'let b1_19 = 19 * b1' -> '... = 18 * b1' (the schoolbook-multiply reduction constant, not the carry-propagation tail feMul shares with feSq). | KILLED (test) | tests/unit/test_field.nim |
 | F13 | field.nim | feSq: reduction-by-2p coefficient swapped, 'let a5_38 = 38 * a5' -> '... = 36 * a5' (38 = 2*19, feSq's own reduction constant distinct from feMul's). | KILLED (test) | tests/unit/test_field.nim |
 | F15 | field.nim | feMul121666: RFC 7748 X25519 curve constant A24=121666 off-by-one, '121666' -> '121665'. | KILLED (test) | tests/unit/test_x25519.nim |
