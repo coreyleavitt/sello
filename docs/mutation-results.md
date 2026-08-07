@@ -10,7 +10,7 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 - **Survived:** 0
 - **Overall kill rate:** 100.0% (46/46)
 - **Retired (confirmed-equivalent, excluded from the above):** 1
-- **Wall clock:** 385s
+- **Wall clock:** 477s
 
 **Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red or by a compile error.
 

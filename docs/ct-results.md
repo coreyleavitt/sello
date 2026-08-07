@@ -92,7 +92,7 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
     few minutes before starting `scripts/ct.sh` showed `3.69 5.02 4.63`,
     i.e. the same rough range -- consistent with the banner's own
     reading rather than a discrepancy.
-  The full campaign (seven targets -- positive control plus six real --
+  The full campaign (six targets -- positive control plus five real --
   1,000,000 samples/class each) ran end-to-end in this environment; see
   the table below. No real target showed elevated variance relative to
   prior runs despite the disclosed container/governor conditions.
@@ -113,8 +113,8 @@ constant-time implementation have the `-d:selloLibsodium` escape hatch
 - **Samples:** 1,000,000 per class per target (2,000,000 timed calls per
   target; 8,000,000 total across the four targets -- positive control
   plus three real -- in the RFC-001 run, 10,000,000 total across the five
-  targets in the RFC-002 slice 4 run, 14,000,000 total across the seven
-  targets -- positive control plus six real -- as of the RFC-003 slice 5
+  targets in the RFC-002 slice 4 run, 12,000,000 total across the six
+  targets -- positive control plus five real -- as of the RFC-003 slice 5
   run below).
 - **Cropping:** upper-percentile cropping at the 99.5th percentile,
   computed once from the *pooled* (both classes together) sample and
@@ -160,7 +160,7 @@ itself always fixed-vs-random WITHIN this run.
 | `sello/x25519.x25519Base` | 1,000,000 | 995,002 / 994,999 | 9,999 | 216,256.04 / 216,207.63 | **1.10** | PASS |
 | `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 1,000,000 | 994,995 / 995,005 | 10,000 | 232,823.57 / 232,911.25 | **-1.42** | PASS |
 
-### RFC-003 slice 5 run (seven targets, adds the arbitrary-peer static-secret DH target)
+### RFC-003 slice 5 run (six targets, adds the arbitrary-peer static-secret DH target)
 
 Re-run in full (not incremental) after adding the sixth target
 (`x25519(X25519StaticSecret, peer)`, RFC-003 slice 5 item 1), on the same
@@ -182,8 +182,8 @@ this run.
 | `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 1,000,000 | 994,992 / 995,008 | 10,000 | 214,923.02 / 214,967.41 | **-1.18** | PASS |
 | `x25519(X25519StaticSecret, peer)` fixed-vs-random | 1,000,000 | 994,994 / 995,006 | 10,000 | 219,120.41 / 219,138.30 | **-0.36** | PASS |
 
-Total samples in this run: 7 target rows x 1,000,000 samples/class x 2
-classes = 14,000,000 timed calls (12,000,000 across the six real
+Total samples in this run: 6 target rows x 1,000,000 samples/class x 2
+classes = 12,000,000 timed calls (10,000,000 across the five real
 targets, plus the 2,000,000-sample positive-control self-test).
 
 ### The sixth target: x25519(X25519StaticSecret, peer) -- a real fixed-vs-random-secret leak test of the DH path
@@ -222,7 +222,7 @@ varies (or doesn't) between classes, not just a construction pattern that
 is identical either way.
 
 Result: **t = -0.36**, comfortably inside the pass band, the tightest
-(closest-to-zero) of the six real targets in this run. This closes the
+(closest-to-zero) of the five real targets in this run. This closes the
 leak-test gap the fifth target's own doc comment names explicitly as
 something it structurally cannot answer.
 
@@ -291,7 +291,7 @@ with a nonzero exit code).
 
 ### Real targets
 
-All six sello real targets in the current (RFC-003 slice 5, six-target)
+All five sello real targets in the current (RFC-003 slice 5, six-target)
 run pass comfortably inside the `|t| <= 4.5` band, nowhere near the 4.5
 warn threshold, let alone the 10 fail threshold:
 
@@ -308,7 +308,7 @@ warn threshold, let alone the 10 fail threshold:
   secret test): t = -1.18.
 - `x25519(X25519StaticSecret, peer)` fixed-vs-random (RFC-003 slice 5's
   new sixth target; see "The sixth target" above): t = -0.36, the
-  tightest result of the six.
+  tightest result of the five.
 
 The RFC-002 slice 4 five-target run (`backend.signDetached` t = -1.75,
 `scalar.geScalarmultBase` t = 1.15, `x25519.x25519Base` t = 1.10,
@@ -323,7 +323,7 @@ qualitative picture -- each full run is a confirmation, not a one-off.
 
 No target has exceeded the warn threshold in any run to date, so there is
 nothing in the 4.5-10 band requiring the investigation writeup the RFC
-calls for. The clean pass on all six real targets in the current run,
+calls for. The clean pass on all five real targets in the current run,
 combined with the positive control firmly failing, is the intended shape
 of evidence: the harness is demonstrably capable of detecting a leak of
 this class and size, and does not detect one in `signDetached`,

@@ -35,15 +35,17 @@
 # only the mutated file(s) and their transitive dependents actually
 # recompile per mutant. Measured, not merely estimated (the original "low
 # tens of minutes" guess was never checked against a real run): 318s for
-# the original 36-mutant catalog (RFC-002 slice 5), 448s for the 46-mutant
-# catalog RFC-003 slice 3 grew it to — both single-digit minutes, scaling
-# roughly linearly with catalog size at a shade over 9s/mutant averaged
-# across the whole campaign (individual mutants range from ~1.5s, killed
-# almost instantly by a cheap unit file, to ~30s when the killing test
-# happens to sit late in the file list). Budget accordingly as the catalog
-# grows further; a survivor that needs a new test still requires
-# re-running this script (or a targeted subset while iterating) to confirm
-# the kill.
+# the original 36-mutant catalog (RFC-002 slice 5); the 46-mutant catalog
+# RFC-003 slice 3 grew it to has measured 385-477s across separate runs
+# on this shared host (RFC-003 slices 3 and 6) — both single-digit
+# minutes, scaling roughly linearly with catalog size at a shade over
+# 10s/mutant averaged across the whole campaign, with real run-to-run
+# variance from host load rather than a fixed constant (individual
+# mutants range from ~1.5s, killed almost instantly by a cheap unit file,
+# to ~40s when the killing test happens to sit late in the file list).
+# Budget accordingly as the catalog grows further; a survivor that needs
+# a new test still requires re-running this script (or a targeted subset
+# while iterating) to confirm the kill.
 #
 # Needs only the base Nim image (python3 is present there; confirmed
 # empirically, same standard as the rest of this project's toolchain

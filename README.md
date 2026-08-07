@@ -68,12 +68,17 @@ API is built around that split rather than papering over it:
     timing harness (`tests/ct/`, run via `scripts/ct.sh`): 1,000,000
     interleaved fixed-vs-random-secret samples per target, Welch's t-test
     against dudect's published thresholds. The current run passes cleanly
-    on all three secret-holding code paths, with a deliberately-leaky
-    positive control confirming the harness can actually detect a timing
-    leak of that size. Full methodology, numbers, and the honest limits
-    of what this evidence does and doesn't prove (container vs. bare
-    metal, `powersave` vs. `performance`, one CPU model, one compiler) are
-    in [`docs/ct-results.md`](docs/ct-results.md).
+    on all five real secret-holding targets -- ed25519's `signDetached`
+    and `geScalarmultBase`, the X25519 Montgomery ladder (`x25519Base`),
+    an ephemeral-secret construct+consume calibration check, and a
+    fixed-vs-random-secret leak test of the `X25519StaticSecret`
+    arbitrary-peer DH path -- with a deliberately-leaky positive control
+    confirming the harness can actually detect a timing leak of that
+    size. Full methodology, numbers, and the honest limits of what this
+    evidence does and doesn't prove (container vs. bare metal,
+    `powersave` vs. `performance`, one CPU model, one compiler, and a
+    shared rather than exclusively quiet host for the two most recent
+    runs) are in [`docs/ct-results.md`](docs/ct-results.md).
   - If a statistical harness on unaudited Nim isn't enough assurance for
     your use case, compile with **`-d:selloLibsodium`** and every `sign`/
     `keypair` call dispatches to [libsodium][libsodium]'s audited C

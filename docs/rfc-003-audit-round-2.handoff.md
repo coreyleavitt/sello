@@ -1,15 +1,24 @@
 # RFC-003 audit round 2 — handoff
 
-- **Stage:** 3 (implementation) — slice grind in progress under the `/loop` below,
-  started 2026-08-07. Stage 2 (architect rounds) skipped on the RFC-002 precedent: this
-  RFC *is* the output of a four-lens architect audit whose load-bearing claims were
-  spot-checked against source before drafting.
-- **Resume:** `/loop implement the next unimplemented RFC slice with /tdd, following the
-  standing rules; after each slice report one progress line (e.g. "slice 2/6 done, 4
-  remaining"); stop when every slice is implemented` — slices 1-5 done and committed;
-  next is slice 6, the last (ordering 1 → {2,4 free; 3 after 1} → 5 → 6). Slices are done by
-  sonnet subagents (TDD, gates run synchronously in-agent per the RFC-002 ops lesson);
-  the control loop verifies, commits, and updates this doc.
+- **Stage:** implementation COMPLETE — all six slices landed 2026-08-07 under the
+  slice-grind `/loop` (each implemented by a sonnet subagent via TDD, gates run
+  synchronously in-agent per the RFC-002 ops lesson; control loop verified, committed,
+  and kept this doc current). Version bumped to 0.3.0. Working tree clean; this is a
+  safe `/compact` or `/clear` point.
+- **Resume:** the combined stage-4 review both RFCs are waiting on — ONE
+  `/code-review` over RFC-002 + RFC-003 scope together (recorded recommendation in
+  both RFCs: near-total file overlap, two sequential reviews would double-handle the
+  same code) — awaiting Corey to invoke it.
+- **Slice-grind ops note for future RFCs:** two of the six subagents initially stalled
+  by ending their turn to "wait" on a background task (the exact RFC-002 ops-lesson
+  failure mode) — one needed a resume nudge; later slice prompts stated the
+  synchronous-foreground rule as the FIRST instruction and provided a keep-turn-alive
+  polling recipe for runs longer than one Bash timeout, after which no agent stalled.
+  Separately, the slice-5 agent's report and its ct-results.md prose miscounted the
+  run's target rows ("seven targets / six real" for a 6-row, 5-real-target table);
+  the control loop caught it against the table itself and corrected doc + commit
+  message + this doc before the final commit — trust tables over prose when they
+  disagree.
 - **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
   NOT yet run; RFC-003 records the recommendation to run ONE combined `/code-review` over
   both RFCs' scope after these slices land.
@@ -110,16 +119,33 @@
       unconditionally into the captured log (fixing the hand-transcription mechanism
       that failed in RFC-002 slice 4); WARNs (never hard-fails) on powersave / nonzero
       containers / 1-min load ≥ 4 (fixed threshold, disclosed heuristic). (3) Full
-      campaign, 1e6 samples/class × 2 classes × 7 rows: positive control t=921.79 FAIL
+      campaign, 1e6 samples/class × 2 classes × 6 rows: positive control t=921.79 FAIL
       (expected); signDetached −0.60, geScalarmultBase 1.97, x25519Base 0.34, ephemeral
-      construct+consume −1.18, NEW static DH −0.36 — all six real targets PASS, max
+      construct+consume −1.18, NEW static DH −0.36 — all five real targets PASS, max
       |t|=1.97 ≪ 4.5. Banner observed: governor powersave (WARN), 1 unrelated idle
       container (amoxtli-dev, WARN, known disclosed shared-host condition), load
       3.27/4.85/4.58 (no WARN). docs/ct-results.md updated per convention (prior runs
       preserved; new table + sixth-target subsection + banner values quoted verbatim).
       ~13 min wall-clock. **Gates:** campaign clean as above; test.sh green.
-- [ ] 6 docs/packaging (CHANGELOG + 0.3.0 bump in sello.nimble + milpa.kdl; README/
-      CLAUDE.md/x25519.nim drift fixes; F12/F14 gap note; mutation.sh estimate)
+- [x] 6 docs/packaging (subject: "RFC-003 slice 6: docs, packaging, 0.3.0") — version
+      0.2.0 → 0.3.0 in sello.nimble + milpa.kdl; one [0.3.0] CHANGELOG entry covering
+      RFC-002 + RFC-003 in full (nothing released between — stated up front), with a
+      correction note superseding 0.2.0's now-false "manual induction, not Z3-checked"
+      sentence (0.2.0 entry itself left unrewritten). Drift fixes: README
+      "three secret-holding code paths" → five real dudect targets (all named) + shared-
+      host caveat pointer; x25519.nim's stale "dudect harness is tracked with the ed25519
+      signing milestone" sentence replaced with the accurate present-tense coverage
+      statement; CLAUDE.md gained the mutation-testing subsystem everywhere it was
+      missing (scripts block, tests/mutation/ bullet, validation-bar entry,
+      implementation-status line, "all five scripts" → six) plus the
+      test_properties_x25519 mention; mutation.sh wall-clock header reconciled to a
+      measured range (385-477s across the two most recent runs) after slice 3's own
+      single-point figure proved internally inconsistent. Control loop additionally
+      corrected docs/ct-results.md's target-count prose (see ops note above) in the
+      same commit. F12/F14 gap note was already landed by slice 3 (verified).
+      **Gates:** check-readme.sh 5/5; test.sh green; mutation.sh 46/46 killed, 0
+      survivors (x25519.nim doc edit did not bitrot X01/X02); grep sweep for stale
+      counts/claims clean in live docs (rfc-*.md left as historical records).
 
 ## Open forks (awaiting Corey)
 - none — all decisions resolved at approval ("roll all of it into rfc-003"); the two

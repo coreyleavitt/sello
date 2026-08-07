@@ -11,8 +11,12 @@
 ## simplifies away), secrets live in fixed-size stack arrays, Nim's runtime
 ## checks are disabled in the core, and the clamped secret copy is wiped
 ## via `ct.wipe` (volatile stores + compiler barrier — RFC-001 slice 8)
-## once the ladder is done with it. The remaining constant-time toolkit
-## item (the dudect harness) is tracked with the ed25519 signing milestone.
+## once the ladder is done with it. The constant-time discipline above is
+## backed by `tests/ct/`'s dudect harness, which covers this module's own
+## secret-holding call shapes directly (`x25519Base`, the ephemeral
+## construct+consume path, and the static-secret fixed-vs-random DH path
+## — see `docs/ct-results.md`), not merely by association with ed25519
+## signing.
 ##
 ## Public API types: role-typed wrappers, one per X25519 role (RFC-001
 ## ledger #29, revisited on Corey's direction; supersedes the single-
