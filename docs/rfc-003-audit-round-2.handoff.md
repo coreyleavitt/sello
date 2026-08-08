@@ -211,8 +211,21 @@
 ## control FAIL at every crop >= 824) — same code now battery-clean on both the
 ## noisiest and quietest disclosed environments. ROUND-3 FIX-NOW WORK IS FULLY
 ## COMPLETE (commits d36078b A, 78508a4 B, a2f4f7e Z, c2c5033 C + ct-results closing
-## commit; tags v0.1.0/v0.2.0/v0.3.0). Remaining next step for Corey: the ONE combined
-## /code-review over RFC-002 + RFC-003 + round-3 scope.
+## commit; tags v0.1.0/v0.2.0/v0.3.0@28700a3). Remaining next step for Corey: the ONE
+## combined /code-review over RFC-002 + RFC-003 + round-3 scope.
+##
+## SIDE-QUEST IN FLIGHT (2026-08-08): Corey asked whether the four documented symex
+## limitations (L1 nested-int32-checked-arith walker crash svBV64/bv32 + suppression
+## knobs ineffective; L2 tuple-return nested callee unwired; L3 branch-merged int32
+## width mismatch; L4 negBV on -int32(bool)) are engine bugs to report upstream, and
+## to first re-test them against proptest release 0.3.2 (pinned _deps copy is older:
+## ref main, nimble 0.1.0). A probe agent is running: minimal repros in the session
+## scratchpad (repros/l1-l4.nim), validated against the PINNED copy first, then run
+## against a fresh 0.3.2 clone (scratchpad/proptest-032 + nim-z3/softlink deps) via a
+## bmc.sh-derived container invocation. Authoritative limitation descriptions:
+## tests/verify/symex_recode.nim (L1/L2) and symex_mask.nim (L3/L4) module docs.
+## On result: report per-limitation STILL PRESENT / CHANGED / FIXED to Corey and
+## offer drafted upstream issues for whatever remains. Sello repo/_deps untouched.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
