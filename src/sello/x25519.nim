@@ -102,13 +102,43 @@ type
     ## is no paired public value whose invariant a second live copy could
     ## violate (contrast `Keypair`), so duplication costs nothing beyond
     ## the copy itself.
+    ##
+    ## **Move-only-vs-copyable policy (round-4 finding R9):** this type and
+    ## `signing.Seed` look like structurally parallel "reusable secret"
+    ## roles -- `Seed` is move-only, this is copyable -- but the split is a
+    ## coherent policy, not an accident:
+    ## - **Move-only** = single-custody or single-use: `Keypair` (a bundled
+    ##   identity; silent whole-identity duplication is the accident it
+    ##   prevents), `Seed` (a transient raw-seed INPUT to `keypair()`, single
+    ##   custody en route -- move-only is load-bearing for round-4 finding
+    ##   R4's compile-time wipe-then-reuse guarantee, see `Seed`'s own doc
+    ##   comment), `X25519EphemeralSecret` below (single-use by
+    ##   construction, the same R4 guarantee).
+    ## - **Copyable, self-wiping** = a reusable long-term secret HOLDER
+    ##   where duplication is a legitimate ergonomic need and each copy
+    ##   scrubs itself independently: `X25519StaticSecret` (this type -- the
+    ##   durable X25519 identity; there is no wrapper type, so you hold the
+    ##   secret directly and derive publics on demand, meaning reuse/storage
+    ##   ergonomics matter the way they don't for a one-shot input --
+    ##   x25519-dalek's `StaticSecret` is `Clone` for the same reason),
+    ##   `X25519Shared` (a completed DH output you may need to copy into a
+    ##   KDF call or similar).
+    ##
+    ## The through-line: transient/single-use/bundled-identity secrets are
+    ## move-only; reusable bare-scalar holders are copyable-with-self-
+    ## wiping. Do not make `Seed` copyable to "match" this type, or this
+    ## type move-only to "match" `Seed` -- each is already the correct
+    ## shape for its own role.
     bytes: array[32, byte]
 
   X25519Shared* = object
     ## The output of a completed Diffie-Hellman exchange (`x25519`). This
     ## IS secret material -- feed it to a KDF, never use it directly as a
     ## key -- so it follows `X25519StaticSecret`'s exact shape: one-field object,
-    ## copyable, `=destroy`-wiped.
+    ## copyable, `=destroy`-wiped. Falls under the copyable-self-wiping-
+    ## holder half of the move-only-vs-copyable policy documented on
+    ## `X25519StaticSecret`'s doc comment (round-4 finding R9): a completed
+    ## DH output you may need to copy into a KDF call.
     bytes: array[32, byte]
 
   X25519EphemeralSecret* = object
@@ -120,8 +150,11 @@ type
     ## single use at compile time: consuming an ephemeral in a DH exchange
     ## moves it out of the caller's variable, and any second consuming use
     ## (another `x25519` call, `wipe`, or a bare copy) is a compile error,
-    ## not a convention. `x25519Base` is a separate, non-consuming borrow
-    ## (see below) and does not count. Verified empirically against
+    ## not a convention. Falls under the move-only-single-use half of the
+    ## move-only-vs-copyable policy documented on `X25519StaticSecret`'s
+    ## doc comment (round-4 finding R9), the same guarantee `signing.Seed`
+    ## carries for its own single-custody role. `x25519Base` is a separate,
+    ## non-consuming borrow (see below) and does not count. Verified empirically against
     ## Nim 2.2.10/ORC's `injectdestructors` pass with checked-in negative
     ## fixtures (`tests/unit/fixtures/reject_ephemeral_reuse.nim`,
     ## `reject_ephemeral_copy.nim`) -- see `tests/unit/test_x25519.nim`'s
@@ -162,21 +195,23 @@ type
 ## hook first and reject an explicit one declared later). The
 ## `secretHooks*`/`secretHooksMoveOnly*` templates below (round-3 finding
 ## A5, `sello/private/secret_hooks`) expand to exactly the hand-written
-## `zeroize<Type>`/`=destroy`/`=copy` shape this comment used to introduce
-## directly for all three types here -- see that module's doc comment for
-## the full "why a template, why `{.dirty.}`" writeup.
+## `=destroy`/`=copy` shape this comment used to introduce directly for all
+## three types here -- see that module's doc comment for the full "why a
+## template, why `{.dirty.}`" writeup, including round-4 finding R10's
+## simplification to a two-argument `(Type, field)` signature (no more
+## per-type `zeroizeProc` name).
 
 ## Copyable (no `=copy` restriction, unlike the ephemeral secret below):
 ## every copy self-wipes independently at its own scope exit.
-secretHooks(X25519StaticSecret, zeroizeX25519StaticSecret, bytes)
+secretHooks(X25519StaticSecret, bytes)
 
 ## Copyable, same reasoning as `X25519StaticSecret` above.
-secretHooks(X25519Shared, zeroizeX25519Shared, bytes)
+secretHooks(X25519Shared, bytes)
 
 ## Move-only, the `Keypair`/RFC-001 slice 5 pattern: a second live copy of
 ## a single-use secret is a compile error, not a hygiene footnote.
 ## Legitimate transfers move (`x25519`'s `sink` parameter below).
-secretHooksMoveOnly(X25519EphemeralSecret, zeroizeX25519EphemeralSecret, bytes)
+secretHooksMoveOnly(X25519EphemeralSecret, bytes)
 
 func toX25519StaticSecret*(bytes: array[32, byte]): X25519StaticSecret {.inline.} =
   ## Explicit construction from raw bytes (e.g. straight out of a CSPRNG,
@@ -530,22 +565,39 @@ proc wipe*(s: var X25519StaticSecret) =
   ## shared secret when the caller does not need to retain the raw
   ## secret. `=destroy` performs the same wipe automatically at scope
   ## exit; this exists for callers that want it sooner.
-  zeroizeX25519StaticSecret(s)
+  ##
+  ## Calls `ct.wipe` directly (round-4 finding R10), not a named
+  ## `zeroize<Type>` proc -- see `private/secret_hooks.nim`'s doc comment.
+  ct.wipe(s.bytes)
 
 proc wipe*(sh: var X25519Shared) =
   ## Explicit early wipe of a DH output, e.g. right after feeding it to a
   ## KDF. `=destroy` performs the same wipe automatically at scope exit;
   ## this exists for callers that want it sooner.
-  zeroizeX25519Shared(sh)
+  ct.wipe(sh.bytes)
 
-proc wipe*(s: var X25519EphemeralSecret) =
+proc wipe*(s: sink X25519EphemeralSecret) =
   ## Early disposal of an ephemeral secret that was generated but never
   ## consumed by `x25519` (e.g. the caller decided not to complete the
   ## exchange). `=destroy` performs the same wipe automatically at scope
-  ## exit; this exists for callers that want it sooner. Note this is
-  ## explicit early wipe of a still-owned value, not a way around the
-  ## move-only single-use rule -- `wipe` takes `var`, not `sink`, so a
-  ## caller cannot "wipe, then still pass to x25519" any more than they
-  ## already could before this proc existed; the type's single ownership
-  ## just moves to whichever consumes it first, `wipe` or `x25519`.
-  zeroizeX25519EphemeralSecret(s)
+  ## exit; this exists for callers that want it sooner.
+  ##
+  ## Takes `sink`, not `var` (round-4 finding R4): this type's whole design
+  ## point is compiler-enforced single use, and a `var` `wipe` does not
+  ## consume its argument, so a caller could write `wipe(eph)` and then
+  ## still reach a consuming `x25519(move(eph), peer)` -- which compiled
+  ## and ran the ladder on the just-zeroed bytes, silently defeating the
+  ## single-use guarantee (`clampScalar` on an all-zero array is the fixed
+  ## public scalar 2^254, neither zero nor small-order, so the ladder's own
+  ## small-order check does not catch it either). With `sink`, `wipe`
+  ## consumes `s` exactly like `x25519` does, so a later use of the same
+  ## variable -- moved or not -- is the same `=copy {.error.}` compile
+  ## error `x25519`'s own reuse already produces; see
+  ## `tests/unit/fixtures/reject_ephemeral_wipe_then_use.nim`, driven by
+  ## `test_x25519.nim`, for the regression pin. The type's single ownership
+  ## moves to whichever consumes it first, `wipe` or `x25519`, same as
+  ## before -- only the enforcement mechanism changed.
+  ##
+  ## Calls `ct.wipe` directly (round-4 finding R10), not a named
+  ## `zeroize<Type>` proc -- see `private/secret_hooks.nim`'s doc comment.
+  ct.wipe(s.bytes)

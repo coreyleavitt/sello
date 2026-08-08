@@ -50,15 +50,26 @@ const
 # ---------------------------------------------------------------------------
 
 func feFromLimbs*(limbs: array[10, int32]): Fe {.inline.} =
-  ## The one audited construction door for an `Fe` built directly from
-  ## limbs (as opposed to `feFromBytes`, which decodes a 32-byte wire
-  ## encoding), matching the `challenge.nim`/`ct.wipe` "one audited
-  ## primitive" pattern (RFC-003 slice 1 item 2). `Fe.limbs` stays a
-  ## public field -- the arithmetic core legitimately mutates it in hot
-  ## paths -- but every OTHER call site that used to hand-assign
-  ## `someFe.limbs = someRawArray` now goes through here instead, so
-  ## construction has a single documented door even though the field
-  ## itself stays open.
+  ## The one audited construction door for an `Fe` built directly from an
+  ## EXTERNAL CONSTANT'S raw limb array (as opposed to `feFromBytes`, which
+  ## decodes a 32-byte wire encoding) -- i.e. the curve/field constants this
+  ## codebase hand-decomposes into limbs (`Ed25519D_Raw`, `Ed25519Gx_Raw`,
+  ## `Ed25519Gy_Raw`, the sqrt(-1) constant in this module), matching the
+  ## `challenge.nim`/`ct.wipe` "one audited primitive" pattern (RFC-003
+  ## slice 1 item 2). It is NOT, and does not claim to be, the sole
+  ## entrance to limb-writing in general: `Fe.limbs` stays a public,
+  ## mutable field on purpose, for two call sites this door deliberately
+  ## does not cover -- the arithmetic core's own hot-path mutation (every
+  ## `fe*` primitive writes `.limbs` directly, for performance, not through
+  ## a constructor call) and `tests/unit/test_field.nim`'s white-box
+  ## carry/boundary tests (which construct and mutate `.limbs` directly to
+  ## exercise exact carry-chain behavior). So: every call site that
+  ## hand-assembles an `Fe` FROM A RAW CONSTANT ARRAY goes through here
+  ## instead of a bare `Fe(limbs: ...)` literal or a hand-assigned
+  ## `someFe.limbs = someRawArray`, giving that one narrow purpose a single
+  ## documented, precondition-checked door -- while the field itself stays
+  ## open for the arithmetic core and white-box tests, which have no
+  ## business routing through an external-constant constructor.
   ##
   ## Caller's obligation, restated from this module's own doc comment
   ## above (not checked here in a release build -- checks are off for this

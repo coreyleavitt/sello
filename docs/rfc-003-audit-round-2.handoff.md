@@ -257,6 +257,75 @@ assert, SECURITY.md, threat-model section, milpa/GHCR public-availability statem
 CHANGELOG breaking tag on verify flip, plain-nimble clone story, NOTICE wording).
 Exemption lens re-verified 14 standing disclosures as genuine ceilings.
 
-## Review ledger (stage 4 — empty until review)
+## Review ledger (stage 4 — combined RFC-002 + RFC-003 + round-3 review, opened 2026-08-08)
+
+Scope: `git diff 710fbe7..HEAD` (whole remediation arc). 5 reviewers (crypto correctness,
+security/CT, design & ergonomics, validation infra, docs accuracy) on sonnet; Critical/High
+adversarially verified before presentation.
+
 | id | sev | finding | status | proof / reason |
 |----|-----|---------|--------|----------------|
+| R1 | Critical/High | `scalar.geScalarmultBase` + `scMulAdd` never wipe their own secret locals (`sBytes`, `digits`, `b`, `c`, `s0..s23`, point accumulators); `scalar.nim` does not import `private/ct` at all. | **fixed** | Agent A: imported `private/ct`, both fns wrapped try/finally mirroring backend.nim; `sBytes`/`digits`/`b`/`c`/accumulators/`s0..s23` wiped after last use + `finally` net (`s0..s23` hoisted before try for finally scope). scripts/test.sh green (RFC KAT + scMulAdd/geScalarmultBase vectors prove no premature wipe). |
+| R2 | Medium/High | Sign-critical group ops live in public-tier `scalar.nim`, not `private/`. | **resolved (declined-in-place)** | Agent A assessed extraction: moving `geScalarmultBase`/`scMulAdd` forces exporting 3 currently-private internals (`geP3Double`,`load3`,`load4`) whose other callers stay in scalar.nim — trades one wart for exposing scalar.nim's private reduction machinery. Judged net-neutral; kept in scalar.nim (R1 fix makes it consistent with `private/ct`'s universal-leaf framing). Reasoning recorded on SecretScalar's doc comment. Accepted. |
+| R3 | High | CLAUDE.md (:81,:96) describes the OLD `fuzzWith`/`{.cover.}` fuzz mechanism replaced in RFC-002 slice 3. | **fixed** | Agent A: rewrote both passages to describe the current `fuzz_external_target.nim` + `-fsanitize-coverage=trace-pc` external-target mechanism. |
+| R4 | Medium | `wipe(var T)` on move-only types doesn't consume → `wipe(s); x25519(move(s),peer)` runs on zeroed bytes (clampScalar(0)=2^254). | **fixed** | Agent C: `wipe*` → `sink` for Seed + X25519EphemeralSecret; new negative-compile fixtures `reject_{ephemeral,seed}_wipe_then_use.nim` (RED-confirmed compiled pre-fix, now rejected with `=copy`), wired into test_x25519/test_signing. Copyable types correctly stay `var`. Re-review v1: CORRECT & COMPLETE. |
+| R5 | Medium | mutation harness has NO timeout; a non-terminating mutant hangs the campaign. | **fixed** | Agent B: run_mutation.py uses `Popen(start_new_session=True)`+`communicate(timeout=300)`, `os.killpg(SIGKILL)` on TimeoutExpired → distinct "KILLED (timeout)" bucket in report/summary. ast-validated. |
+| R6 | Medium | `scripts/mutation.sh` silently runs weaker suite when proptest absent, no banner. | **fixed** | Agent B: loud banner gated on `skipped_property_files` (same signal test.sh uses), before podman run. bash -n valid. |
+| R7 | Medium | `scripts/fuzz.sh` doc overclaims sello sources stay uninstrumented (--passC is build-wide). | **fixed (doc corrected)** | Agent B: corrected comment — sello *source* stays pragma-free but `--passC` instruments its object code build-wide (deliberate, that IS the coverage signal). Resolves the mismatch without a build; the standalone `nm` check is now moot. |
+| R8 | Medium/Low | `feFromLimbs` "one audited construction door" overclaim; but tests+hot-path legitimately write `.limbs`. | **fixed (doc)** | Agent C: corrected feFromLimbs's doc comment to scope the claim to external-CONSTANT construction, naming the two carve-outs (hot-path mutation, white-box tests). No de-export (would break valuable white-box field tests). |
+| R9 | Low/Medium | `Seed` (move-only) vs `X25519StaticSecret` (copyable) copy-policy asymmetry. | **fixed (doc)** | Not ad-hoc: move-only = single-custody/single-use (Keypair/Seed/EphemeralSecret; Seed's move-only is load-bearing for R4), copyable-self-wiping = reusable bare-scalar holder (StaticSecret/Shared). Policy documented across the type doc comments, cross-linked. Seed CANNOT be made copyable (would reopen R4). No code change. |
+| R10 | Low | secret_hooks.nim leaks per-type `zeroizeProc` name; undocumented ct-import coupling. | **fixed** | Templates now `(T, field)` 2-arg, emit `=destroy` inline (no named zeroize); public `wipe*` procs call `ct.wipe(s.bytes)` directly; `{.dirty.}` kept; ct-import requirement given its own doc subsection. Suite green + all move-only reject fixtures still pass → hooks preserved. |
+| R11 | Low | `$` for wire types has zero test coverage. | **fixed** | Agent C: added `$` suite to test_facade.nim (PublicKey/Signature/X25519Public), asserting `$v == $v.toBytes()` — non-vacuous (distinct borrowed `$` vs array `$`). Re-review v1: non-vacuous confirmed. |
+| R12 | Low | CLAUDE.md:23 "every constant-from-raw-array site" overclaims (FeZero/FeOne bypass). | **fixed** | Agent A: softened to except FeZero/FeOne. |
+| R13 | Low | `symex_recode.nim` L1 framing superseded by `symex_mask.nim`'s broader characterization. | **fixed** | Agent B: appended superseded-note cross-referencing symex_mask.nim; a single occurrence (no nesting) reproduces the crash. |
+| R14 | Low | dudect "fixed" class is one arbitrary random draw, not adversarial edge-value scalars — generic dudect limitation, not impl-specific. | open | Inherent; note in ct-results.md. |
+| — | refuted | SECURITY #1: backend `derivePublic`/`signDetached` don't wipe the `seed` PARAMETER. | refuted | `array[32,byte]` non-var param passes by hidden `const` ref → `seed` ALIASES caller's `kp.seed.bytes`/`Seed.bytes`; wiping it would corrupt a live Keypair/Seed. Caller destructors own it. |
+| — | refuted | SECURITY #4: `x25519.ladder` doesn't wipe its `k` PARAMETER (only clamped copy `e`). | refuted | Same ABI: `k` is a const-by-ref alias of caller's `secret.bytes` (proven by `var e = k` being required to get a mutable copy). Genuine working copy `e` IS wiped. |
+
+### Re-review round 1 (over changed scope; Security + Correctness/Design standing dims)
+Adversarial re-review of the applied fixes. R4 verified CORRECT & COMPLETE (sink scrub routes
+through volatile-barrier ct.wipe; copyable types correctly left `var`; negative fixtures real).
+`s0..s23` hoist correct (no use-before-assign, `result` written before finally, no aliasing —
+Fe/GeP3 have no custom copy hooks so `result = acc` is a real value copy). `$` test non-vacuous.
+All script/doc edits (R3/R5/R6/R7/R12/R13) confirmed accurate. Three NEW findings opened:
+
+| id | sev | finding | status | proof / reason |
+|----|-----|---------|--------|----------------|
+| R15 | High | `scMulAdd` wipes raw `b`/`c` but leaves `b0..b11`/`c0..c11` (directly-invertible radix-2^21 encoding of the SAME secret key scalar + nonce) and `carry0..carry22` unwiped. | **fixed** | Round-2 agent: `b0..b11`/`c0..c11`/`carry0..carry22` → `var`, added to ct.wipe (after last use) + finally net. Re-review v2: CORRECT & COMPLETE — every directly-invertible secret local now wiped; `a0..a11` correctly NOT wiped (public challenge, not secret); no premature wipe, no CT regression; caller/callee ownership chain closed. |
+| R16 | High (false-pass, introduced by R4) | The four `move()`-before-`wipe` POSITIVE tests are now VACUOUS: `move(s)` zeroes the caller's local via default `=wasMoved`, so the probe read zero because of `move`, NOT `wipe`. | **fixed** | Round-2 agent: removed the un-observable move-only probes (+ comments so nobody re-adds them); consume pinned by negative fixtures + destructor smoke tests + test_ct.nim; strengthened copyable-type wipe checks with before/after sanity assertions (genuinely fail if ct.wipe were a no-op). Re-review v2: vacuity gone, non-vacuity confirmed. |
+| R17 | Low | `run_mutation.py:~271` unguarded `killpg`/`getpgid` in TimeoutExpired handler crashes campaign on race. | **fixed** | Round-2 agent: wrapped in try/except (ProcessLookupError, OSError); reap still runs. Re-review v2: correct. |
+| R18 | Low (accepted) | Four move-only wipe smoke tests are now assertion-free (prove reachability + no-raise only). | **accepted** | Working-as-intended: a move-only sink wipe has NO runtime-observable caller-side effect (unobservable by construction); deeper properties pinned by negative fixtures + destructor smoke tests + test_ct + copyable-type checks. Forcing an artificial assertion is the anti-pattern this project rejects (cf. F05). |
+
+Accepted residuals (NOT findings, documented ceilings):
+- Callee-internal `Fe` temporaries in `geAdd`/`geP3Double`/`cmovCached` — curve-point coordinates
+  (ECDLP-hard, not directly invertible); per-function-frame wiping is a project-wide limitation
+  (backend.nim/x25519 share the boundary), not a regression.
+- `recodeScalarRadix16`'s internal `carry: int32` — pre-existing, extremely lossy (1 bit/iter),
+  deliberately below the `SecretScalar` boundary; nice-to-have at most.
+- R17's `except (ProcessLookupError, OSError)` breadth — theoretical PermissionError-then-hang;
+  same-UID child kill practically never raises it. Not reworked.
+
+## FLOOR REACHED (2026-08-08)
+Two fix rounds + two re-review rounds. Round-2 re-review surfaced nothing above Low.
+Findings closed: R1,R2(resolved-in-place),R3,R4,R5,R6,R7,R8,R9,R10,R11,R12,R13,R15,R16,R17.
+Lows R9/R10 fixed on Corey's "fix lows now" (2026-08-08). Accepted Lows (working-as-intended /
+documented ceilings, not fixed by design): R14 (dudect single fixed-class draw — inherent dudect
+limitation, not impl-specific), R18 (move-only wipe smoke tests assertion-free — unobservable by
+construction), + 3 residuals (callee Fe temps ECDLP-hard; recode carry lossy+below-boundary;
+R17 except-breadth theoretical). ALL actionable findings closed.
+Final `scripts/test.sh` (round-2 fix agent, on the complete combined tree): full green — all
+unit/vector/property suites pass, both new negative fixtures rejected correctly.
+NOT COMMITTED — awaiting Corey's approval + commit-shape decision.
+Resume: commit the remediation (proposed: one commit, whole review-fix arc) once approved.
+
+Verified-clean (reviewers explicitly cleared): RFC 8032/7748 conformance (strict decode,
+canonicity, clamping, all-zero X25519 handling), SecretScalar/wire-type boundaries (no
+converter leaks secret→vartime), backend_sodium FFI arg-order/lengths/return-codes + atomic
+sodium_init, RNG fail-fast, dudect statistical methodology (no false-PASS mechanism), the
+exact-string mutation patcher's loud-abort-on-≠1-match, negative-compile fixtures asserting
+the RIGHT diagnostic, Wycheproof loader count-asserts, symex proof-scope discipline,
+unit_test_files matching disk. README examples/vector counts/tag SHAs/rename cleanliness all
+cross-checked accurate.
+
+Resume: findings presented to Corey 2026-08-08, awaiting fix-mandate approval. Recommended
+mandate: fix R1–R7 (through Medium); R8–R14 batchable/Low.

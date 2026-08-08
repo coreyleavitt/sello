@@ -18,8 +18,20 @@
 # and linked against proptest's vendored, UNFLAGGED `proptest_cov.c`
 # runtime -- see `_deps/proptest/docs/fuzz/USAGE.md`'s "Instrumentation
 # recipe (normative)" Nim row for the exact recipe this script follows.
-# Audited sello sources stay pragma-free: only the harness's own external
-# target file gets the sancov compile flags, never `src/sello/*`.
+# Audited sello sources stay pragma-free: no {.cover.} markup or other
+# fuzzing-specific annotation is added to `src/sello/*` -- the harness's
+# own external target file (fuzz_external_target.nim) is the only source
+# file written for this campaign. That said, the sancov instrumentation
+# itself is NOT scoped to that one file: `--passC` is a Nim compiler
+# GLOBAL flag, applied to every C translation unit the build emits,
+# including the ones generated from `src/sello/*` and pulled in
+# transitively by fuzz_external_target.nim's imports. So sello's own
+# compiled object code IS instrumented at the C level, alongside the
+# harness's -- deliberately, since that instrumentation is exactly what
+# produces the coverage-edge signal (`MinEdgesGate` below) guiding the
+# mutator through sello's own decode/verify branches. "Pragma-free" is a
+# source-level statement about sello's .nim files, not a claim that
+# sello's compiled code is excluded from instrumentation.
 #
 # Deliberately separate from scripts/test.sh (like scripts/ct.sh): this is
 # an open-ended campaign, not a fixed-assertion pass/fail suite, and its

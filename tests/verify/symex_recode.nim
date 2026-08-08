@@ -155,8 +155,19 @@ import sello/scalar  # for the cross-check only, not entered by symex (see below
 #      Nim-pragma level NOR `SymexSettings.arithChecks = {}` (which the
 #      retired `-d:selloBmcFullUnroll` attempt below already sets, for a
 #      different reason) suppresses it -- the crash site is unconditional
-#      `int32`-width bookkeeping in the interprocedural call path, not the
+#      `int32`-width bookkeeping in the arithmetic-lowering path, not the
 #      optional arithmetic-defect-fork feature `arithChecks` gates.
+#      SUPERSEDED characterization, kept for history: this was originally
+#      pinned as specifically a NESTED-callee trigger. `symex_mask.nim`'s
+#      "A THIRD EMPIRICAL SYMEX LIMITATION" (its own module doc comment,
+#      ~line 84 onward) reproduces the identical `bv32`/`svBV64` crash
+#      signature on a DIRECT `symexFind` target with no nested call
+#      involved at all -- the actual trigger is broader: a branch-merged
+#      `int32` local (not just a nested-call parameter) fed into a binop
+#      alongside another symbolic `int32` operand, regardless of call
+#      depth. Nesting was sufficient to trigger it here, not necessary in
+#      general; see that file for the fuller characterization and the
+#      free-parameter (vs. branch-derived-local) workaround it documents.
 #   2. Independently, a proc that RETURNS A TUPLE and is called as a
 #      nested callee hits a *different*, more gracefully-handled gap:
 #      `sxUnknown` with `weInternalWalkerFault: ValueError: retBindEq:

@@ -37,15 +37,28 @@ suite "facade - public surface (sello.nim re-exports)":
     let kp = keypair()
     check keypair(toSeed(toSeedBytes(kp))).public == kp.public
 
-  test "wipe(var Seed) is reachable through the facade":
-    ## `Seed` has no `==`/`toBytes` of its own (RFC-002 slice 1) -- the
-    ## raw-pointer probe pattern (same as the `X25519EphemeralSecret` wipe
-    ## check below) is how the wipe gets observed here.
+  test "wipe(sink Seed) is reachable through the facade":
+    ## `wipe` takes `sink`, not `var` (round-4 finding R4), so it consumes
+    ## `s` -- `move(s)` is required inside `test:`'s implicit try/finally
+    ## even for this sole remaining use.
+    ##
+    ## Round-4 finding R16: this test used to also capture a raw-pointer
+    ## probe on `s` BEFORE the wipe and assert it read zero afterward. That
+    ## assertion was vacuous: `move(s)` itself resets the moved-from
+    ## SOURCE to binary zero via the compiler's default `=wasMoved` (`Seed`
+    ## defines no custom `=wasMoved`), so the probe read zero because of
+    ## `move`, not because of `wipe` -- the assertion would have passed
+    ## even with a no-op `wipe`. A move-only sink type's caller-side local
+    ## can never be observed post-move for exactly this reason, so no
+    ## caller-side byte-probe on `Seed` can be a real wipe test here. This
+    ## test's remaining job is purely facade-reachability (the call
+    ## compiles and runs through `import sello` alone); genuine
+    ## zero-on-wipe coverage lives in `tests/unit/test_ct.nim` (direct
+    ## `ct.wipe` coverage) and in `test_signing.nim`'s `Seed` destructor
+    ## smoke tests (which observe a real, non-moved scope-exit wipe).
     var s = toSeed([1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
                     17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32])
-    wipe(s)
-    let probe = cast[ptr array[32, byte]](addr s)
-    check probe[] == default(array[32, byte])
+    wipe(move(s))
 
   test "openArray[byte] overload is reachable through the facade":
     let kp = keypair()
@@ -82,6 +95,24 @@ suite "facade - hash() for the public wire types (RFC-002 slice 1)":
     var pubSet = initHashSet[X25519Public]()
     pubSet.incl pub
     check pub in pubSet
+
+suite "facade - $ for the public wire types (round-4 finding R11)":
+  test "$ on PublicKey/Signature/X25519Public matches the underlying bytes' own stringification":
+    ## `$` for these three types is `{.borrow.}`ed straight from the
+    ## underlying `array[N, byte]` (`wire.nim`/`x25519.nim`), the same way
+    ## `==`/`hash` are (pinned just above) -- so the behavioral check is
+    ## that stringifying the nominal type matches stringifying its own
+    ## `toBytes()`, not merely "returns something non-empty".
+    let kp = keypair()
+    let sig = kp.sign("dollar smoke test")
+    let pub = x25519Base(x25519StaticSecret())
+
+    check $(kp.public) == $(toBytes(kp.public))
+    check $(sig) == $(toBytes(sig))
+    check $(pub) == $(toBytes(pub))
+    check len($(kp.public)) > 0
+    check len($(sig)) > 0
+    check len($(pub)) > 0
 
 suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
   test "X25519StaticSecret/X25519Public/X25519Shared and their converters are reachable through the facade":
@@ -128,19 +159,42 @@ suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
     let shared = x25519(move(eph), x25519Base(x25519EphemeralSecret()))
     check shared.isSome
 
-  test "wipe(var X25519EphemeralSecret) is reachable through the facade":
+  test "wipe(sink X25519EphemeralSecret) is reachable through the facade":
+    ## `wipe` takes `sink`, not `var` (round-4 finding R4), so it consumes
+    ## `eph` -- `move(eph)` is required inside `test:`'s implicit
+    ## try/finally even for this sole remaining use.
+    ##
+    ## Round-4 finding R16: this test used to also capture a raw-pointer
+    ## probe on `eph` BEFORE the wipe and assert it read zero afterward.
+    ## That assertion was vacuous for the same reason the `Seed` wipe test
+    ## above is: `move(eph)` resets the moved-from SOURCE to binary zero
+    ## via the compiler's default `=wasMoved` before `wipe`'s own body
+    ## ever runs, so the probe read zero regardless of whether `wipe`
+    ## worked. A move-only sink type's caller-side local can never be
+    ## observed post-move, so no caller-side byte-probe here can be a real
+    ## wipe test. This test's remaining job is purely facade-reachability;
+    ## genuine zero-on-wipe coverage for this type lives in
+    ## `test_x25519.nim`'s ephemeral-secret destructor/scope-exit smoke
+    ## tests (real, non-moved wipes) and `tests/unit/test_ct.nim` (direct
+    ## `ct.wipe` coverage).
     var eph = x25519EphemeralSecret()
-    wipe(eph)
-    let probe = cast[ptr array[32, byte]](addr eph)
-    check probe[] == default(array[32, byte])
+    wipe(move(eph))
 
   test "wipe(X25519StaticSecret) / wipe(X25519Shared) are reachable through the facade":
+    ## Unlike `Seed`/`X25519EphemeralSecret` above, these two types use the
+    ## `var` (non-sink) `wipe` overload -- `secret`/`shared` are NOT moved
+    ## anywhere, so this genuinely observes `wipe`'s own zeroization: if
+    ## `ct.wipe` were a no-op, `secret`/`shared` would still hold their
+    ## original (essentially-never-all-zero) random secret material and
+    ## the `toBytes(...) == default(...)` checks below would fail.
     var secret = x25519StaticSecret()
+    doAssert toBytes(secret) != default(array[32, byte]) # sanity: nonzero before wipe
     wipe(secret)
     check toBytes(secret) == default(array[32, byte])
 
     let peer = x25519Base(x25519StaticSecret())
     var shared = x25519(x25519StaticSecret(), peer).get
+    doAssert toBytes(shared) != default(array[32, byte]) # sanity: nonzero before wipe
     wipe(shared)
     check toBytes(shared) == default(array[32, byte])
 

@@ -287,14 +287,26 @@ suite "keypair(seed) - invariant":
     check keypair(toSeed(toSeedBytes(kp))).public == kp.public
 
 suite "Seed lifecycle":
-  test "wipe(seed) zeroes the underlying bytes":
-    ## `Seed` has no `==`/`toBytes` of its own (RFC-002 slice 1) -- the
-    ## raw-pointer probe pattern (see the destructor smoke tests below)
-    ## is how a standalone `Seed`'s bytes get observed from a test.
+  test "wipe(sink Seed) is reachable and consumes the seed":
+    ## `wipe` takes `sink`, not `var` (round-4 finding R4), so it consumes
+    ## `s` -- `move(s)` is required inside `test:`'s implicit try/finally
+    ## even for this sole remaining use (same ceremony `test_x25519.nim`'s
+    ## ephemeral-secret tests need, for the same reason).
+    ##
+    ## Round-4 finding R16: this test used to also capture a raw-pointer
+    ## probe on `s` BEFORE the wipe and assert it read zero afterward.
+    ## That assertion was vacuous: `move(s)` itself resets the moved-from
+    ## SOURCE to binary zero via the compiler's default `=wasMoved` (`Seed`
+    ## defines no custom `=wasMoved`), so the probe read zero because of
+    ## `move`, not because of `wipe` -- it would have passed even with a
+    ## no-op `wipe`. A move-only sink type's caller-side local can never
+    ## be observed post-move for exactly this reason, so no caller-side
+    ## byte-probe on `Seed` can be a real wipe test here. Genuine
+    ## zero-on-wipe coverage for `Seed` is the "Seed destructor smoke
+    ## tests" suite directly below (a real, non-moved scope-exit wipe) and
+    ## `tests/unit/test_ct.nim` (direct `ct.wipe` coverage).
     var s = toSeed(tv1_sk)
-    wipe(s)
-    let probe = cast[ptr array[32, byte]](addr s)
-    check probe[] == default(array[32, byte])
+    wipe(move(s))
 
   test "different seed bytes derive keypairs with different toSeedBytes; equal seed bytes derive equal ones":
     ## `Seed.==` was deleted (RFC-002 slice 1, one principle/one layer with
@@ -395,6 +407,22 @@ suite "type and ownership safety (compile-time)":
     let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
     let cmd = "nim c --hints:off --nimcache:" &
       (repoRoot / "build" / "nimcache_reject_seed_copy") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "=copy" in output
+
+  test "using a wiped Seed is a compile error (verified via a subprocess compile, round-4 finding R4)":
+    ## `wipe(s: sink Seed)` consumes `s`, so a later `keypair(move(s))`
+    ## after `wipe(s)` reuses an already-consumed variable -- same
+    ## violation class as the plain copy check above. See
+    ## `fixtures/reject_seed_wipe_then_use.nim`'s own doc comment for the
+    ## full "why this matters" writeup (round-4 finding R4: before this
+    ## fix, `wipe` took `var`, so this fixture compiled and derived a
+    ## keypair from an all-zero seed).
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_seed_wipe_then_use.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_seed_wipe_then_use") & " " & fixture
     let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
     check exitCode != 0
     check "=copy" in output

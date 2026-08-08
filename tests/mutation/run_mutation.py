@@ -64,6 +64,17 @@ Method: for each mutant, in isolation --
          into the same bucket as a real red-suite kill.
        KILLED (test) -- all files compiled but at least one test failed
          (red suite): the suite's assertions actually caught the mutant.
+       KILLED (timeout) -- the compile+run invocation for one file did not
+         finish within PER_FILE_TIMEOUT_SECONDS. A mutant that hangs the
+         suite (e.g. one that turns a bounded loop unbounded, or breaks
+         termination of a compile-time-evaluated computation like the base
+         table) is detected and counted as killed, not silently left to
+         stall the whole campaign forever with no diagnostic -- reported
+         separately from the other two KILLED buckets, same honesty
+         standard as the compile-error/test-red split, since a timeout
+         kill proves the mutant is observably wrong (it never produced a
+         clean green run) without saying anything about which assertion
+         (if any) would have caught it.
        SURVIVED -- every file compiled AND every test passed: the suite
          did not notice this mutant at all. A coverage-gap finding,
          handled in-slice per the RFC (a new test gets added to kill it,
@@ -83,8 +94,10 @@ Nim compiler's own nimcache carry unrelated dependencies (nimcrypto,
 proptest, ...) across mutants within the one container invocation, instead
 of paying their full compile cost once per mutant.
 """
+import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -94,6 +107,19 @@ SCRATCH = pathlib.Path("/tmp/sello-mutation-src")
 MUTANTS_DIR = REPO_ROOT / "tests/mutation/mutants"
 REPORT_PATH = REPO_ROOT / "docs/mutation-results.md"
 NIM_BIN = "nim"
+
+# Per-file `nim c -r` wall-clock bound. A normal compile+run of one unit
+# test file, even the heavier property/Wycheproof ones, finishes well
+# under a couple of minutes on this project's own measured numbers (see
+# scripts/mutation.sh's header comment: ~1.5s-40s per mutant for the WHOLE
+# suite, short-circuiting on first failure). 300s is a generous multiple
+# of that per-file cost, not a tight bound -- the goal is to catch a
+# genuinely non-terminating mutant (a bounded loop turned unbounded, or a
+# compile-time-evaluated computation like the base table that stops
+# terminating), not to race normal variance. Contrast scripts/bmc.sh,
+# which needs `timeout --signal=KILL` for the same reason (its subprocess,
+# Z3, can hang indefinitely).
+PER_FILE_TIMEOUT_SECONDS = 300
 
 
 class Mutant:
@@ -211,31 +237,68 @@ def reset_targets(targets):
         shutil.copyfile(REPO_ROOT / rel, SCRATCH / rel)
 
 
-def run_one_file(test_file: str, log_path: pathlib.Path) -> tuple[bool, bool]:
+def run_one_file(test_file: str, log_path: pathlib.Path) -> tuple[str, bool]:
     """Compile+run one unit test file against the current scratch tree.
 
-    Returns (ok, compiled) -- ok is True iff the whole `nim c -r` invocation
-    exited 0 (compiled AND every test passed); compiled is True iff a
-    binary was produced and executed at all (distinguishes a compile-error
-    kill from a red-suite kill when ok is False).
+    Returns (status, compiled):
+      status is "ok" (compiled AND every test passed), "fail" (ran to
+        completion but exited nonzero), or "timeout" (did not finish
+        within PER_FILE_TIMEOUT_SECONDS and was killed).
+      compiled is True iff a binary was produced and executed at all
+        (distinguishes a compile-error kill from a red-suite kill when
+        status is "fail"; always False for "timeout", since a hang could
+        be mid-compile or mid-run and this driver has no reliable way to
+        tell which from the outside).
+
+    Runs the child in its own session (`start_new_session=True`) so a
+    timeout can kill the whole process group, not just the immediate
+    `nim` process -- `nim c -r` shells out to a C compiler/linker and then
+    execs the resulting test binary, and killing only the top-level `nim`
+    process would leave any of those still-running descendants orphaned
+    rather than reaped.
     """
-    proc = subprocess.run(
+    proc = subprocess.Popen(
         [NIM_BIN, "c", "-r", test_file],
         cwd=SCRATCH,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        start_new_session=True,
     )
-    log_path.write_text(proc.stdout)
-    compiled = "[Exec]" in proc.stdout
-    return proc.returncode == 0, compiled
+    try:
+        stdout, _ = proc.communicate(timeout=PER_FILE_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            # The process (and its group) is already gone -- it exited in
+            # the race window between the timeout firing and the kill
+            # landing. Nothing to signal; fall through to reap it below
+            # (round-4 finding R17: this used to be unguarded, so this
+            # exact race crashed the whole campaign instead of just
+            # scoring one mutant as a timeout).
+            pass
+        # Reap the now-dying process group and collect whatever partial
+        # output it had produced before the kill, for the log.
+        stdout, _ = proc.communicate()
+        log_path.write_text(
+            (stdout or "")
+            + f"\n\n[run_mutation: TIMED OUT after {PER_FILE_TIMEOUT_SECONDS}s "
+            "-- process group killed]\n"
+        )
+        return "timeout", False
+    log_path.write_text(stdout)
+    compiled = "[Exec]" in stdout
+    return ("ok" if proc.returncode == 0 else "fail"), compiled
 
 
 def run_mutant(mutant: Mutant, unit_test_files, log_dir: pathlib.Path):
     log_dir.mkdir(parents=True, exist_ok=True)
     for test_file in unit_test_files:
-        ok, compiled = run_one_file(test_file, log_dir / (pathlib.Path(test_file).stem + ".log"))
-        if not ok:
+        status, compiled = run_one_file(test_file, log_dir / (pathlib.Path(test_file).stem + ".log"))
+        if status == "timeout":
+            return "KILLED (timeout)", test_file
+        if status == "fail":
             outcome = "KILLED (test)" if compiled else "KILLED (compile-error)"
             return outcome, test_file
     return "SURVIVED", None
@@ -245,8 +308,9 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
     total = len(catalog)
     killed_test = sum(1 for r in results.values() if r[0] == "KILLED (test)")
     killed_compile = sum(1 for r in results.values() if r[0] == "KILLED (compile-error)")
+    killed_timeout = sum(1 for r in results.values() if r[0] == "KILLED (timeout)")
     survived = sum(1 for r in results.values() if r[0] == "SURVIVED")
-    killed_total = killed_test + killed_compile
+    killed_total = killed_test + killed_compile + killed_timeout
     kill_rate = (killed_total / total * 100.0) if total else 0.0
 
     lines = []
@@ -265,6 +329,7 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
     lines.append(f"- **Mutants:** {total}")
     lines.append(f"- **Killed (test, red suite):** {killed_test}")
     lines.append(f"- **Killed (compile error):** {killed_compile}")
+    lines.append(f"- **Killed (timeout):** {killed_timeout}")
     lines.append(f"- **Survived:** {survived}")
     lines.append(f"- **Overall kill rate:** {kill_rate:.1f}% ({killed_total}/{total})")
     lines.append(f"- **Retired (confirmed-equivalent, excluded from the above):** {len(equivalent)}")
@@ -280,8 +345,8 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
     else:
         lines.append(
             "**Gate status: clean.** Every mutant in the catalog was "
-            "killed, either by the unit suite going red or by a compile "
-            "error."
+            "killed, either by the unit suite going red, by a compile "
+            "error, or by exceeding the per-file timeout."
         )
     lines.append("")
     lines.append("## Methodology")
@@ -309,11 +374,14 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
         "mutated tree. A mutant is KILLED if any file fails to compile "
         "(compile-error kill -- reported separately, since a mutant that "
         "never got a chance to run proves nothing about the suite's "
-        "sensitivity) or if any test fails once compiled (test kill -- a "
-        "real red suite). A mutant SURVIVES only if every file in the "
-        "suite compiles and passes. Verdicts short-circuit on the first "
-        "failing file for wall-clock reasons; a SURVIVED verdict still "
-        "requires the entire suite to pass."
+        "sensitivity), if any test fails once compiled (test kill -- a "
+        "real red suite), or if any one file's compile+run does not finish "
+        "within the per-file timeout (timeout kill -- reported separately "
+        "again, since a hang is detected and counted, not left to stall "
+        "the campaign silently). A mutant SURVIVES only if every file in "
+        "the suite compiles and passes within the timeout. Verdicts "
+        "short-circuit on the first failing file for wall-clock reasons; a "
+        "SURVIVED verdict still requires the entire suite to pass."
     )
     lines.append("")
     lines.append(
@@ -432,9 +500,11 @@ def main():
     survived = [m.id for m in catalog if results[m.id][0] == "SURVIVED"]
     killed_compile = sum(1 for m in catalog if results[m.id][0] == "KILLED (compile-error)")
     killed_test = sum(1 for m in catalog if results[m.id][0] == "KILLED (test)")
+    killed_timeout = sum(1 for m in catalog if results[m.id][0] == "KILLED (timeout)")
     print()
     print(f"run_mutation: {len(catalog)} mutants -- {killed_test} killed (test), "
-          f"{killed_compile} killed (compile-error), {len(survived)} survived")
+          f"{killed_compile} killed (compile-error), {killed_timeout} killed (timeout), "
+          f"{len(survived)} survived")
     if survived:
         print(f"run_mutation: SURVIVORS: {', '.join(survived)}")
         print(f"run_mutation: report written to {REPORT_PATH}")

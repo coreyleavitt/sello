@@ -308,6 +308,23 @@ suite "X25519 - ephemeral single-use (compile-time, subprocess-verified)":
     check exitCode != 0
     check "=copy" in output
 
+  test "using a wiped X25519EphemeralSecret is a compile error (subprocess compile, round-4 finding R4)":
+    ## `wipe(s: sink X25519EphemeralSecret)` consumes `s`, so a later
+    ## `x25519(move(eph), peer)` after `wipe(eph)` reuses an
+    ## already-consumed variable -- same violation class as the plain
+    ## reuse fixture above. See
+    ## `fixtures/reject_ephemeral_wipe_then_use.nim`'s own doc comment for
+    ## the full "why this matters" writeup (round-4 finding R4: before this
+    ## fix, `wipe` took `var`, so this fixture compiled and ran the ladder
+    ## on zeroed bytes).
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_ephemeral_wipe_then_use.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_ephemeral_wipe_then_use") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "=copy" in output
+
   test "a single-use ephemeral consumes cleanly":
     ## `x25519EphemeralSecret.reject_ephemeral_reuse.nim` (this file's own
     ## negative fixture) is the actual proof that a genuinely sole,
@@ -379,12 +396,36 @@ suite "X25519 - ephemeral secret hygiene (probe pattern)":
       doAssert probe[] != default(array[32, byte]) # sanity: nonzero before scope exit
     check probe[] == default(array[32, byte])
 
-  test "wipe(var X25519EphemeralSecret) zeroes the underlying bytes in place":
+  test "wipe(sink X25519EphemeralSecret) is reachable and consumes the secret":
+    ## `wipe` takes `sink`, not `var` (round-4 finding R4), so it consumes
+    ## `eph` -- an explicit `move()` is required here for the same reason
+    ## `x25519EphemeralPair()`'s own facade test needs one: `unittest`'s
+    ## `test` template wraps every body in an implicit try/finally, and a
+    ## sink-consuming call inside one needs `move()` even when it is the
+    ## variable's only remaining use (see `test_x25519.nim`'s dedicated,
+    ## non-`test:`-wrapped proof this ceremony is NOT needed at ordinary
+    ## top-level scope, in the "ephemeral single-use" suite below).
+    ##
+    ## Round-4 finding R16: this test used to also capture a raw-pointer
+    ## probe on `eph` BEFORE the wipe and assert it read zero afterward.
+    ## That assertion was vacuous: `move(eph)` itself resets the
+    ## moved-from SOURCE to binary zero via the compiler's default
+    ## `=wasMoved` (`X25519EphemeralSecret` defines no custom
+    ## `=wasMoved`), so the probe read zero because of `move`, not because
+    ## of `wipe` -- it would have passed even with a no-op `wipe` (this is
+    ## the exact mechanism documented in the "after a consuming x25519
+    ## call" test above). A move-only sink type's caller-side local can
+    ## never be observed post-move for exactly this reason, so no
+    ## caller-side byte-probe on `X25519EphemeralSecret` can be a real
+    ## wipe test here. Genuine zero-on-wipe coverage for this type is the
+    ## "=destroy wipes an unused X25519EphemeralSecret at scope exit" test
+    ## just above (a real, non-moved wipe) and `tests/unit/test_ct.nim`
+    ## (direct `ct.wipe` coverage); genuine wipe-of-a-COPYABLE-secret
+    ## coverage (the `var`, non-sink overload, fully observable in place)
+    ## is the `X25519StaticSecret`/`X25519Shared` "secret hygiene" suite
+    ## above.
     var eph = x25519EphemeralSecret()
-    let probe = cast[ptr array[32, byte]](addr eph)
-    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe
-    wipe(eph)
-    check probe[] == default(array[32, byte])
+    wipe(move(eph))
 
 suite "X25519 - generic array wipe (sello/wipe, RFC-001 finding 11/28)":
   ## Before finding 11, `private/ct.wipe` -- the one audited volatile-store

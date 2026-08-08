@@ -125,12 +125,38 @@ type
     ## below is the persistence escape hatch, so nothing in the public API
     ## needs a second live `Seed` copy any more -- see the module doc
     ## comment for the fuller rationale.
+    ##
+    ## **Why move-only rather than copyable-with-self-wiping like
+    ## `x25519.X25519StaticSecret` (round-4 finding R9):** the two look
+    ## like structurally parallel "reusable secret" roles but are not --
+    ## `Seed` is a TRANSIENT raw-seed INPUT to `keypair()`, single custody
+    ## en route from CSPRNG (or caller-supplied bytes) to the `Keypair` it
+    ## produces, not a long-lived secret a caller holds and reuses on its
+    ## own. Move-only is load-bearing here, not incidental: it is what
+    ## makes round-4 finding R4's wipe-then-reuse guarantee a compile
+    ## error rather than a caller discipline (`wipe(sink Seed)` below
+    ## consumes `s`, so a later `keypair(move(s))` on the same variable is
+    ## the same `=copy {.error.}` diagnostic reuse already produces --
+    ## pinned by `tests/unit/fixtures/reject_seed_wipe_then_use.nim`).
+    ## Making `Seed` copyable would silently reopen that hole: a copy taken
+    ## before `wipe` could still be fed to `keypair` after the original was
+    ## zeroed, with no compile-time signal at all. See the module-group
+    ## policy note on `x25519.X25519StaticSecret`'s doc comment for the
+    ## copyable side of this design and the general rule it falls under.
     bytes: array[32, byte]
 
   Keypair* = object
     ## Move-only: `=copy` is declared `{.error.}`. Fields are deliberately
     ## not exported — `keypair(seed)` is the only constructor, so a
     ## mismatched (public, seed) pair is unconstructible.
+    ##
+    ## Falls under the same move-only-vs-copyable policy as `Seed` above
+    ## (round-4 finding R9): `Keypair` is a bundled identity -- secret plus
+    ## public plus the invariant tying them together -- and move-only is
+    ## what prevents silent whole-identity duplication. See `Seed`'s doc
+    ## comment for the fuller policy writeup, cross-linked from
+    ## `x25519.X25519StaticSecret`/`X25519EphemeralSecret` on the X25519
+    ## side.
     public: PublicKey
     seed: Seed
 
@@ -140,20 +166,24 @@ type
 ## explicit one declared later with "cannot bind another '=destroy'". The
 ## `secretHooks*`/`secretHooksMoveOnly*` templates below (round-3 finding
 ## A5, `sello/private/secret_hooks`) expand to exactly the hand-written
-## `zeroizeSeed`/`=destroy`/`=copy` shape this comment used to introduce
-## directly -- see that module's doc comment for the full "why a template,
-## why `{.dirty.}`, why `Keypair` stays hand-written" writeup.
+## `=destroy`/`=copy` shape this comment used to introduce directly -- see
+## that module's doc comment for the full "why a template, why
+## `{.dirty.}`, why `Keypair` stays hand-written" writeup, including
+## round-4 finding R10's simplification to a two-argument `(Type, field)`
+## signature (no more per-type `zeroizeProc` name).
 
-## RFC-001 slice 8: `zeroizeSeed`'s wipe (emitted below by
+## RFC-001 slice 8: `Seed`'s `=destroy` (emitted below by
 ## `secretHooksMoveOnly`) is routed through `ct.wipe` (volatile stores +
-## compiler barrier) rather than a plain loop -- the whole point of
-## `Seed`'s `=destroy` hook is to guarantee the wipe actually happens,
-## which a compiler-eliminable dead store would silently defeat (see
+## compiler barrier) rather than a plain loop -- the whole point of the
+## hook is to guarantee the wipe actually happens, which a
+## compiler-eliminable dead store would silently defeat (see
 ## `sello/private/ct` and the x25519.nim ladder fix in this same slice).
 ## The `=copy {.error.}` this also emits (RFC-002 slice 1): a second live
 ## copy of a `Seed` is a compile error, not a runtime hygiene footnote.
-## Legitimate transfers move.
-secretHooksMoveOnly(Seed, zeroizeSeed, bytes)
+## Legitimate transfers move. (Round-4 finding R10: the template no longer
+## takes a separate `zeroizeProc` name -- see `secret_hooks.nim`'s doc
+## comment.)
+secretHooksMoveOnly(Seed, bytes)
 
 proc `=copy`(dst: var Keypair; src: Keypair) {.error.}
   ## A second live copy of the seed is a compile error, not a runtime
@@ -163,24 +193,41 @@ func toSeed*(bytes: array[32, byte]): Seed {.inline.} =
   ## Explicit construction — the point where raw bytes become a secret.
   Seed(bytes: bytes)
 
-proc wipe*(s: var Seed) =
+proc wipe*(s: sink Seed) =
   ## Explicit early wipe, e.g. right after deriving a `Keypair` when the
   ## caller does not need to retain the raw seed. `=destroy` performs the
   ## same wipe automatically at scope exit; this exists for callers that
   ## want it sooner.
-  zeroizeSeed(s)
+  ##
+  ## Takes `sink`, not `var` (round-4 finding R4): `Seed` is move-only and
+  ## its whole design point is compiler-enforced single use, but a `var`
+  ## `wipe` does not consume its argument, so a caller could write
+  ## `wipe(s)` and then still reach a consuming `keypair(move(s))` -- which
+  ## compiled and derived a keypair from the just-zeroed, all-zero seed,
+  ## silently defeating the single-use guarantee. With `sink`, `wipe`
+  ## consumes `s` exactly like `keypair` does, so a later use of the same
+  ## variable -- moved or not -- is the same `=copy {.error.}` compile
+  ## error `keypair`'s own reuse already produces; see
+  ## `tests/unit/fixtures/reject_seed_wipe_then_use.nim`, driven by
+  ## `test_signing.nim`, for the regression pin. The type's single
+  ## ownership moves to whichever consumes it first, `wipe` or `keypair`,
+  ## same as before -- only the enforcement mechanism changed.
+  ##
+  ## Calls `ct.wipe` directly (round-4 finding R10), not a named
+  ## `zeroizeSeed` proc -- see `private/secret_hooks.nim`'s doc comment.
+  ct.wipe(s.bytes)
 
 proc wipe*(kp: var Keypair) =
   ## Eager-scrub counterpart to `wipe(var Seed)` (RFC-001 ledger finding
   ## 16): zeroes `kp`'s secret half (its `Seed`, via the same `ct.wipe`
-  ## path `zeroizeSeed`/`Seed`'s own `=destroy` use) in place, for a caller
-  ## that wants the secret gone before `kp` itself goes out of scope.
-  ## `kp.public` is not secret and is left untouched -- it stays readable
-  ## after this call, unlike the seed. `Keypair`'s own `=destroy` (via its
-  ## `Seed` field's `=destroy`) performs the same wipe automatically at
-  ## scope exit regardless; this exists for the same "sooner, explicitly"
-  ## reason `wipe(var Seed)` does.
-  zeroizeSeed(kp.seed)
+  ## path `Seed`'s own `=destroy` uses) in place, for a caller that wants
+  ## the secret gone before `kp` itself goes out of scope. `kp.public` is
+  ## not secret and is left untouched -- it stays readable after this call,
+  ## unlike the seed. `Keypair`'s own `=destroy` (via its `Seed` field's
+  ## `=destroy`) performs the same wipe automatically at scope exit
+  ## regardless; this exists for the same "sooner, explicitly" reason
+  ## `wipe(var Seed)` does.
+  ct.wipe(kp.seed.bytes)
 
 func public*(kp: Keypair): PublicKey =
   ## The keypair's public key (cached at construction — never re-derived).

@@ -11,6 +11,7 @@
 ## this module back for `scReduce`). No nimcrypto import here any more.
 
 import sello/field
+import sello/private/ct
 
 # ---------------------------------------------------------------------------
 # Types
@@ -66,6 +67,31 @@ type
     ## actually guards. `geScalarmultBase` is where the boundary is drawn
     ## instead: it is the actual entry point `backend.nim` calls with a
     ## real secret, so that is where the type does its one job.
+    ##
+    ## **`private/`-extraction considered and declined (compromise-audit
+    ## finding R2):** moving `geScalarmultBase`/`scMulAdd`/`SecretScalar`/
+    ## `toSecretScalar`/`secretScalarBytes` to a new
+    ## `private/secret_scalar.nim` (matching every other raw-secret handler
+    ## in this codebase living under `private/`) was evaluated directly
+    ## against this file. It does not extract cleanly: `geScalarmultBase`
+    ## needs `geP3Double` (the 4x-doubling step between the odd/even digit
+    ## passes), and `scMulAdd` needs `load3`/`load4` (its limb decoding) --
+    ## all three are today unexported internals with exactly one other
+    ## caller apiece that would stay behind in this file (`geP3Double` via
+    ## `buildBaseTable`, `load3`/`load4` via `scReduce`). Extracting would
+    ## force exporting all three purely to bridge the module split, trading
+    ## "secret ops sit in the public tier" for "scalar.nim's private
+    ## reduction/doubling helpers become public surface" -- not a net win.
+    ## `geScalarmultBase`/`scMulAdd` stay here; RFC finding R1's `ct.wipe`
+    ## coverage of every secret local both functions touch (`sBytes`/
+    ## `digits`/`acc`/`u`/`step` in `geScalarmultBase`, `b`/`c`/`s0..s23` in
+    ## `scMulAdd`, both under the same `try`/`finally` net
+    ## `private/backend.nim` uses) is applied in place, on the strength of
+    ## `private/ct.nim` already being a universal leaf any secret-holding
+    ## module reaches into directly regardless of its position in the
+    ## import graph (see this project's own architecture notes) -- the same
+    ## justification `x25519.nim` (not under `private/` either) relies on
+    ## for its own `ct.wipe` calls.
 
   GeP2* = object
     x*, y*, z*: Fe
@@ -422,6 +448,18 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
   ## unwrap for the two places genuinely below the type boundary
   ## (the bit-255 precondition check, `recodeScalarRadix16`'s byte-level
   ## input).
+  ##
+  ## RFC finding R1: every secret local this function touches --
+  ## `sBytes` (a fresh copy of the raw secret scalar), `digits` (its
+  ## directly-invertible radix-16 decomposition), and the secret-dependent
+  ## point accumulators `acc`/`u`/`step` -- is wiped via `ct.wipe` once no
+  ## longer needed, under the same `try`/`finally` net `private/backend.nim`
+  ## uses (RFC-001 ledger finding 18): the explicit happy-path wipes fire as
+  ## soon as each value is no longer needed, and `finally` re-wipes
+  ## everything regardless of exit path (a defensive, currently-unreachable
+  ## net, since nothing in this body raises). `result = acc` copies `acc`'s
+  ## value out before `acc` itself is wiped, so the wipe cannot affect the
+  ## returned point.
   # Debug-only precondition check (RFC-002 slice 2 item 3a): plain
   # `assert`, meant to be absent from the dudect-measured `-d:release`
   # build (and every downstream consumer's release build) entirely, so it
@@ -445,12 +483,12 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
   # assert can actually fire. (Same empirical-deviation register as
   # `signing.Seed`'s `distinct array` fallback -- see that module's doc
   # comment.)
-  let sBytes = secretScalarBytes(s)
+  var sBytes = secretScalarBytes(s)
   when not defined(release):
     {.push assertions: on.}
     assert (sBytes[31] and 0x80'u8) == 0, "geScalarmultBase: bit 255 of s must be 0"
     {.pop.}
-  let digits = recodeScalarRadix16(sBytes)
+  var digits = recodeScalarRadix16(sBytes)
 
   var acc: GeP3
   acc.x = FeZero; acc.y = FeOne; acc.z = FeOne; acc.t = FeZero
@@ -458,20 +496,34 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
   var u: GeCached
   var step: GeP1P1
 
-  for i in countup(1, 63, 2):
-    cmovCached(u, GeBaseTable[i div 2], digits[i])
-    geAdd(step, acc, u)
-    geP1P1ToP3(acc, step)
+  try:
+    ct.wipe(sBytes)
 
-  for _ in 0 ..< 4:
-    acc = geP3Double(acc)
+    for i in countup(1, 63, 2):
+      cmovCached(u, GeBaseTable[i div 2], digits[i])
+      geAdd(step, acc, u)
+      geP1P1ToP3(acc, step)
 
-  for i in countup(0, 62, 2):
-    cmovCached(u, GeBaseTable[i div 2], digits[i])
-    geAdd(step, acc, u)
-    geP1P1ToP3(acc, step)
+    for _ in 0 ..< 4:
+      acc = geP3Double(acc)
 
-  result = acc
+    for i in countup(0, 62, 2):
+      cmovCached(u, GeBaseTable[i div 2], digits[i])
+      geAdd(step, acc, u)
+      geP1P1ToP3(acc, step)
+
+    result = acc
+
+    ct.wipe(digits)
+    ct.wipe(acc)
+    ct.wipe(u)
+    ct.wipe(step)
+  finally:
+    ct.wipe(sBytes)
+    ct.wipe(digits)
+    ct.wipe(acc)
+    ct.wipe(u)
+    ct.wipe(step)
 
 {.pop.}
 
@@ -753,15 +805,44 @@ func scMulAdd*(a: array[32, byte]; bSecret, cSecret: SecretScalar): array[32, by
   ## nonce `r` respectively) -- typed `SecretScalar` accordingly (round-3
   ## finding A3), while the public multiplier stays a bare
   ## `array[32, byte]`. `bSecret`/`cSecret` are unwrapped once, right below,
-  ## into plain-byte `let b`/`c` shadows: the rest of this function's body
+  ## into plain-byte `b`/`c` shadows (`var`, not `let` -- RFC finding R1
+  ## wipes them once their limb decompositions are complete): the rest of
+  ## this function's body
   ## is otherwise the untouched ref10 port (the same `a0..a11`/`b0..b11`/
   ## `c0..c11` limb extraction every other consumer of this arithmetic
   ## already relies on byte-for-byte), so the `SecretScalar` boundary costs
   ## nothing but these two lines. This function indexes fixed-size arrays
   ## at compile-time-constant offsets only, so checks-off carries no
   ## additional CT burden here.
-  let b = secretScalarBytes(bSecret)
-  let c = secretScalarBytes(cSecret)
+  ##
+  ## RFC finding R1 (extended by round-2 finding R15): `b`/`c` (fresh
+  ## copies of the secret key scalar and nonce), their `b0..b11`/`c0..c11`
+  ## radix-2^21 limb decompositions (themselves a full, directly-invertible
+  ## re-encoding of the same secret bytes -- R15 found these surviving
+  ## un-wiped on the stack after R1's `b`/`c` wipe, defeating that wipe's
+  ## own purpose), and the `s0..s23` limb accumulators built from them are
+  ## all secret working state, wiped via `ct.wipe` once no longer needed,
+  ## under the same `try`/`finally` net `private/backend.nim` uses
+  ## (RFC-001 ledger finding 18) -- `b`/`c` as soon as the `b0..b11`/
+  ## `c0..c11` limb decompositions below are complete (their only
+  ## consumers), `b0..b11`/`c0..c11` themselves immediately after the
+  ## `s0..s23` schoolbook-multiply accumulation that is THEIR only
+  ## consumer completes (before carry propagation begins), and `s0..s23`
+  ## once `result` is fully assigned. The `carry0..carry22` intermediates
+  ## (also secret-derived, though lossier/lower-value than the limbs
+  ## above) are wiped defensively in `finally` only, since they are still
+  ## live and being read/written throughout the carry-propagation tail.
+  ## `finally` re-wipes everything regardless of exit path (defensive,
+  ## currently unreachable: this whole function is fixed-size-array/int64
+  ## arithmetic under `checks: off`, with no raising op reachable).
+  var b = secretScalarBytes(bSecret)
+  var c = secretScalarBytes(cSecret)
+  var b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11: int64
+  var c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11: int64
+  var carry0, carry1, carry2, carry3, carry4, carry5: int64
+  var carry6, carry7, carry8, carry9, carry10, carry11: int64
+  var carry12, carry13, carry14, carry15, carry16, carry17: int64
+  var carry18, carry19, carry20, carry21, carry22: int64
   let a0  = 0x1FFFFF'i64 and load3(a, 0)
   let a1  = 0x1FFFFF'i64 and (load4(a, 2) shr 5)
   let a2  = 0x1FFFFF'i64 and (load3(a, 5) shr 2)
@@ -775,262 +856,307 @@ func scMulAdd*(a: array[32, byte]; bSecret, cSecret: SecretScalar): array[32, by
   let a10 = 0x1FFFFF'i64 and (load3(a, 26) shr 2)
   let a11 = load4(a, 28) shr 7
 
-  let b0  = 0x1FFFFF'i64 and load3(b, 0)
-  let b1  = 0x1FFFFF'i64 and (load4(b, 2) shr 5)
-  let b2  = 0x1FFFFF'i64 and (load3(b, 5) shr 2)
-  let b3  = 0x1FFFFF'i64 and (load4(b, 7) shr 7)
-  let b4  = 0x1FFFFF'i64 and (load4(b, 10) shr 4)
-  let b5  = 0x1FFFFF'i64 and (load3(b, 13) shr 1)
-  let b6  = 0x1FFFFF'i64 and (load4(b, 15) shr 6)
-  let b7  = 0x1FFFFF'i64 and (load3(b, 18) shr 3)
-  let b8  = 0x1FFFFF'i64 and load3(b, 21)
-  let b9  = 0x1FFFFF'i64 and (load4(b, 23) shr 5)
-  let b10 = 0x1FFFFF'i64 and (load3(b, 26) shr 2)
-  let b11 = load4(b, 28) shr 7
+  b0  = 0x1FFFFF'i64 and load3(b, 0)
+  b1  = 0x1FFFFF'i64 and (load4(b, 2) shr 5)
+  b2  = 0x1FFFFF'i64 and (load3(b, 5) shr 2)
+  b3  = 0x1FFFFF'i64 and (load4(b, 7) shr 7)
+  b4  = 0x1FFFFF'i64 and (load4(b, 10) shr 4)
+  b5  = 0x1FFFFF'i64 and (load3(b, 13) shr 1)
+  b6  = 0x1FFFFF'i64 and (load4(b, 15) shr 6)
+  b7  = 0x1FFFFF'i64 and (load3(b, 18) shr 3)
+  b8  = 0x1FFFFF'i64 and load3(b, 21)
+  b9  = 0x1FFFFF'i64 and (load4(b, 23) shr 5)
+  b10 = 0x1FFFFF'i64 and (load3(b, 26) shr 2)
+  b11 = load4(b, 28) shr 7
 
-  let c0  = 0x1FFFFF'i64 and load3(c, 0)
-  let c1  = 0x1FFFFF'i64 and (load4(c, 2) shr 5)
-  let c2  = 0x1FFFFF'i64 and (load3(c, 5) shr 2)
-  let c3  = 0x1FFFFF'i64 and (load4(c, 7) shr 7)
-  let c4  = 0x1FFFFF'i64 and (load4(c, 10) shr 4)
-  let c5  = 0x1FFFFF'i64 and (load3(c, 13) shr 1)
-  let c6  = 0x1FFFFF'i64 and (load4(c, 15) shr 6)
-  let c7  = 0x1FFFFF'i64 and (load3(c, 18) shr 3)
-  let c8  = 0x1FFFFF'i64 and load3(c, 21)
-  let c9  = 0x1FFFFF'i64 and (load4(c, 23) shr 5)
-  let c10 = 0x1FFFFF'i64 and (load3(c, 26) shr 2)
-  let c11 = load4(c, 28) shr 7
+  c0  = 0x1FFFFF'i64 and load3(c, 0)
+  c1  = 0x1FFFFF'i64 and (load4(c, 2) shr 5)
+  c2  = 0x1FFFFF'i64 and (load3(c, 5) shr 2)
+  c3  = 0x1FFFFF'i64 and (load4(c, 7) shr 7)
+  c4  = 0x1FFFFF'i64 and (load4(c, 10) shr 4)
+  c5  = 0x1FFFFF'i64 and (load3(c, 13) shr 1)
+  c6  = 0x1FFFFF'i64 and (load4(c, 15) shr 6)
+  c7  = 0x1FFFFF'i64 and (load3(c, 18) shr 3)
+  c8  = 0x1FFFFF'i64 and load3(c, 21)
+  c9  = 0x1FFFFF'i64 and (load4(c, 23) shr 5)
+  c10 = 0x1FFFFF'i64 and (load3(c, 26) shr 2)
+  c11 = load4(c, 28) shr 7
 
-  var s0  = c0 + a0*b0
-  var s1  = c1 + a0*b1 + a1*b0
-  var s2  = c2 + a0*b2 + a1*b1 + a2*b0
-  var s3  = c3 + a0*b3 + a1*b2 + a2*b1 + a3*b0
-  var s4  = c4 + a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0
-  var s5  = c5 + a0*b5 + a1*b4 + a2*b3 + a3*b2 + a4*b1 + a5*b0
-  var s6  = c6 + a0*b6 + a1*b5 + a2*b4 + a3*b3 + a4*b2 + a5*b1 + a6*b0
-  var s7  = c7 + a0*b7 + a1*b6 + a2*b5 + a3*b4 + a4*b3 + a5*b2 + a6*b1 + a7*b0
-  var s8  = c8 + a0*b8 + a1*b7 + a2*b6 + a3*b5 + a4*b4 + a5*b3 + a6*b2 +
-            a7*b1 + a8*b0
-  var s9  = c9 + a0*b9 + a1*b8 + a2*b7 + a3*b6 + a4*b5 + a5*b4 + a6*b3 +
-            a7*b2 + a8*b1 + a9*b0
-  var s10 = c10 + a0*b10 + a1*b9 + a2*b8 + a3*b7 + a4*b6 + a5*b5 + a6*b4 +
-            a7*b3 + a8*b2 + a9*b1 + a10*b0
-  var s11 = c11 + a0*b11 + a1*b10 + a2*b9 + a3*b8 + a4*b7 + a5*b6 + a6*b5 +
-            a7*b4 + a8*b3 + a9*b2 + a10*b1 + a11*b0
-  var s12 = a1*b11 + a2*b10 + a3*b9 + a4*b8 + a5*b7 + a6*b6 + a7*b5 +
-            a8*b4 + a9*b3 + a10*b2 + a11*b1
-  var s13 = a2*b11 + a3*b10 + a4*b9 + a5*b8 + a6*b7 + a7*b6 + a8*b5 +
-            a9*b4 + a10*b3 + a11*b2
-  var s14 = a3*b11 + a4*b10 + a5*b9 + a6*b8 + a7*b7 + a8*b6 + a9*b5 +
-            a10*b4 + a11*b3
-  var s15 = a4*b11 + a5*b10 + a6*b9 + a7*b8 + a8*b7 + a9*b6 + a10*b5 + a11*b4
-  var s16 = a5*b11 + a6*b10 + a7*b9 + a8*b8 + a9*b7 + a10*b6 + a11*b5
-  var s17 = a6*b11 + a7*b10 + a8*b9 + a9*b8 + a10*b7 + a11*b6
-  var s18 = a7*b11 + a8*b10 + a9*b9 + a10*b8 + a11*b7
-  var s19 = a8*b11 + a9*b10 + a10*b9 + a11*b8
-  var s20 = a9*b11 + a10*b10 + a11*b9
-  var s21 = a10*b11 + a11*b10
-  var s22 = a11*b11
-  var s23 = 0'i64
+  ct.wipe(b)
+  ct.wipe(c)
 
-  var carry0  = (s0  + (1'i64 shl 20)) shr 21; s1  += carry0;  s0  -= carry0 shl 21
-  var carry2  = (s2  + (1'i64 shl 20)) shr 21; s3  += carry2;  s2  -= carry2 shl 21
-  var carry4  = (s4  + (1'i64 shl 20)) shr 21; s5  += carry4;  s4  -= carry4 shl 21
-  var carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
-  var carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
-  var carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
-  var carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
-  var carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
-  var carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
-  var carry18 = (s18 + (1'i64 shl 20)) shr 21; s19 += carry18; s18 -= carry18 shl 21
-  var carry20 = (s20 + (1'i64 shl 20)) shr 21; s21 += carry20; s20 -= carry20 shl 21
-  var carry22 = (s22 + (1'i64 shl 20)) shr 21; s23 += carry22; s22 -= carry22 shl 21
+  var s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11: int64
+  var s12, s13, s14, s15, s16, s17, s18, s19, s20, s21, s22, s23: int64
 
-  var carry1  = (s1  + (1'i64 shl 20)) shr 21; s2  += carry1;  s1  -= carry1 shl 21
-  var carry3  = (s3  + (1'i64 shl 20)) shr 21; s4  += carry3;  s3  -= carry3 shl 21
-  var carry5  = (s5  + (1'i64 shl 20)) shr 21; s6  += carry5;  s5  -= carry5 shl 21
-  var carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
-  var carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
-  var carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
-  var carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
-  var carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
-  var carry17 = (s17 + (1'i64 shl 20)) shr 21; s18 += carry17; s17 -= carry17 shl 21
-  var carry19 = (s19 + (1'i64 shl 20)) shr 21; s20 += carry19; s19 -= carry19 shl 21
-  var carry21 = (s21 + (1'i64 shl 20)) shr 21; s22 += carry21; s21 -= carry21 shl 21
+  try:
+    s0  = c0 + a0*b0
+    s1  = c1 + a0*b1 + a1*b0
+    s2  = c2 + a0*b2 + a1*b1 + a2*b0
+    s3  = c3 + a0*b3 + a1*b2 + a2*b1 + a3*b0
+    s4  = c4 + a0*b4 + a1*b3 + a2*b2 + a3*b1 + a4*b0
+    s5  = c5 + a0*b5 + a1*b4 + a2*b3 + a3*b2 + a4*b1 + a5*b0
+    s6  = c6 + a0*b6 + a1*b5 + a2*b4 + a3*b3 + a4*b2 + a5*b1 + a6*b0
+    s7  = c7 + a0*b7 + a1*b6 + a2*b5 + a3*b4 + a4*b3 + a5*b2 + a6*b1 + a7*b0
+    s8  = c8 + a0*b8 + a1*b7 + a2*b6 + a3*b5 + a4*b4 + a5*b3 + a6*b2 +
+              a7*b1 + a8*b0
+    s9  = c9 + a0*b9 + a1*b8 + a2*b7 + a3*b6 + a4*b5 + a5*b4 + a6*b3 +
+              a7*b2 + a8*b1 + a9*b0
+    s10 = c10 + a0*b10 + a1*b9 + a2*b8 + a3*b7 + a4*b6 + a5*b5 + a6*b4 +
+              a7*b3 + a8*b2 + a9*b1 + a10*b0
+    s11 = c11 + a0*b11 + a1*b10 + a2*b9 + a3*b8 + a4*b7 + a5*b6 + a6*b5 +
+              a7*b4 + a8*b3 + a9*b2 + a10*b1 + a11*b0
+    s12 = a1*b11 + a2*b10 + a3*b9 + a4*b8 + a5*b7 + a6*b6 + a7*b5 +
+              a8*b4 + a9*b3 + a10*b2 + a11*b1
+    s13 = a2*b11 + a3*b10 + a4*b9 + a5*b8 + a6*b7 + a7*b6 + a8*b5 +
+              a9*b4 + a10*b3 + a11*b2
+    s14 = a3*b11 + a4*b10 + a5*b9 + a6*b8 + a7*b7 + a8*b6 + a9*b5 +
+              a10*b4 + a11*b3
+    s15 = a4*b11 + a5*b10 + a6*b9 + a7*b8 + a8*b7 + a9*b6 + a10*b5 + a11*b4
+    s16 = a5*b11 + a6*b10 + a7*b9 + a8*b8 + a9*b7 + a10*b6 + a11*b5
+    s17 = a6*b11 + a7*b10 + a8*b9 + a9*b8 + a10*b7 + a11*b6
+    s18 = a7*b11 + a8*b10 + a9*b9 + a10*b8 + a11*b7
+    s19 = a8*b11 + a9*b10 + a10*b9 + a11*b8
+    s20 = a9*b11 + a10*b10 + a11*b9
+    s21 = a10*b11 + a11*b10
+    s22 = a11*b11
+    s23 = 0'i64
 
-  s11 += s23 * 666643
-  s12 += s23 * 470296
-  s13 += s23 * 654183
-  s14 -= s23 * 997805
-  s15 += s23 * 136657
-  s16 -= s23 * 683901
-  s23 = 0
+    # b0..b11/c0..c11's only consumers are the s0..s23 products above --
+    # wipe them here, right after last use, same placement rule as b/c
+    # and s0..s23 elsewhere in this function (RFC finding R15).
+    ct.wipe(b0);  ct.wipe(b1);  ct.wipe(b2);  ct.wipe(b3)
+    ct.wipe(b4);  ct.wipe(b5);  ct.wipe(b6);  ct.wipe(b7)
+    ct.wipe(b8);  ct.wipe(b9);  ct.wipe(b10); ct.wipe(b11)
+    ct.wipe(c0);  ct.wipe(c1);  ct.wipe(c2);  ct.wipe(c3)
+    ct.wipe(c4);  ct.wipe(c5);  ct.wipe(c6);  ct.wipe(c7)
+    ct.wipe(c8);  ct.wipe(c9);  ct.wipe(c10); ct.wipe(c11)
 
-  s10 += s22 * 666643
-  s11 += s22 * 470296
-  s12 += s22 * 654183
-  s13 -= s22 * 997805
-  s14 += s22 * 136657
-  s15 -= s22 * 683901
-  s22 = 0
+    carry0  = (s0  + (1'i64 shl 20)) shr 21; s1  += carry0;  s0  -= carry0 shl 21
+    carry2  = (s2  + (1'i64 shl 20)) shr 21; s3  += carry2;  s2  -= carry2 shl 21
+    carry4  = (s4  + (1'i64 shl 20)) shr 21; s5  += carry4;  s4  -= carry4 shl 21
+    carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
+    carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
+    carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
+    carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
+    carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
+    carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
+    carry18 = (s18 + (1'i64 shl 20)) shr 21; s19 += carry18; s18 -= carry18 shl 21
+    carry20 = (s20 + (1'i64 shl 20)) shr 21; s21 += carry20; s20 -= carry20 shl 21
+    carry22 = (s22 + (1'i64 shl 20)) shr 21; s23 += carry22; s22 -= carry22 shl 21
 
-  s9 += s21 * 666643
-  s10 += s21 * 470296
-  s11 += s21 * 654183
-  s12 -= s21 * 997805
-  s13 += s21 * 136657
-  s14 -= s21 * 683901
-  s21 = 0
+    carry1  = (s1  + (1'i64 shl 20)) shr 21; s2  += carry1;  s1  -= carry1 shl 21
+    carry3  = (s3  + (1'i64 shl 20)) shr 21; s4  += carry3;  s3  -= carry3 shl 21
+    carry5  = (s5  + (1'i64 shl 20)) shr 21; s6  += carry5;  s5  -= carry5 shl 21
+    carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
+    carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
+    carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
+    carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
+    carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
+    carry17 = (s17 + (1'i64 shl 20)) shr 21; s18 += carry17; s17 -= carry17 shl 21
+    carry19 = (s19 + (1'i64 shl 20)) shr 21; s20 += carry19; s19 -= carry19 shl 21
+    carry21 = (s21 + (1'i64 shl 20)) shr 21; s22 += carry21; s21 -= carry21 shl 21
 
-  s8 += s20 * 666643
-  s9 += s20 * 470296
-  s10 += s20 * 654183
-  s11 -= s20 * 997805
-  s12 += s20 * 136657
-  s13 -= s20 * 683901
-  s20 = 0
+    s11 += s23 * 666643
+    s12 += s23 * 470296
+    s13 += s23 * 654183
+    s14 -= s23 * 997805
+    s15 += s23 * 136657
+    s16 -= s23 * 683901
+    s23 = 0
 
-  s7 += s19 * 666643
-  s8 += s19 * 470296
-  s9 += s19 * 654183
-  s10 -= s19 * 997805
-  s11 += s19 * 136657
-  s12 -= s19 * 683901
-  s19 = 0
+    s10 += s22 * 666643
+    s11 += s22 * 470296
+    s12 += s22 * 654183
+    s13 -= s22 * 997805
+    s14 += s22 * 136657
+    s15 -= s22 * 683901
+    s22 = 0
 
-  s6 += s18 * 666643
-  s7 += s18 * 470296
-  s8 += s18 * 654183
-  s9 -= s18 * 997805
-  s10 += s18 * 136657
-  s11 -= s18 * 683901
-  s18 = 0
+    s9 += s21 * 666643
+    s10 += s21 * 470296
+    s11 += s21 * 654183
+    s12 -= s21 * 997805
+    s13 += s21 * 136657
+    s14 -= s21 * 683901
+    s21 = 0
 
-  carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
-  carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
-  carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
-  carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
-  carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
-  carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
+    s8 += s20 * 666643
+    s9 += s20 * 470296
+    s10 += s20 * 654183
+    s11 -= s20 * 997805
+    s12 += s20 * 136657
+    s13 -= s20 * 683901
+    s20 = 0
 
-  carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
-  carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
-  carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
-  carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
-  carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
+    s7 += s19 * 666643
+    s8 += s19 * 470296
+    s9 += s19 * 654183
+    s10 -= s19 * 997805
+    s11 += s19 * 136657
+    s12 -= s19 * 683901
+    s19 = 0
 
-  s5 += s17 * 666643
-  s6 += s17 * 470296
-  s7 += s17 * 654183
-  s8 -= s17 * 997805
-  s9 += s17 * 136657
-  s10 -= s17 * 683901
-  s17 = 0
+    s6 += s18 * 666643
+    s7 += s18 * 470296
+    s8 += s18 * 654183
+    s9 -= s18 * 997805
+    s10 += s18 * 136657
+    s11 -= s18 * 683901
+    s18 = 0
 
-  s4 += s16 * 666643
-  s5 += s16 * 470296
-  s6 += s16 * 654183
-  s7 -= s16 * 997805
-  s8 += s16 * 136657
-  s9 -= s16 * 683901
-  s16 = 0
+    carry6  = (s6  + (1'i64 shl 20)) shr 21; s7  += carry6;  s6  -= carry6 shl 21
+    carry8  = (s8  + (1'i64 shl 20)) shr 21; s9  += carry8;  s8  -= carry8 shl 21
+    carry10 = (s10 + (1'i64 shl 20)) shr 21; s11 += carry10; s10 -= carry10 shl 21
+    carry12 = (s12 + (1'i64 shl 20)) shr 21; s13 += carry12; s12 -= carry12 shl 21
+    carry14 = (s14 + (1'i64 shl 20)) shr 21; s15 += carry14; s14 -= carry14 shl 21
+    carry16 = (s16 + (1'i64 shl 20)) shr 21; s17 += carry16; s16 -= carry16 shl 21
 
-  s3 += s15 * 666643
-  s4 += s15 * 470296
-  s5 += s15 * 654183
-  s6 -= s15 * 997805
-  s7 += s15 * 136657
-  s8 -= s15 * 683901
-  s15 = 0
+    carry7  = (s7  + (1'i64 shl 20)) shr 21; s8  += carry7;  s7  -= carry7 shl 21
+    carry9  = (s9  + (1'i64 shl 20)) shr 21; s10 += carry9;  s9  -= carry9 shl 21
+    carry11 = (s11 + (1'i64 shl 20)) shr 21; s12 += carry11; s11 -= carry11 shl 21
+    carry13 = (s13 + (1'i64 shl 20)) shr 21; s14 += carry13; s13 -= carry13 shl 21
+    carry15 = (s15 + (1'i64 shl 20)) shr 21; s16 += carry15; s15 -= carry15 shl 21
 
-  s2 += s14 * 666643
-  s3 += s14 * 470296
-  s4 += s14 * 654183
-  s5 -= s14 * 997805
-  s6 += s14 * 136657
-  s7 -= s14 * 683901
-  s14 = 0
+    s5 += s17 * 666643
+    s6 += s17 * 470296
+    s7 += s17 * 654183
+    s8 -= s17 * 997805
+    s9 += s17 * 136657
+    s10 -= s17 * 683901
+    s17 = 0
 
-  s1 += s13 * 666643
-  s2 += s13 * 470296
-  s3 += s13 * 654183
-  s4 -= s13 * 997805
-  s5 += s13 * 136657
-  s6 -= s13 * 683901
-  s13 = 0
+    s4 += s16 * 666643
+    s5 += s16 * 470296
+    s6 += s16 * 654183
+    s7 -= s16 * 997805
+    s8 += s16 * 136657
+    s9 -= s16 * 683901
+    s16 = 0
 
-  s0 += s12 * 666643
-  s1 += s12 * 470296
-  s2 += s12 * 654183
-  s3 -= s12 * 997805
-  s4 += s12 * 136657
-  s5 -= s12 * 683901
-  s12 = 0
+    s3 += s15 * 666643
+    s4 += s15 * 470296
+    s5 += s15 * 654183
+    s6 -= s15 * 997805
+    s7 += s15 * 136657
+    s8 -= s15 * 683901
+    s15 = 0
 
-  carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
-  carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
-  carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
-  carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
-  carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
-  carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
-  carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
-  carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
-  carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
-  carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
-  carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
-  carry11 = s11 shr 21; s12 += carry11; s11 -= carry11 shl 21
+    s2 += s14 * 666643
+    s3 += s14 * 470296
+    s4 += s14 * 654183
+    s5 -= s14 * 997805
+    s6 += s14 * 136657
+    s7 -= s14 * 683901
+    s14 = 0
 
-  s0 += s12 * 666643
-  s1 += s12 * 470296
-  s2 += s12 * 654183
-  s3 -= s12 * 997805
-  s4 += s12 * 136657
-  s5 -= s12 * 683901
-  s12 = 0
+    s1 += s13 * 666643
+    s2 += s13 * 470296
+    s3 += s13 * 654183
+    s4 -= s13 * 997805
+    s5 += s13 * 136657
+    s6 -= s13 * 683901
+    s13 = 0
 
-  carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
-  carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
-  carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
-  carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
-  carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
-  carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
-  carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
-  carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
-  carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
-  carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
-  carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
+    s0 += s12 * 666643
+    s1 += s12 * 470296
+    s2 += s12 * 654183
+    s3 -= s12 * 997805
+    s4 += s12 * 136657
+    s5 -= s12 * 683901
+    s12 = 0
 
-  result[ 0] = byte(s0 shr 0)
-  result[ 1] = byte(s0 shr 8)
-  result[ 2] = byte((s0 shr 16) or (s1 shl 5))
-  result[ 3] = byte(s1 shr 3)
-  result[ 4] = byte(s1 shr 11)
-  result[ 5] = byte((s1 shr 19) or (s2 shl 2))
-  result[ 6] = byte(s2 shr 6)
-  result[ 7] = byte((s2 shr 14) or (s3 shl 7))
-  result[ 8] = byte(s3 shr 1)
-  result[ 9] = byte(s3 shr 9)
-  result[10] = byte((s3 shr 17) or (s4 shl 4))
-  result[11] = byte(s4 shr 4)
-  result[12] = byte(s4 shr 12)
-  result[13] = byte((s4 shr 20) or (s5 shl 1))
-  result[14] = byte(s5 shr 7)
-  result[15] = byte((s5 shr 15) or (s6 shl 6))
-  result[16] = byte(s6 shr 2)
-  result[17] = byte(s6 shr 10)
-  result[18] = byte((s6 shr 18) or (s7 shl 3))
-  result[19] = byte(s7 shr 5)
-  result[20] = byte(s7 shr 13)
-  result[21] = byte(s8 shr 0)
-  result[22] = byte(s8 shr 8)
-  result[23] = byte((s8 shr 16) or (s9 shl 5))
-  result[24] = byte(s9 shr 3)
-  result[25] = byte(s9 shr 11)
-  result[26] = byte((s9 shr 19) or (s10 shl 2))
-  result[27] = byte(s10 shr 6)
-  result[28] = byte((s10 shr 14) or (s11 shl 7))
-  result[29] = byte(s11 shr 1)
-  result[30] = byte(s11 shr 9)
-  result[31] = byte(s11 shr 17)
+    carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
+    carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
+    carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
+    carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
+    carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
+    carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
+    carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
+    carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
+    carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
+    carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
+    carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
+    carry11 = s11 shr 21; s12 += carry11; s11 -= carry11 shl 21
+
+    s0 += s12 * 666643
+    s1 += s12 * 470296
+    s2 += s12 * 654183
+    s3 -= s12 * 997805
+    s4 += s12 * 136657
+    s5 -= s12 * 683901
+    s12 = 0
+
+    carry0 = s0 shr 21; s1 += carry0; s0 -= carry0 shl 21
+    carry1 = s1 shr 21; s2 += carry1; s1 -= carry1 shl 21
+    carry2 = s2 shr 21; s3 += carry2; s2 -= carry2 shl 21
+    carry3 = s3 shr 21; s4 += carry3; s3 -= carry3 shl 21
+    carry4 = s4 shr 21; s5 += carry4; s4 -= carry4 shl 21
+    carry5 = s5 shr 21; s6 += carry5; s5 -= carry5 shl 21
+    carry6 = s6 shr 21; s7 += carry6; s6 -= carry6 shl 21
+    carry7 = s7 shr 21; s8 += carry7; s7 -= carry7 shl 21
+    carry8 = s8 shr 21; s9 += carry8; s8 -= carry8 shl 21
+    carry9 = s9 shr 21; s10 += carry9; s9 -= carry9 shl 21
+    carry10 = s10 shr 21; s11 += carry10; s10 -= carry10 shl 21
+
+    result[ 0] = byte(s0 shr 0)
+    result[ 1] = byte(s0 shr 8)
+    result[ 2] = byte((s0 shr 16) or (s1 shl 5))
+    result[ 3] = byte(s1 shr 3)
+    result[ 4] = byte(s1 shr 11)
+    result[ 5] = byte((s1 shr 19) or (s2 shl 2))
+    result[ 6] = byte(s2 shr 6)
+    result[ 7] = byte((s2 shr 14) or (s3 shl 7))
+    result[ 8] = byte(s3 shr 1)
+    result[ 9] = byte(s3 shr 9)
+    result[10] = byte((s3 shr 17) or (s4 shl 4))
+    result[11] = byte(s4 shr 4)
+    result[12] = byte(s4 shr 12)
+    result[13] = byte((s4 shr 20) or (s5 shl 1))
+    result[14] = byte(s5 shr 7)
+    result[15] = byte((s5 shr 15) or (s6 shl 6))
+    result[16] = byte(s6 shr 2)
+    result[17] = byte(s6 shr 10)
+    result[18] = byte((s6 shr 18) or (s7 shl 3))
+    result[19] = byte(s7 shr 5)
+    result[20] = byte(s7 shr 13)
+    result[21] = byte(s8 shr 0)
+    result[22] = byte(s8 shr 8)
+    result[23] = byte((s8 shr 16) or (s9 shl 5))
+    result[24] = byte(s9 shr 3)
+    result[25] = byte(s9 shr 11)
+    result[26] = byte((s9 shr 19) or (s10 shl 2))
+    result[27] = byte(s10 shr 6)
+    result[28] = byte((s10 shr 14) or (s11 shl 7))
+    result[29] = byte(s11 shr 1)
+    result[30] = byte(s11 shr 9)
+    result[31] = byte(s11 shr 17)
+
+    ct.wipe(s0);  ct.wipe(s1);  ct.wipe(s2);  ct.wipe(s3)
+    ct.wipe(s4);  ct.wipe(s5);  ct.wipe(s6);  ct.wipe(s7)
+    ct.wipe(s8);  ct.wipe(s9);  ct.wipe(s10); ct.wipe(s11)
+    ct.wipe(s12); ct.wipe(s13); ct.wipe(s14); ct.wipe(s15)
+    ct.wipe(s16); ct.wipe(s17); ct.wipe(s18); ct.wipe(s19)
+    ct.wipe(s20); ct.wipe(s21); ct.wipe(s22); ct.wipe(s23)
+  finally:
+    ct.wipe(b)
+    ct.wipe(c)
+    ct.wipe(b0);  ct.wipe(b1);  ct.wipe(b2);  ct.wipe(b3)
+    ct.wipe(b4);  ct.wipe(b5);  ct.wipe(b6);  ct.wipe(b7)
+    ct.wipe(b8);  ct.wipe(b9);  ct.wipe(b10); ct.wipe(b11)
+    ct.wipe(c0);  ct.wipe(c1);  ct.wipe(c2);  ct.wipe(c3)
+    ct.wipe(c4);  ct.wipe(c5);  ct.wipe(c6);  ct.wipe(c7)
+    ct.wipe(c8);  ct.wipe(c9);  ct.wipe(c10); ct.wipe(c11)
+    ct.wipe(s0);  ct.wipe(s1);  ct.wipe(s2);  ct.wipe(s3)
+    ct.wipe(s4);  ct.wipe(s5);  ct.wipe(s6);  ct.wipe(s7)
+    ct.wipe(s8);  ct.wipe(s9);  ct.wipe(s10); ct.wipe(s11)
+    ct.wipe(s12); ct.wipe(s13); ct.wipe(s14); ct.wipe(s15)
+    ct.wipe(s16); ct.wipe(s17); ct.wipe(s18); ct.wipe(s19)
+    ct.wipe(s20); ct.wipe(s21); ct.wipe(s22); ct.wipe(s23)
+    ct.wipe(carry0);  ct.wipe(carry1);  ct.wipe(carry2);  ct.wipe(carry3)
+    ct.wipe(carry4);  ct.wipe(carry5);  ct.wipe(carry6);  ct.wipe(carry7)
+    ct.wipe(carry8);  ct.wipe(carry9);  ct.wipe(carry10); ct.wipe(carry11)
+    ct.wipe(carry12); ct.wipe(carry13); ct.wipe(carry14); ct.wipe(carry15)
+    ct.wipe(carry16); ct.wipe(carry17); ct.wipe(carry18); ct.wipe(carry19)
+    ct.wipe(carry20); ct.wipe(carry21); ct.wipe(carry22)
 
 {.pop.}

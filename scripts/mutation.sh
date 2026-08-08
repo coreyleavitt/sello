@@ -73,6 +73,30 @@ source "$(dirname "$0")/lib/unit-test-files.sh"
 source "$(dirname "$0")/lib/milpa-preflight.sh"
 milpa_preflight
 
+# Loud degraded-suite warning (mirrors scripts/test.sh's own per-file
+# SKIPPED banner) -- unit-test-files.sh silently drops the four
+# test_properties_*.nim files from unit_test_files whenever _deps/proptest
+# is absent (a fresh clone's plain `milpa fetch`, with no
+# `--features proptest`, never populates it). scripts/test.sh compensates
+# by echoing a SKIPPED line per omitted file so that's visible in its own
+# output; this script has no equivalent per-file echo (the omitted files
+# never even reach run_mutation.py's argv), so without this banner a
+# mutation run on such a host would report an equally "clean" kill rate
+# off a materially weaker suite with nothing flagging the degradation.
+if [[ ${#skipped_property_files[@]} -gt 0 ]]; then
+  echo "=================================================================="
+  echo "WARNING: proptest not fetched (_deps/proptest absent) -- the"
+  echo "following property-test files are EXCLUDED from this mutation run:"
+  for f in "${skipped_property_files[@]}"; do
+    echo "  - $f"
+  done
+  echo ""
+  echo "The kill-rate result below reflects a REDUCED suite, missing all"
+  echo "property-based coverage those files provide. For a full-strength"
+  echo "mutation run, fetch proptest first: milpa fetch --features proptest"
+  echo "=================================================================="
+fi
+
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
 podman run --rm \
