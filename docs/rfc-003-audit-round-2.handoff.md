@@ -214,18 +214,29 @@
 ## commit; tags v0.1.0/v0.2.0/v0.3.0@28700a3). Remaining next step for Corey: the ONE
 ## combined /code-review over RFC-002 + RFC-003 + round-3 scope.
 ##
-## SIDE-QUEST IN FLIGHT (2026-08-08): Corey asked whether the four documented symex
-## limitations (L1 nested-int32-checked-arith walker crash svBV64/bv32 + suppression
-## knobs ineffective; L2 tuple-return nested callee unwired; L3 branch-merged int32
-## width mismatch; L4 negBV on -int32(bool)) are engine bugs to report upstream, and
-## to first re-test them against proptest release 0.3.2 (pinned _deps copy is older:
-## ref main, nimble 0.1.0). A probe agent is running: minimal repros in the session
-## scratchpad (repros/l1-l4.nim), validated against the PINNED copy first, then run
-## against a fresh 0.3.2 clone (scratchpad/proptest-032 + nim-z3/softlink deps) via a
-## bmc.sh-derived container invocation. Authoritative limitation descriptions:
-## tests/verify/symex_recode.nim (L1/L2) and symex_mask.nim (L3/L4) module docs.
-## On result: report per-limitation STILL PRESENT / CHANGED / FIXED to Corey and
-## offer drafted upstream issues for whatever remains. Sello repo/_deps untouched.
+## SIDE-QUEST RESOLVED (2026-08-08): the four documented symex limitations were
+## re-tested against proptest v0.3.2 (58eb11c) with repros validated on the pinned
+## copy first. Verdict: NONE fixed — all root causes open upstream (pickaxe for
+## bv32/svBV64/negBV/overflowCond empty). L1/L3 (one shared width-confusion root
+## cause in lowerArith/overflowCond) and the L1 crash now surface as classified
+## sxUnknown/weInternalWalkerFault instead of uncaught Defects (walker v64 a0bfeff);
+## L2 degrades as feUnsupportedOp; L4 unchanged. Sello's workarounds in
+## tests/verify/symex_recode.nim + symex_mask.nim remain necessary on 0.3.2. NEW
+## empirical refinement: L1's true trigger is CHAINED nested int32 calls (>=2-3,
+## carry threaded) — a single nested call is clean; symex_recode.nim's module doc
+## states the broader claim and could be tightened (minor, not yet done). A
+## console handoff doc with three upstream issue write-ups (L1+L3 combined, L2, L4)
+## + runnable repros was delivered to Corey 2026-08-08; repro files live in the
+## session scratchpad (repros/l1.nim, l2b.nim, l3.nim, l4.nim, l1_battery*.nim) —
+## scratchpad is session-scoped, so copy them out before closing if wanted.
+##
+## CURRENT STATE (2026-08-08): all implementation work complete through v0.3.0 +
+## round-3 fix batches. Awaiting Corey's pick of next step, options presented:
+## (1) the combined RFC-002+003+round-3 /code-review (recommended first), then
+## (2) batch verification (RFC-004 candidate) or Ristretto255 (the brief's last
+## undelivered chapter; feSqrtRatioVartime extension point ready), and optionally
+## (3) publish logistics (push repo + tags, nimble registry). Resume: ask Corey
+## which, or `/code-review` per the recorded recommendation.
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
