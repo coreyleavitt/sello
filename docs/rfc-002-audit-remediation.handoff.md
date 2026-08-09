@@ -1,10 +1,12 @@
 # RFC-002 audit remediation — handoff
 
-- **Stage:** 4 (review) — implementation complete. All five slices land; RFC approved by
-  Corey 2026-08-06 with all decisions resolved (no architect rounds needed — the RFC *is*
-  the output of a three-lens architect audit, and Corey approved the full scope).
-- **Resume:** `/code-review docs/rfc-002-audit-remediation.md` (stage 4; awaiting Corey to
-  invoke it). All five slices are done and verified by the control loop 2026-08-07 —
+- **Stage:** CLOSED — implementation complete, and the stage-4 review ran 2026-08-08 as
+  the ONE combined review over RFC-002 + RFC-003 + round-3 scope (per the recorded
+  near-total-file-overlap recommendation). Two fix rounds + two re-reviews to the floor;
+  all actionable findings closed; remediation committed as `d1133e2`. The full review
+  ledger lives in `rfc-003-audit-round-2.handoff.md`, not here.
+- **Resume:** nothing — this RFC is closed. Historical record of the implementation
+  below. All five slices were done and verified by the control loop 2026-08-07 —
   master history `ecdb8e6` (slice 4) → `8449b06` (3) → `1458abd` (5) → `72610d9` (2) →
   `02e0005` (1), working tree clean; see the slice list below for what each changed, its
   judgment calls, and its gate results. Nothing left to implement for this RFC; this is a
@@ -271,6 +273,7 @@
 - Mutation testing is sello-side patch-based (proptest mutation v1 is int->int only).
 - Batch verification: disclose as considered/deferred now; feature is RFC-003 candidate.
 
-## Review ledger (stage 4 — empty until RFC-002 review)
-| id | sev | finding | status | proof / reason |
-|----|-----|---------|--------|----------------|
+## Review ledger (stage 4)
+The stage-4 review ran 2026-08-08 as the combined RFC-002 + RFC-003 + round-3 review;
+its ledger (R1–R18, floor reached, remediation committed `d1133e2`) is maintained in
+`rfc-003-audit-round-2.handoff.md` — one ledger for one review, not duplicated here.

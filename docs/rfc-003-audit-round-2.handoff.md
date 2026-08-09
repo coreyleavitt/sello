@@ -1,14 +1,19 @@
 # RFC-003 audit round 2 — handoff
 
-- **Stage:** implementation COMPLETE — all six slices landed 2026-08-07 under the
-  slice-grind `/loop` (each implemented by a sonnet subagent via TDD, gates run
-  synchronously in-agent per the RFC-002 ops lesson; control loop verified, committed,
-  and kept this doc current). Version bumped to 0.3.0. Working tree clean; this is a
-  safe `/compact` or `/clear` point.
-- **Resume:** the combined stage-4 review both RFCs are waiting on — ONE
-  `/code-review` over RFC-002 + RFC-003 scope together (recorded recommendation in
-  both RFCs: near-total file overlap, two sequential reviews would double-handle the
-  same code) — awaiting Corey to invoke it.
+- **Stage:** CLOSED — all six slices landed 2026-08-07 under the slice-grind `/loop`,
+  the round-3 fix-now batches (A/B/Z/C) landed 2026-08-07/08, and the combined stage-4
+  review (ONE `/code-review` over RFC-002 + RFC-003 + round-3 scope, per the recorded
+  near-total-file-overlap recommendation) ran 2026-08-08: two fix rounds + two
+  re-reviews to the floor, all actionable findings (R1–R17) closed, remediation
+  committed as `d1133e2`. Version 0.3.0; tags v0.1.0–v0.3.0 exist (v0.3.0 @ `28700a3`
+  — the review-remediation and handoff commits sit after it, currently untagged).
+- **Resume:** nothing open in this RFC — working tree clean, safe `/clear` point.
+  Next-step options for Corey: (1) publish logistics (push repo + tags, nimble
+  registry; decide whether the post-v0.3.0 commits warrant a v0.3.1 tag),
+  (2) Ristretto255 as RFC-004 (the brief's last undelivered chapter;
+  `feSqrtRatioVartime` extension point ready) or batch verification, (3) further
+  validation depth (field-core machine-checked proofs, dataflow CT checking,
+  CI/platform matrix).
 - **Slice-grind ops note for future RFCs:** two of the six subagents initially stalled
   by ending their turn to "wait" on a background task (the exact RFC-002 ops-lesson
   failure mode) — one needed a resume nudge; later slice prompts stated the
@@ -19,9 +24,9 @@
   the control loop caught it against the table itself and corrected doc + commit
   message + this doc before the final commit — trust tables over prose when they
   disagree.
-- **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`), stage-4 review
-  NOT yet run; RFC-003 records the recommendation to run ONE combined `/code-review` over
-  both RFCs' scope after these slices land.
+- **Prior RFC state:** RFC-002 fully implemented (`ecdb8e6` → `02e0005`); its stage-4
+  review was folded into the combined review recorded in the Stage line above and the
+  review ledger below (both RFCs' handoffs now point at that one ledger).
 
 ## Slices
 - [x] 1 src/ design coherence — all five items landed (subject: "RFC-003 slice 1: src
@@ -212,7 +217,8 @@
 ## noisiest and quietest disclosed environments. ROUND-3 FIX-NOW WORK IS FULLY
 ## COMPLETE (commits d36078b A, 78508a4 B, a2f4f7e Z, c2c5033 C + ct-results closing
 ## commit; tags v0.1.0/v0.2.0/v0.3.0@28700a3). Remaining next step for Corey: the ONE
-## combined /code-review over RFC-002 + RFC-003 + round-3 scope.
+## combined /code-review over RFC-002 + RFC-003 + round-3 scope. [Since done — see
+## the review ledger below; remediation committed d1133e2.]
 ##
 ## SIDE-QUEST RESOLVED (2026-08-08): the four documented symex limitations were
 ## re-tested against proptest v0.3.2 (58eb11c) with repros validated on the pinned
@@ -230,13 +236,12 @@
 ## session scratchpad (repros/l1.nim, l2b.nim, l3.nim, l4.nim, l1_battery*.nim) —
 ## scratchpad is session-scoped, so copy them out before closing if wanted.
 ##
-## CURRENT STATE (2026-08-08): all implementation work complete through v0.3.0 +
-## round-3 fix batches. Awaiting Corey's pick of next step, options presented:
-## (1) the combined RFC-002+003+round-3 /code-review (recommended first), then
-## (2) batch verification (RFC-004 candidate) or Ristretto255 (the brief's last
-## undelivered chapter; feSqrtRatioVartime extension point ready), and optionally
-## (3) publish logistics (push repo + tags, nimble registry). Resume: ask Corey
-## which, or `/code-review` per the recorded recommendation.
+## CURRENT STATE (2026-08-08, superseded): option (1), the combined
+## RFC-002+003+round-3 /code-review, was invoked, run to the floor, and its
+## remediation committed (d1133e2) — see the review ledger below. The live
+## statement of remaining options is the Stage/Resume block at the top of this
+## doc (publish logistics; Ristretto255 or batch verification as RFC-004;
+## further validation depth).
 ## Original audit summary (for context) below:
 Headline (control-loop-verified where load-bearing): (1) differential testing vs the
 libsodium backend is unexploited — Wycheproof/fuzz never run through backend_sodium
@@ -315,8 +320,8 @@ construction), + 3 residuals (callee Fe temps ECDLP-hard; recode carry lossy+bel
 R17 except-breadth theoretical). ALL actionable findings closed.
 Final `scripts/test.sh` (round-2 fix agent, on the complete combined tree): full green — all
 unit/vector/property suites pass, both new negative fixtures rejected correctly.
-NOT COMMITTED — awaiting Corey's approval + commit-shape decision.
-Resume: commit the remediation (proposed: one commit, whole review-fix arc) once approved.
+COMMITTED 2026-08-08 as `d1133e2` (one commit, whole review-fix arc, per Corey's
+approval). The review is fully closed; nothing outstanding from this ledger.
 
 Verified-clean (reviewers explicitly cleared): RFC 8032/7748 conformance (strict decode,
 canonicity, clamping, all-zero X25519 handling), SecretScalar/wire-type boundaries (no
@@ -327,5 +332,6 @@ the RIGHT diagnostic, Wycheproof loader count-asserts, symex proof-scope discipl
 unit_test_files matching disk. README examples/vector counts/tag SHAs/rename cleanliness all
 cross-checked accurate.
 
-Resume: findings presented to Corey 2026-08-08, awaiting fix-mandate approval. Recommended
-mandate: fix R1–R7 (through Medium); R8–R14 batchable/Low.
+(Historical: findings were presented 2026-08-08; Corey's mandate was fix-through-Medium,
+then "fix lows now" — all applied, floor reached, committed as `d1133e2`. See FLOOR
+REACHED above; nothing here awaits action.)
