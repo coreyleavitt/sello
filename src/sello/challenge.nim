@@ -24,6 +24,10 @@
 import nimcrypto/sha2
 import sello/scalar
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 func challenge*(R, A: array[32, byte]; msg: openArray[byte]): array[32, byte] =
   ## k = SHA-512(R || A || msg) mod L (RFC 8032 §5.1.6 step 4 / §5.1.7 step
   ## 2) -- the challenge hash shared by verify and signDetached. One
@@ -39,3 +43,5 @@ func challenge*(R, A: array[32, byte]; msg: openArray[byte]): array[32, byte] =
   var k64: array[64, byte]
   sha.finish(k64)
   scReduce(result, k64)
+
+{.pop.}

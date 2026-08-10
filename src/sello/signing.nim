@@ -78,7 +78,11 @@
 ##   fresh-secret constructors across the public surface that share this
 ##   fail-fast policy (`keypair()`; `x25519.x25519StaticSecret`,
 ##   `x25519EphemeralSecret`, `x25519StaticPair`, `x25519EphemeralPair` —
-##   see `x25519.nim`). Nothing else in the pure-Nim public surface raises.
+##   see `x25519.nim`). Nothing else in the pure-Nim public surface raises
+##   -- and that is a declared, compiler-checked effect now (`{.push
+##   raises: [].}`/`gcsafe` over every public module, with explicit
+##   `{.raises: [OSError].}` on the five constructors; janus consumer
+##   finding 3), not a doc-comment promise.
 ##   Under `-d:selloLibsodium`, `keypair(seed)`/`keypair()`/`sign` can also
 ##   raise `SodiumInitError` (`private/backend_sodium.nim`) if libsodium's
 ##   one-time `sodium_init()` call fails — reachable through this module's
@@ -98,7 +102,7 @@
 ##   import/tests/derivation, `keypair()` for a fresh identity. No
 ##   `keypairFromSeed`.
 
-import std/sysrand
+import std/[options, sysrand]
 import sello/wire  # PublicKey/Signature nominal types (RFC-001 finding 9)
 import sello/private/ct
 import sello/private/secret_hooks
@@ -110,6 +114,25 @@ when defined(selloLibsodium):
   import sello/private/backend_sodium as backend
 else:
   import sello/private/backend
+
+## The raises/gcsafe contract below is compiler-enforced, not prose (janus
+## consumer finding 3): before this push, the module doc's "nothing else in
+## the pure-Nim public surface raises" promise was held only by downstream
+## consumers' own `{.raises: [].}` annotations via cross-module effect
+## inference -- a future accidental raise here would keep sello's own build
+## green and surface as an opaque effect-inference error at the consumer's
+## call site. `keypair()` (the one `std/sysrand` constructor in this
+## module) overrides with its own explicit annotation below.
+when defined(selloLibsodium):
+  # `SodiumInitError` (a hard `sodium_init()` failure -- see
+  # `private/backend_sodium.nim`) is reachable through this module's
+  # dispatch on this backend, so it is part of the declared effect here.
+  # Re-exported so callers can name the type they must handle without
+  # importing a `private/` module.
+  export backend.SodiumInitError
+  {.push raises: [SodiumInitError], gcsafe.}
+else:
+  {.push raises: [], gcsafe.}
 
 type
   Seed* = object
@@ -265,6 +288,53 @@ proc keypair*(seed: sink Seed): Keypair =
   result.public = toPublicKey(backend.derivePublic(seed.bytes))
   result.seed = seed
 
+proc keypair*(seed: sink Seed; expectedPublic: PublicKey): Option[Keypair] =
+  ## Load-time consistency check for PERSISTED keys (janus consumer finding
+  ## 2): derives the keypair from `seed` exactly like `keypair(seed)`, then
+  ## compares the derived public key against the caller's stored copy --
+  ## `some` on a match, `none` on a mismatch. Use this whenever the storage
+  ## format carries both halves (the dominant real-world layout is
+  ## OpenSSH's/libsodium's `seed(32) ‖ publicKey(32)` secret key), so a
+  ## corrupted or mixed-up stored key is rejected at load time instead of
+  ## silently signing under a public key the caller never presented --
+  ## sello re-derives the public half, so without this gate that failure
+  ## mode fails OPEN (the signatures are valid, just not for the identity
+  ## the caller thinks it loaded). `keypair(seed)` remains the constructor
+  ## for seed-only storage, where no stored public half exists to check.
+  ##
+  ## `Option`, not a raised exception, for the same reason as `x25519`'s
+  ## small-order `none` (round-3 finding A8): a mismatch is a well-defined
+  ## negative answer about the caller's input, and the pure surface's
+  ## raises contract (see the module-level push above) reserves raising for
+  ## CSPRNG/backend failure. On the `none` path the derived keypair's
+  ## secret half is wiped by `Keypair`'s own `=destroy` before this proc
+  ## returns; nothing secret-derived escapes.
+  ##
+  ## `Keypair` is move-only, so extract the payload with `move`, via the
+  ## `var Option` `get` overload:
+  ##
+  ## ```nim
+  ## var loaded = keypair(toSeed(seedBytes), toPublicKey(storedPublic))
+  ## if loaded.isNone: quit("stored key is corrupt")
+  ## var kp = move(loaded.get())
+  ## ```
+  var kp = keypair(seed)
+  if kp.public == expectedPublic:
+    result = some(move(kp))
+  else:
+    result = none(Keypair)
+
+## `keypair()` raises `OSError` on CSPRNG failure on top of the module
+## default, so it gets its own exact effect region -- an explicit
+## per-backend annotation region rather than widening the whole module's
+## push to include `OSError`, which would loosen every other declaration
+## here for one constructor's sake.
+{.pop.}
+when defined(selloLibsodium):
+  {.push raises: [OSError, SodiumInitError], gcsafe.}
+else:
+  {.push raises: [OSError], gcsafe.}
+
 proc keypair*(): Keypair =
   ## Fresh identity via `std/sysrand`'s in-place `urandom`. Raises
   ## `OSError` if the OS CSPRNG call fails, the same fail-fast policy
@@ -291,6 +361,13 @@ proc keypair*(): Keypair =
   # the compiler needs this explicit assertion that the move below is
   # safe.
   result = keypair(move(s))
+
+# End of the OSError region -- back to the module default for `sign`.
+{.pop.}
+when defined(selloLibsodium):
+  {.push raises: [SodiumInitError], gcsafe.}
+else:
+  {.push raises: [], gcsafe.}
 
 proc sign*(kp: Keypair; msg: openArray[byte]): Signature =
   ## RFC 8032 §5.1.6 detached signature over `msg`. Deterministic and
@@ -320,3 +397,5 @@ proc sign*(kp: Keypair; msg: string): Signature =
   ## (round-3 finding A4): calls the `openArray[byte]` overload above,
   ## itself `proc` now.
   kp.sign(msg.toOpenArrayByte(0, msg.len - 1))
+
+{.pop.}

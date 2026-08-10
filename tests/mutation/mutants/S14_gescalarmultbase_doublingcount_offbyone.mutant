@@ -2,9 +2,9 @@ id: S14
 target: src/sello/scalar.nim
 desc: geScalarmultBase: iteration-count off-by-one, 'for _ in 0 ..< 4: acc = geP3Double(acc)' -> '0 ..< 3', scaling the accumulator by 8 instead of 16 between the odd- and even-digit passes.
 ====OLD====
-  for _ in 0 ..< 4:
-    acc = geP3Double(acc)
+    for _ in 0 ..< 4:
+      acc = geP3Double(acc)
 ====NEW====
-  for _ in 0 ..< 3:
-    acc = geP3Double(acc)
+    for _ in 0 ..< 3:
+      acc = geP3Double(acc)
 ====END====

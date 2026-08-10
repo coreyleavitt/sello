@@ -33,6 +33,14 @@ suite "facade - public surface (sello.nim re-exports)":
     check kp.public == publicBefore
     check toSeedBytes(kp) == default(array[32, byte])
 
+  test "keypair(seed, expectedPublic) is reachable through the facade (janus finding 2)":
+    let kp = keypair()
+    let seedBytes = toSeedBytes(kp)
+    check keypair(toSeed(seedBytes), kp.public).isSome
+    var wrong = toBytes(kp.public)
+    wrong[0] = wrong[0] xor 0x01
+    check keypair(toSeed(seedBytes), toPublicKey(wrong)).isNone
+
   test "toSeedBytes(kp: Keypair) is reachable through the facade (RFC-002 slice 1, renamed by round-3 finding A7)":
     let kp = keypair()
     check keypair(toSeed(toSeedBytes(kp))).public == kp.public
@@ -259,3 +267,73 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
       let raw = default(array[32, byte])
       discard toX25519EphemeralSecret(raw)
     ))
+
+suite "facade - declared effect contract (janus finding 3)":
+  ## The "nothing else in the pure surface raises" promise used to be
+  ## prose, held only by downstream consumers' own `{.raises: [].}`
+  ## annotations via cross-module effect inference -- a regression in sello
+  ## kept sello's own build green and broke consumers with an opaque
+  ## effect-inference error at their call sites. Every module now carries
+  ## `{.push raises: [], gcsafe.}` (with per-constructor `OSError`
+  ## overrides), so the pins below fail to COMPILE if any declared effect
+  ## grows -- the same shape as a consumer's annotated closure, checked in
+  ## sello's own suite. `-d:selloLibsodium` widens the sign/keygen path by
+  ## `SodiumInitError` (a declared, exported effect on that backend), which
+  ## is why those pins split on the define.
+  test "verify and the X25519 exchange satisfy {.raises: [], gcsafe.} by declaration":
+    proc pinVerify(pk: PublicKey; msg: string; sig: Signature): bool {.raises: [], gcsafe.} =
+      pk.verify(msg, sig)
+    proc pinDh(s: X25519StaticSecret; p: X25519Public): Option[X25519Shared] {.raises: [], gcsafe.} =
+      x25519(s, p)
+
+    let kp = keypair()
+    check pinVerify(kp.public, "m", kp.sign("m"))
+    let (sa, pa) = x25519StaticPair()
+    let (sb, pb) = x25519StaticPair()
+    check pinDh(sa, pb).get().toBytes() == pinDh(sb, pa).get().toBytes()
+
+  test "sign / keypair(seed) / keypair(seed, expectedPublic) declare exactly the backend's effect set":
+    when defined(selloLibsodium):
+      proc pinSign(kp: Keypair; msg: string): Signature {.raises: [SodiumInitError], gcsafe.} =
+        kp.sign(msg)
+      proc pinDerive(s: sink Seed): Keypair {.raises: [SodiumInitError], gcsafe.} =
+        keypair(s)
+      proc pinLoad(s: sink Seed; expected: PublicKey): Option[Keypair] {.raises: [SodiumInitError], gcsafe.} =
+        keypair(s, expected)
+    else:
+      proc pinSign(kp: Keypair; msg: string): Signature {.raises: [], gcsafe.} =
+        kp.sign(msg)
+      proc pinDerive(s: sink Seed): Keypair {.raises: [], gcsafe.} =
+        keypair(s)
+      proc pinLoad(s: sink Seed; expected: PublicKey): Option[Keypair] {.raises: [], gcsafe.} =
+        keypair(s, expected)
+
+    let kp = pinDerive(toSeed(default(array[32, byte])))
+    check verify(kp.public, "m", pinSign(kp, "m"))
+    check pinLoad(toSeed(toSeedBytes(kp)), kp.public).isSome
+
+  test "the five fresh-secret constructors declare {.raises: [OSError].}":
+    when defined(selloLibsodium):
+      proc pinFresh(): Keypair {.raises: [OSError, SodiumInitError], gcsafe.} =
+        keypair()
+    else:
+      proc pinFresh(): Keypair {.raises: [OSError], gcsafe.} =
+        keypair()
+    proc pinStatic(): X25519StaticSecret {.raises: [OSError], gcsafe.} =
+      x25519StaticSecret()
+    proc pinEph(): X25519EphemeralSecret {.raises: [OSError], gcsafe.} =
+      x25519EphemeralSecret()
+    proc pinStaticPair(): tuple[secret: X25519StaticSecret, public: X25519Public] {.raises: [OSError], gcsafe.} =
+      x25519StaticPair()
+    proc pinEphPair(): tuple[secret: X25519EphemeralSecret, public: X25519Public] {.raises: [OSError], gcsafe.} =
+      x25519EphemeralPair()
+
+    let kp = pinFresh()
+    check verify(kp.public, "m", kp.sign("m"))
+    let stat = pinStatic()
+    discard x25519Base(stat)
+    wipe(pinEph())
+    let (ss, sp) = pinStaticPair()
+    var (es, ep) = pinEphPair()
+    check x25519(move(es), sp).isSome
+    check x25519(ss, ep).isSome

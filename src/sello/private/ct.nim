@@ -46,6 +46,11 @@
 ## pointer/length header, not the heap payload, silently leaving the real
 ## secret bytes alive on the heap.
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy. A wipe
+## primitive that could raise or touch global state would defeat its own
+## every-exit-path guarantee.
+{.push raises: [], gcsafe.}
 {.push checks: off.}
 
 func volatileStoreByte(dest: ptr byte; val: byte) {.inline.} =
@@ -70,4 +75,5 @@ func wipe*[T](data: var T) {.noinline.} =
     volatileStoreByte(addr base[i], 0'u8)
   {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
+{.pop.}
 {.pop.}

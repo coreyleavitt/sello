@@ -50,6 +50,10 @@
 
 import std/hashes
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 type
   PublicKey* = distinct array[32, byte]
     ## ed25519 compressed public point (RFC 8032 §5.1.5), 32 bytes.
@@ -110,3 +114,5 @@ func hash*(sig: Signature): Hash {.inline.} =
   ## event — see `Signature`'s own doc comment and `ed25519.verify`'s full
   ## writeup. Key such a cache on `(msg, pk)` instead.
   hash(array[64, byte](sig))
+
+{.pop.}

@@ -13,6 +13,10 @@
 import sello/field
 import sello/private/ct
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 # ---------------------------------------------------------------------------
 # Types
 # ---------------------------------------------------------------------------
@@ -1159,4 +1163,5 @@ func scMulAdd*(a: array[32, byte]; bSecret, cSecret: SecretScalar): array[32, by
     ct.wipe(carry16); ct.wipe(carry17); ct.wipe(carry18); ct.wipe(carry19)
     ct.wipe(carry20); ct.wipe(carry21); ct.wipe(carry22)
 
+{.pop.}
 {.pop.}

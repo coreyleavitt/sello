@@ -7,18 +7,19 @@ Kill-rate report for sello's curated mutation-testing catalog (`tests/mutation/m
 - **Mutants:** 50
 - **Killed (test, red suite):** 50
 - **Killed (compile error):** 0
+- **Killed (timeout):** 0
 - **Survived:** 0
 - **Overall kill rate:** 100.0% (50/50)
 - **Retired (confirmed-equivalent, excluded from the above):** 1
-- **Wall clock:** 556s
+- **Wall clock:** 462s
 
-**Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red or by a compile error.
+**Gate status: clean.** Every mutant in the catalog was killed, either by the unit suite going red, by a compile error, or by exceeding the per-file timeout.
 
 ## Methodology
 
 This is a curated, hand-written mutant catalog, not an exhaustive operator sweep: proptest's own `mutation.nim` v1 is `int -> int` only and cannot target Nim source directly, so sello builds this thin patch-based harness in its place (RFC-002 slice 5). Each mutant is an exact-string OLD -> NEW replacement (see `tests/mutation/run_mutation.py`'s module doc comment for the full format and rationale for exact-match over a fuzzy context diff), applied to a disposable scratch copy of the source tree -- the real working tree is never touched. Every mutant's OLD block is verified to occur in the real source EXACTLY ONCE, both when the catalog was written and again on every run (a 0- or multiple-occurrence match aborts the run loudly rather than silently mis-targeting).
 
-For each mutant, the full unit suite (the same 14 files `scripts/test.sh` runs, from `scripts/lib/unit-test-files.sh`) is compiled and run against the mutated tree. A mutant is KILLED if any file fails to compile (compile-error kill -- reported separately, since a mutant that never got a chance to run proves nothing about the suite's sensitivity) or if any test fails once compiled (test kill -- a real red suite). A mutant SURVIVES only if every file in the suite compiles and passes. Verdicts short-circuit on the first failing file for wall-clock reasons; a SURVIVED verdict still requires the entire suite to pass.
+For each mutant, the full unit suite (the same 14 files `scripts/test.sh` runs, from `scripts/lib/unit-test-files.sh`) is compiled and run against the mutated tree. A mutant is KILLED if any file fails to compile (compile-error kill -- reported separately, since a mutant that never got a chance to run proves nothing about the suite's sensitivity), if any test fails once compiled (test kill -- a real red suite), or if any one file's compile+run does not finish within the per-file timeout (timeout kill -- reported separately again, since a hang is detected and counted, not left to stall the campaign silently). A mutant SURVIVES only if every file in the suite compiles and passes within the timeout. Verdicts short-circuit on the first failing file for wall-clock reasons; a SURVIVED verdict still requires the entire suite to pass.
 
 Scope, per RFC-002 slice 5: `field.nim`/`scalar.nim`'s highest-risk spots -- carry-chain operator swaps, shift-amount off-by-ones, boundary constants (19, 0x7FFFFF, RFC 7748's 121666, clamp masks, ...), comparison flips in `feBytesCanonical`/`scIsCanonical`, and digit-range constants in `recodeScalarRadix16`/`cmovCached`. RFC-003 slice 3 extended the catalog beyond field/scalar to the highest-stakes boundary logic elsewhere in the verify/decode surface: `challenge.nim`'s shared sign/verify hash-input ordering (a survivor there would be forgery-adjacent), `ed25519.pointDecode`'s RFC 8032 §5.1.3 reject conditions, `field.feSqrtRatioVartime`'s sqrt-ratio retry/reject branches, `x25519.nim`'s RFC 7748 §6.1 zero-output small-order-peer check at both call sites, and `scalar.pointEncode`'s sign-bit condition (the one comparison-flip family the original S-series missed). This is quality-over-exhaustiveness curation throughout, not a claim of exhaustive operator coverage over every line of any of these files.
 

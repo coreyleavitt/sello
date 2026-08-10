@@ -17,6 +17,25 @@
 ## `VerifyingKey::verify(message, signature)`) -- both actor-first,
 ## UFCS-friendly, and matching `x25519`'s own actor-first argument order.
 ##
+## Loading a PERSISTED key whose storage carries both halves (e.g.
+## OpenSSH's/libsodium's `seed(32) ‖ publicKey(32)` layout) goes through
+## `keypair(seed, expectedPublic): Option[Keypair]` (janus consumer
+## finding 2), which re-derives the public key and returns `none` on a
+## mismatch instead of silently signing under a public key the caller
+## never presented -- see `signing.nim`'s doc comment on that overload,
+## including the `move(loaded.get())` extraction idiom for the move-only
+## `Keypair`. Plain `keypair(seed)` remains the constructor for seed-only
+## storage.
+##
+## Effects are declared, not inferred (janus consumer finding 3): the
+## whole surface is `{.raises: [], gcsafe.}` by compiler-checked
+## annotation, except the five fresh-secret constructors (`keypair()`,
+## `x25519StaticSecret`, `x25519EphemeralSecret`, `x25519StaticPair`,
+## `x25519EphemeralPair`), which are `{.raises: [OSError].}` (fail-fast on
+## a broken CSPRNG), and -- under `-d:selloLibsodium` only -- the
+## sign/keygen path, which adds `SodiumInitError` (exported below on that
+## backend).
+##
 ## `PublicKey`, `Signature`, and X25519's `X25519Public` are nominal
 ## (`distinct array`) wire types, not interchangeable aliases: a
 ## `PublicKey` cannot be passed where an `X25519Public` is expected or vice
@@ -85,6 +104,11 @@ export signing.Seed, signing.Keypair, signing.toSeed
 export signing.keypair, signing.sign
 export signing.wipe
 export signing.public, signing.toSeedBytes
+when defined(selloLibsodium):
+  # `sign`/`keypair` declare `SodiumInitError` in their `{.raises.}`
+  # effects on this backend; export the type so a caller can catch it by
+  # name through `import sello` alone.
+  export signing.SodiumInitError
 # Neither `Seed` nor `X25519StaticSecret`/`X25519EphemeralSecret`/
 # `X25519Shared` has an `==` at all (RFC-002 slice 1 removed `Seed`'s old
 # test/tooling-only one): all four hold secret material, so this library

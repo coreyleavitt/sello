@@ -21,6 +21,10 @@
 
 import sello/private/ct
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 proc wipe*(bytes: var array[32, byte]) =
   ## Audited wipe (volatile stores + compiler barrier, see
   ## `private/ct.nim`) of raw 32-byte secret material a caller is holding
@@ -29,3 +33,5 @@ proc wipe*(bytes: var array[32, byte]) =
   ## each get their own typed overload that delegates to this same
   ## audited primitive.
   ct.wipe(bytes)
+
+{.pop.}

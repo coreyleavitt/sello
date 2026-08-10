@@ -195,6 +195,28 @@ var seedBytes: array[32, byte]
 let kp = keypair(toSeed(seedBytes))
 ```
 
+If your storage carries **both halves** of the key -- the dominant
+real-world layout is OpenSSH's/libsodium's `seed(32) ‖ publicKey(32)`
+secret key -- load through `keypair(seed, expectedPublic)` instead. It
+re-derives the public key from the seed and returns `none` on a mismatch,
+so a corrupted or mixed-up stored key is rejected at load time. Without
+the check that failure mode is nasty and silent: sello derives the public
+half from the seed, so a corrupted seed still *signs successfully* --
+under a public key you never presented. `Keypair` is move-only, so
+extract the payload with `move`:
+
+```nim
+import std/options
+import sello
+
+var seedHalf, publicHalf: array[32, byte]
+# split your stored seed(32) ‖ publicKey(32) blob into the two halves
+var loaded = keypair(toSeed(seedHalf), toPublicKey(publicHalf))
+if loaded.isNone:
+  quit("stored key is corrupt: seed does not derive the stored public key")
+var kp = move(loaded.get())
+```
+
 Hold `Keypair`/`Seed` as stack values, never boxed in a `seq` or `ref` --
 that's what lets their destructors guarantee the wipe. Both `Keypair` and
 `Seed` are move-only (`=copy` is a compile error): pass them by value and
@@ -208,6 +230,17 @@ not itself wiped.
 VERIFY(pk, M, sig) notation and ed25519-dalek's
 `VerifyingKey::verify(message, signature)` -- both actor-first, and both
 matching `x25519`'s own actor-first argument order.
+
+The exception policy above is a **declared, compiler-checked effect**, not
+a doc promise: every module in the public surface carries `{.push raises:
+[], gcsafe.}`, with the five fresh-secret constructors explicitly
+annotated `{.raises: [OSError].}` (and, under `-d:selloLibsodium` only,
+the sign/keygen path adding `SodiumInitError`, exported through the
+facade on that backend). Consumer code annotated `{.raises: [], gcsafe.}`
+composes against sello's declared effects -- if a future sello change
+accidentally introduced a raise on the pure surface, sello's own build
+would go red rather than surfacing downstream as an opaque
+effect-inference error.
 
 ### X25519
 

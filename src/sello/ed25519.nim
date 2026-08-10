@@ -23,6 +23,12 @@ export wire.PublicKey, wire.Signature
 export wire.toPublicKey, wire.toSignature, wire.toBytes
 export wire.`==`, wire.`$`
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy. Verify-path
+## code never raises at all: `pointDecode`/`verify` answer bad input with
+## `none`/`false`, not exceptions.
+{.push raises: [], gcsafe.}
+
 # ---------------------------------------------------------------------------
 # Point decoding (RFC 8032 §5.1.3)
 # ---------------------------------------------------------------------------
@@ -157,3 +163,5 @@ func verify*(pk: PublicKey; msg: string; sig: Signature): bool =
   ## Zero-copy `string` overload, matching `signing.sign`'s: `msg.
   ## toOpenArrayByte` views the string's existing bytes in place, no copy.
   verify(pk, msg.toOpenArrayByte(0, msg.len - 1), sig)
+
+{.pop.}

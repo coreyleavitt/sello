@@ -44,6 +44,11 @@ import sello/scalar
 import sello/challenge
 import sello/private/ct
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy. The pure-Nim
+## secret-math backend never raises: `signing.sign`/`keypair(seed)`'s
+## totality claim rests on these two functions being total too.
+{.push raises: [], gcsafe.}
 {.push checks: off.}
 
 proc derivePublic*(seed: array[32, byte]): array[32, byte] =
@@ -235,4 +240,5 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
     ct.wipe(rBytes)
     ct.wipe(r)
 
+{.pop.}
 {.pop.}

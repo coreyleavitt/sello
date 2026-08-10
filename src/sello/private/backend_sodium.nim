@@ -74,6 +74,14 @@ type
     ## the libsodium runtime (e.g. its internal self-tests), not something
     ## a retry at this layer can paper over.
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy. This backend's
+## one legitimate exception is `SodiumInitError` above; the FFI calls
+## themselves raise nothing, and the once-guard's global is a bare
+## `Atomic[int]` (no GC'd memory), so `gcsafe` holds. Placed after the
+## type declaration the pragma names.
+{.push raises: [SodiumInitError], gcsafe.}
+
 const
   CryptoSignPublicKeyBytes = 32
   CryptoSignSecretKeyBytes = 64
@@ -242,3 +250,5 @@ proc sodiumScalarmult*(priv: array[32, byte]; pub: array[32, byte]): Option[arra
     cast[ptr UncheckedArray[byte]](unsafeAddr pub[0]))
   if rc != 0: none(array[32, byte])
   else: some(q)
+
+{.pop.}

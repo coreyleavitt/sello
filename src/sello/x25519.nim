@@ -81,6 +81,13 @@ import sello/field
 import sello/private/ct
 import sello/private/secret_hooks
 
+## Compiler-enforced effect contract (janus consumer finding 3): nothing
+## in this module raises or touches global GC'd state except the four
+## `std/sysrand` constructors, which carry their own explicit
+## `{.raises: [OSError].}` override below. See `signing.nim`'s module doc
+## for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 type
   X25519Public* = distinct array[32, byte]
     ## A public u-coordinate (RFC 7748 §5): the result of `x25519Base`, or
@@ -220,7 +227,7 @@ func toX25519StaticSecret*(bytes: array[32, byte]): X25519StaticSecret {.inline.
   ## `x25519StaticSecret()` instead.
   X25519StaticSecret(bytes: bytes)
 
-proc x25519StaticSecret*(): X25519StaticSecret =
+proc x25519StaticSecret*(): X25519StaticSecret {.raises: [OSError].} =
   ## Fresh secret via `std/sysrand`, filling the object's bytes IN PLACE
   ## (the `signing.keypair()` lesson: never a bare unwiped local that gets
   ## wrapped afterward). Raises `OSError` if the OS CSPRNG call fails --
@@ -235,7 +242,7 @@ func toBytes*(s: X25519StaticSecret): array[32, byte] {.inline.} =
   ## `sello/wipe.wipe`) once you are done with it.
   s.bytes
 
-proc x25519EphemeralSecret*(): X25519EphemeralSecret =
+proc x25519EphemeralSecret*(): X25519EphemeralSecret {.raises: [OSError].} =
   ## The ONLY constructor -- deliberately no `toX25519EphemeralSecret(bytes)`
   ## counterpart (see the type's doc comment: freshness-by-construction is
   ## the whole point). Same `std/sysrand`-in-place-fill / `OSError`-on-
@@ -391,7 +398,7 @@ func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
   ## neither this nor `move()`.
   toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
 
-proc x25519StaticPair*(): tuple[secret: X25519StaticSecret, public: X25519Public] =
+proc x25519StaticPair*(): tuple[secret: X25519StaticSecret, public: X25519Public] {.raises: [OSError].} =
   ## Fresh static secret plus its derived public value, in one call
   ## (RFC-003 slice 1 item 5) -- mirrors `x25519EphemeralPair`'s shape and
   ## doc register. The static role is the one X25519 role where
@@ -418,7 +425,7 @@ proc x25519StaticPair*(): tuple[secret: X25519StaticSecret, public: X25519Public
     raise newException(OSError, "sello.x25519StaticPair: sysrand.urandom failed")
   result.public = toX25519Public(ladder(result.secret.bytes, toBytes(X25519BasePoint)))
 
-proc x25519EphemeralPair*(): tuple[secret: X25519EphemeralSecret, public: X25519Public] =
+proc x25519EphemeralPair*(): tuple[secret: X25519EphemeralSecret, public: X25519Public] {.raises: [OSError].} =
   ## Fresh ephemeral secret plus its derived public value, in one call
   ## (RFC-002 slice 1) -- the primary way to get an ephemeral secret.
   ## Deriving the public value INSIDE this constructor, rather than
@@ -601,3 +608,5 @@ proc wipe*(s: sink X25519EphemeralSecret) =
   ## Calls `ct.wipe` directly (round-4 finding R10), not a named
   ## `zeroize<Type>` proc -- see `private/secret_hooks.nim`'s doc comment.
   ct.wipe(s.bytes)
+
+{.pop.}

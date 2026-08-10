@@ -35,6 +35,10 @@
 
 import std/options
 
+## Compiler-enforced effect contract (janus consumer finding 3) -- see
+## `signing.nim`'s module doc for the surface-wide policy.
+{.push raises: [], gcsafe.}
+
 type
   Fe* = object
     limbs*: array[10, int32]
@@ -755,4 +759,5 @@ func clampScalar*(s: var array[32, byte]) {.inline.} =
   s[0] = s[0] and 248
   s[31] = (s[31] and 127) or 64
 
+{.pop.}
 {.pop.}

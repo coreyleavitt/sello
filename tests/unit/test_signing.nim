@@ -4,7 +4,7 @@
 ## Keygen vectors: RFC 8032 §7.1 TEST 1, 2, 3, and TEST-1024 (seed ->
 ## public key only; the signatures themselves land with slices 6-7).
 
-import std/[unittest, osproc, os, strutils, json]
+import std/[unittest, options, osproc, os, strutils, json]
 import sello/signing
 import sello/ed25519  # PublicKey/Signature types, and verify() for roundtrips
 
@@ -285,6 +285,55 @@ suite "keypair(seed) - invariant":
   test "kp.public == derive(kp.seed): re-deriving from toSeedBytes(kp) matches":
     let kp = keypair(toSeed(tv1_sk))
     check keypair(toSeed(toSeedBytes(kp))).public == kp.public
+
+suite "keypair(seed, expectedPublic) - load-time consistency check (janus finding 2)":
+  ## The persisted-key load gate: without it, a corrupted stored key fails
+  ## OPEN (sello re-derives the public half, so signing still succeeds --
+  ## under a public key the caller never presented). These tests pin both
+  ## directions plus the layout that motivated the overload.
+  test "matching stored public half: some, and the loaded keypair signs bit-exactly":
+    var loaded = keypair(toSeed(tv1_sk), tv1_pk)
+    require loaded.isSome
+    # `Keypair` is move-only: extract via the `var Option` `get` overload
+    # plus `move` -- the documented idiom on the overload's own doc comment.
+    var kp = move(loaded.get())
+    check kp.public == tv1_pk
+    check kp.sign(tv1_msg) == tv1_sig
+
+  test "every RFC 8032 §7.1 vector's own (seed, public) pair loads as some":
+    check keypair(toSeed(tv2_sk), tv2_pk).isSome
+    check keypair(toSeed(tv3_sk), tv3_pk).isSome
+    check keypair(toSeed(tv1024_sk), tv1024_pk).isSome
+
+  test "single-bit-corrupted stored public half is rejected: none":
+    var wrong = toBytes(tv1_pk)
+    wrong[0] = wrong[0] xor 0x01
+    check keypair(toSeed(tv1_sk), toPublicKey(wrong)).isNone
+
+  test "another identity's public half is rejected: none":
+    check keypair(toSeed(tv1_sk), tv2_pk).isNone
+
+  test "OpenSSH-style seed(32) || publicKey(32) blob: split then gate":
+    var blob: array[64, byte]
+    for i in 0 ..< 32: blob[i] = tv3_sk[i]
+    let pkBytes = toBytes(tv3_pk)
+    for i in 0 ..< 32: blob[32 + i] = pkBytes[i]
+
+    var seedHalf, pubHalf: array[32, byte]
+    for i in 0 ..< 32:
+      seedHalf[i] = blob[i]
+      pubHalf[i] = blob[32 + i]
+    var loaded = keypair(toSeed(seedHalf), toPublicKey(pubHalf))
+    require loaded.isSome
+    var kp = move(loaded.get())
+    check kp.sign(tv3_msg) == tv3_sig
+
+    # same blob with the halves swapped must never load
+    var swappedSeed, swappedPub: array[32, byte]
+    for i in 0 ..< 32:
+      swappedSeed[i] = blob[32 + i]
+      swappedPub[i] = blob[i]
+    check keypair(toSeed(swappedSeed), toPublicKey(swappedPub)).isNone
 
 suite "Seed lifecycle":
   test "wipe(sink Seed) is reachable and consumes the seed":
