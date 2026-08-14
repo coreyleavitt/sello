@@ -28,15 +28,17 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 3 scope** (this file, so far): `RistrettoPoint`/
+## **Slice 4 scope** (this file, so far): `RistrettoPoint`/
 ## `RistrettoEncoded` and their basic borrows, the `ristrettoUnchecked`
 ## construction door, quotient `==`, `ristrettoDecode`, `ristrettoEncode`
-## (plus its `InvSqrtAMinusD` constant), and the fixed
-## `RistrettoIdentity`/`RistrettoBasePoint` consts. NOT yet present: the
-## group operators (`+`/`-`), scalar multiplication, the one-way map, the
-## secret-scalar role types, or a facade export -- later slices.
-## `RistrettoPoint` has deliberately no `wipe` overload even once those
-## land: see its own doc comment below.
+## (plus its `InvSqrtAMinusD` constant), the fixed
+## `RistrettoIdentity`/`RistrettoBasePoint` consts, and now the group
+## operators `+`/binary `-`/unary `-` (this codebase's first operators --
+## see their own doc comments for the canonical-spacing note). NOT yet
+## present: scalar multiplication, the one-way map, the secret-scalar role
+## types, or a facade export -- later slices. `RistrettoPoint` has
+## deliberately no `wipe` overload even once those land: see its own doc
+## comment below.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -446,5 +448,96 @@ const RistrettoBasePoint* = ristrettoUnchecked(geBasePoint())
   ## `tests/unit/test_ristretto.nim` against `ristrettoEncode`) is RFC 9496
   ## §3's own published canonical-generator encoding, matching Appendix
   ## A.1's `i=1` vector.
+
+# ---------------------------------------------------------------------------
+# Group operators: +, binary -, unary - (slice 4)
+#
+# This module's -- and the whole codebase's -- FIRST operators (RFC-004's
+# Design/Operations note): `RistrettoPoint` is a genuine abelian-group
+# public type (unlike `Fe`/`GeP3`, which are internal representations), so
+# `+`/`-` are the first-principles notation for it, a deliberate departure
+# from this codebase's usual verb-prefixed-proc convention. `*` for scalar
+# mult was considered and declined (an operator cannot carry a `Vartime`
+# suffix -- see the scalarmult family, a later slice); that reasoning does
+# not apply to `+`/`-`, which have no CT/vartime register to silently
+# switch.
+#
+# **Whitespace note, pinned for every example in this file/the README
+# (these being the first operators, there is no existing habit to fall
+# back on):** write `a - b` and `-p`, WITH a space before a binary `-`'s
+# right operand when the left side is a bare identifier that could parse
+# as a call -- `a -b` in call position parses as `a(-b)` (unary negation
+# applied to `b` first, then `a` called with that result), not the binary
+# operator. `a - b` (space on both sides) and `-p` (no left operand) are
+# the two unambiguous forms and are what every example below uses.
+# ---------------------------------------------------------------------------
+
+func geCachedNegate(q: GeCached): GeCached {.inline.} =
+  ## Private: the standard ref10-family cached-point negation, the ONE
+  ## place in this file (RFC 9496's group-op slice) that constructs a
+  ## negated point -- both operators below route through it, verified
+  ## against `scalar.cmovCached`'s own conditional negation (RFC-001),
+  ## which performs exactly the same two-step transform on its selected
+  ## `GeCached` for negative signed-radix-16 digits: swap `yPlusX`/
+  ## `yMinusX` (negating `x` swaps which sum, `y+x` or `y-x`, is which),
+  ## negate `t2d`, leave `z` unchanged. `cmovCached` applies this
+  ## conditionally (masked, for CT secret-digit selection); this helper
+  ## applies it unconditionally, since a `RistrettoPoint` is public
+  ## register data with no secret-dependent branch to avoid (see the
+  ## module doc's CT-posture headline). `GeCached` -- not `GeP3` -- is
+  ## what this module's one addition primitive (`scalar.geAdd`) consumes
+  ## as its second operand, so negation stays in that representation
+  ## rather than adding a second, GeP3-level negation formula (raw `feNeg`
+  ## on `x`/`t`) to this file.
+  result.yPlusX = q.yMinusX
+  result.yMinusX = q.yPlusX
+  result.z = q.z
+  feNeg(result.t2d, q.t2d)
+
+func `+`*(a, b: RistrettoPoint): RistrettoPoint =
+  ## RFC 9496's group addition on the underlying `GeP3`s: `b` -> `GeCached`
+  ## -> `geAdd` -> `geP1P1ToP3` -> wrap through the door -- exactly
+  ## `scalarmultVartime`'s own table-build step (`scalar.nim`), applied
+  ## here to two arbitrary `RistrettoPoint`s instead of table rows.
+  var bCached: GeCached
+  geP3ToCached(bCached, b.p)
+  var sum: GeP1P1
+  geAdd(sum, a.p, bCached)
+  var p3: GeP3
+  geP1P1ToP3(p3, sum)
+  ristrettoUnchecked(p3)
+
+func `-`*(a, b: RistrettoPoint): RistrettoPoint =
+  ## Binary subtraction: `a + (-b)`, but computed directly against `b`'s
+  ## NEGATED cached form (`geCachedNegate`) rather than by calling the
+  ## unary operator below and re-deriving `+` -- the two operators below
+  ## are independent implementations sharing only `geCachedNegate`, so the
+  ## "a - b == a + (-b)" spot check in `tests/unit/test_ristretto.nim` is a
+  ## genuine cross-check of both code paths, not a tautology true by
+  ## construction.
+  var bCached: GeCached
+  geP3ToCached(bCached, b.p)
+  let negBCached = geCachedNegate(bCached)
+  var diff: GeP1P1
+  geAdd(diff, a.p, negBCached)
+  var p3: GeP3
+  geP1P1ToP3(p3, diff)
+  ristrettoUnchecked(p3)
+
+func `-`*(p: RistrettoPoint): RistrettoPoint =
+  ## Unary negation: the group inverse of `p`, computed as
+  ## `RistrettoIdentity + (-p)` via the SAME `geCachedNegate` helper binary
+  ## `-` uses above -- `geAdd(identity, negate(cached(p)))` -- rather than
+  ## negating `GeP3`'s raw `x`/`t` coordinates directly (see
+  ## `geCachedNegate`'s own doc comment for why negation stays in the
+  ## `GeCached` representation).
+  var pCached: GeCached
+  geP3ToCached(pCached, p.p)
+  let negCached = geCachedNegate(pCached)
+  var negP1P1: GeP1P1
+  geAdd(negP1P1, RistrettoIdentity.p, negCached)
+  var negP3: GeP3
+  geP1P1ToP3(negP3, negP1P1)
+  ristrettoUnchecked(negP3)
 
 {.pop.}

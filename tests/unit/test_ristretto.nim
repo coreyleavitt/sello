@@ -192,6 +192,209 @@ suite "RistrettoIdentity / RistrettoBasePoint -- fixed compile-time consts":
     let viaScalarmult = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(1))))
     check RistrettoBasePoint == viaScalarmult
 
+suite "RistrettoPoint -- group operator + (RFC 9496 group ops, slice 4)":
+  test "B + identity == B":
+    let b = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[1]))).get()
+    check (b + RistrettoIdentity) == b
+
+  test "B + 2B == 3B":
+    let b1 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[1]))).get()
+    let b2 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[2]))).get()
+    let b3 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check (b1 + b2) == b3
+
+  test "associativity spot check over A.1 points: (1B + 2B) + 3B == 1B + (2B + 3B)":
+    let b1 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[1]))).get()
+    let b2 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[2]))).get()
+    let b3 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ((b1 + b2) + b3) == (b1 + (b2 + b3))
+
+  test "associativity spot check over geScalarmultBase multiples: (5B + 7B) + 9B == 5B + (7B + 9B)":
+    let b5 = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(5))))
+    let b7 = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(7))))
+    let b9 = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(9))))
+    check ((b5 + b7) + b9) == (b5 + (b7 + b9))
+
+suite "RistrettoPoint -- unary/binary - (RFC 9496 group ops, slice 4)":
+  test "P + (-P) == RistrettoIdentity":
+    let b5 = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(5))))
+    check (b5 + (-b5)) == RistrettoIdentity
+
+  test "-identity == identity":
+    check (-RistrettoIdentity) == RistrettoIdentity
+
+  test "binary minus consistent: a - b == a + (-b)":
+    let b3 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    let b5 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[5]))).get()
+    check (b3 - b5) == (b3 + (-b5))
+
+  test "a - a == identity":
+    let b7 = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(7))))
+    check (b7 - b7) == RistrettoIdentity
+
+suite "RistrettoPoint -- E[4] torsion invariance (Stage-3 amendment: [2]E/E[4], not E/E[8])":
+  # RFC 9496 amendment (docs/rfc-004-ristretto255.md "Stage-3 amendment
+  # (2026-08-14)"): ristretto255 is the quotient [2]E/E[4] -- the four E[4]
+  # points below (identity, (0,-1), (+-FeSqrtM1, 0)) are the ONLY Edwards
+  # translates that preserve a RistrettoPoint's encoding. All four are
+  # trivially/FeSqrtM1-expressible -- no offline derivation needed. This
+  # suite is the deterministic plain-unittest torsion spot-check the RFC
+  # calls for (quotient coverage that survives a proptest-less build); the
+  # random-P analog lives in test_properties_ristretto.nim.
+  var negOne, negSqrtM1: Fe
+  feNeg(negOne, FeOne)
+  feNeg(negSqrtM1, FeSqrtM1)
+
+  # Built as raw GeP3 first (RistrettoPoint's underlying `p` field is
+  # private to sello/ristretto, so the curve-equation cross-check below has
+  # to run on these raw values before they are wrapped through the door).
+  let rawZeroMinusOne = GeP3(x: FeZero, y: negOne, z: FeOne, t: FeZero)
+  let rawPlusSqrtM1 = GeP3(x: FeSqrtM1, y: FeZero, z: FeOne, t: FeZero)
+  let rawMinusSqrtM1 = GeP3(x: negSqrtM1, y: FeZero, z: FeOne, t: FeZero)
+
+  template checkOnCurve(p: GeP3) =
+    ## The extended-coordinate twisted Edwards curve equation,
+    ## Y^2 - X^2 == Z^2 + d*T^2 -- the same equation `ristrettoUnchecked`'s
+    ## own debug-only assert checks internally (see that proc's doc
+    ## comment); pinned explicitly here too, in-test, per the task's
+    ## defining-equation cross-check requirement.
+    ##
+    ## A TEMPLATE, deliberately, not a `proc`: `std/unittest`'s `check`
+    ## resolves failures through `testStatusIMPL`, a symbol `{.inject.}`ed
+    ## into a `test:` block's own lexical scope by the `test` template --
+    ## a symbol that does NOT propagate into an ordinary `proc` called from
+    ## within that block (procs do not inherit a caller's injected
+    ## symbols the way nested templates do). A `proc` version of this
+    ## helper was the first RED pass here: every `check` inside it still
+    ## *ran*, but a failing one fell through `fail()`'s
+    ## `when declared(testStatusIMPL): ... else: setProgramResult 1`
+    ## fallback -- printing `[OK]` on the suite line regardless of the
+    ## outcome, with the failure surfacing only as an unattributed nonzero
+    ## process exit ("execution of an external program failed") rather
+    ## than a `[FAILED]` line pointing at this check. Confirmed directly
+    ## (deliberately-inverted `feEqualCT` call, `proc` form): all three
+    ## call sites below kept printing `[OK]` while the process still
+    ## exited 1 -- exactly the silent-misattribution failure mode this
+    ## comment exists to prevent a future edit from reintroducing. As a
+    ## `template`, the check's `testStatusIMPL` reference resolves in the
+    ## CALLING test's own scope instead, and failures report correctly.
+    var y2, x2, z2, dt2, lhs, rhs: Fe
+    feSq(y2, p.y)
+    feSq(x2, p.x)
+    feSq(z2, p.z)
+    feSq(dt2, p.t)
+    feMul(dt2, dt2, feFromLimbs(Ed25519D_Raw))
+    feSub(lhs, y2, x2)
+    feAdd(rhs, z2, dt2)
+    check feEqualCT(lhs, rhs)
+
+  test "(0,-1) satisfies the twisted Edwards curve equation":
+    checkOnCurve(rawZeroMinusOne)
+
+  test "(+FeSqrtM1, 0) satisfies the twisted Edwards curve equation":
+    checkOnCurve(rawPlusSqrtM1)
+
+  test "(-FeSqrtM1, 0) satisfies the twisted Edwards curve equation":
+    checkOnCurve(rawMinusSqrtM1)
+
+  let e4ZeroMinusOne = ristrettoUnchecked(rawZeroMinusOne)
+  let e4PlusSqrtM1 = ristrettoUnchecked(rawPlusSqrtM1)
+  let e4MinusSqrtM1 = ristrettoUnchecked(rawMinusSqrtM1)
+  let e4NonIdentityPoints = [e4ZeroMinusOne, e4PlusSqrtM1, e4MinusSqrtM1]
+  let e4Points = [RistrettoIdentity, e4ZeroMinusOne, e4PlusSqrtM1, e4MinusSqrtM1]
+
+  test "each non-identity E[4] point is annihilated by 4 (4T == RistrettoIdentity, via the module's own + and ==)":
+    for t in e4NonIdentityPoints:
+      let doubled = t + t
+      let quadrupled = doubled + doubled
+      check quadrupled == RistrettoIdentity
+
+  test "P + T encodes equal to P, for two fixed points and all four E[4] T's":
+    # The two fixed spot-check points named in the RFC: the canonical
+    # generator and one other fixed decoded point (A1Encodings[7], already
+    # used as a fixed fixture elsewhere in this file).
+    let p1 = RistrettoBasePoint
+    let p2 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[7]))).get()
+    for p in [p1, p2]:
+      for t in e4Points:
+        check toBytes(ristrettoEncode(p + t)) == toBytes(ristrettoEncode(p))
+
+suite "RistrettoPoint -- order-8 NEGATIVE companion ([2]E/E[4] boundary, Stage-3 amendment)":
+  # The [2]E/E[4] boundary pinned as documented behavior: a genuine order-8
+  # Edwards point does NOT preserve a RistrettoPoint's encoding (unlike the
+  # four E[4] points above). Coordinates below are one order-8 point,
+  # computed offline (Python, plain integer arithmetic mod 2^255-19): find a
+  # curve point G whose order is the full curve-group order 8*L (checked via
+  # 4*L*G != O and 8*G != O, i.e. G survives both maximality tests for the
+  # two primes -- 2 and L -- dividing 8*L), then T8 = L*G has order exactly
+  # 8 (order(G) = 8L => order(L*G) = 8L / gcd(L, 8L) = 8L / L = 8). Verified
+  # in Python: T8 is on-curve, 2*T8 and 4*T8 are the expected order-4/order-2
+  # points ((-sqrt(-1), 0) and (0,-1) respectively) and 8*T8 == the curve
+  # identity (0,1) -- i.e. order exactly 8, not a proper divisor of 8.
+  const Order8XHex = "4ad145c54646a1de38e2e513703c195cbb4ade38329933e9284a3906a0b9d51f"
+  const Order8YHex = "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a"
+
+  let x8 = feFromBytes(hexToArray32(Order8XHex))
+  let y8 = feFromBytes(hexToArray32(Order8YHex))
+  var t8: Fe
+  feMul(t8, x8, y8) # z = 1, so t = x*y/z = x*y
+  let rawOrder8 = GeP3(x: x8, y: y8, z: FeOne, t: t8)
+
+  test "the order-8 point satisfies the twisted Edwards curve equation":
+    var y2, x2, z2, dt2, lhs, rhs: Fe
+    feSq(y2, rawOrder8.y)
+    feSq(x2, rawOrder8.x)
+    feSq(z2, rawOrder8.z)
+    feSq(dt2, rawOrder8.t)
+    feMul(dt2, dt2, feFromLimbs(Ed25519D_Raw))
+    feSub(lhs, y2, x2)
+    feAdd(rhs, z2, dt2)
+    check feEqualCT(lhs, rhs)
+
+  proc doubleRaw(p: GeP3): GeP3 =
+    ## Literal Edwards-point doubling on a raw `GeP3`, via the same
+    ## `geP3ToCached` -> `geAdd` -> `geP1P1ToP3` chain `RistrettoPoint`'s own
+    ## `+` operator uses -- but staying at the raw-`GeP3` level rather than
+    ## going through `RistrettoPoint`'s `+`/`==`. This distinction is
+    ## load-bearing, not stylistic: `RistrettoPoint`'s `==` is QUOTIENT
+    ## equality by design (E[4]-invariant -- that is the entire point of
+    ## ristretto255), so it cannot distinguish the literal identity `(0,1)`
+    ## from any other E[4] member such as `(0,-1)`: both collapse to the
+    ## SAME ristretto element. `4*T8` for this order-8 `T8` is literally
+    ## `(0,-1)` (T8's order is exactly 8, so `4*T8` has order exactly 2) --
+    ## a first RED pass of this very test wrote the check against
+    ## `RistrettoPoint`'s `==` and it FALSELY reported "annihilated", which
+    ## is what caught this distinction before it reached GREEN. "4*T8 !=
+    ## identity as points" (the task's own wording) means literal Edwards
+    ## point equality, checked here directly on `X`/`Y`/`Z` rather than
+    ## through the quotient.
+    var pCached: GeCached
+    geP3ToCached(pCached, p)
+    var sum: GeP1P1
+    geAdd(sum, p, pCached)
+    geP1P1ToP3(result, sum)
+
+  proc isLiteralIdentity(p: GeP3): bool =
+    ## `p` represents the literal Edwards identity `(0, 1)` iff its affine
+    ## `x = X/Z` is 0 (i.e. `X == 0`) and its affine `y = Y/Z` is 1 (i.e.
+    ## `Y == Z`) -- checked directly on the extended coordinates, with no
+    ## detour through `RistrettoPoint`'s quotient `==` (see `doubleRaw`'s
+    ## doc comment above for why that would be the wrong tool here).
+    feIsZeroCT(p.x) and feEqualCT(p.y, p.z)
+
+  let t8Point = ristrettoUnchecked(rawOrder8)
+
+  test "the order-8 point is NOT annihilated by 4, checked literally (4*T8 != (0,1) as an exact Edwards point)":
+    let twiceRaw = doubleRaw(rawOrder8)
+    let fourRaw = doubleRaw(twiceRaw)
+    check not isLiteralIdentity(fourRaw)
+
+  test "P + T8 does NOT encode equal to P, for the same two fixed points (the [2]E boundary)":
+    let p1 = RistrettoBasePoint
+    let p2 = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[7]))).get()
+    for p in [p1, p2]:
+      check toBytes(ristrettoEncode(p + t8Point)) != toBytes(ristrettoEncode(p))
+
 suite "RistrettoEncoded -- wire.nim-style borrows":
   test "toRistrettoEncoded / toBytes round-trip":
     let bytes = hexToArray32(A1Encodings[2])
@@ -213,3 +416,4 @@ suite "RistrettoEncoded -- wire.nim-style borrows":
     let a = toRistrettoEncoded(hexToArray32(A1Encodings[8]))
     let b = toRistrettoEncoded(hexToArray32(A1Encodings[8]))
     check hash(a) == hash(b)
+
