@@ -1,13 +1,9 @@
 # RFC-004 Ristretto255 — handoff
 
-- **Stage:** 2 (architect review) — rounds 1, 2 AND 3 COMPLETE (rounds 1–2
-  2026-08-09, round 3 2026-08-13; four-lens teams every round: depth / breadth /
-  design+ergonomics / feasibility; all findings applied directly to the RFC
-  text). Slicing frozen. NOT yet approved by Corey — approval is the remaining
-  stage-2 gate.
-- **Resume:** awaiting Corey's approval of the RFC as written. On approval,
-  enter stage 3 with the rfc-flow grind loop (no `/tdd` before approval —
-  rfc-flow guardrail):
+- **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
+  three architect rounds. Slices implemented by sonnet subagents under the
+  rfc-flow grind loop, one per iteration, per-slice commits on `main`.
+- **Resume:** re-enter the grind with:
   `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 4/15
   done, 11 remaining"); stop when every slice is implemented`
@@ -31,10 +27,12 @@
       normalization invert); E01/E03 re-anchored/re-cut onto the reshaped
       lines, E02 survived verbatim. scripts/test.sh green (Wycheproof zero
       change), scripts/mutation.sh 50/50 killed, 0 survivors.
-- [ ] 2 decode + equality (types, ristrettoUnchecked door + debug curve-identity
-      assert, quotient `==`, A.1/A.2 vectors with independent geScalarmultBase
-      oracle, unit-test-files.sh registration of test_ristretto.nim, module doc
-      seeded with the CT-posture headline)
+- [x] 2 decode + equality — commit a2983c5 (ristretto.nim born: RistrettoPoint/
+      RistrettoEncoded, ristrettoUnchecked door + debug curve-identity assert,
+      CT quotient `==` via bitwise-or combine, ristrettoDecode on
+      feBytesCanonicalCT/feSqrtRatioM1; A.1 16/16 against independent
+      geScalarmultBase oracle, A.2 29/29 rejected; test_ristretto.nim
+      registered, suite 10 → 11 files)
 - [ ] 3 encode (A.1 encode direction incl. i=0 identity/SQRT_RATIO_M1(1,0) edge,
       InvSqrtAMinusD — pulled forward from the constant batch: encode consumes
       it here — RistrettoIdentity/RistrettoBasePoint consts, round-trips,
