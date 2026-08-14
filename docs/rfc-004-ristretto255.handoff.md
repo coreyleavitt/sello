@@ -3,8 +3,8 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 5b (slice 5a finished and
-  committed; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
+- **Resume:** grind loop RUNNING at slice 6 (slice 5b finished and
+  committed 3b8a778; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
   amended to E[4]-only + order-8 negative companion + [2]E/E[4] Context
   reframe in commit 13cd03c — see the RFC's "Stage-3 amendment
   (2026-08-14)" section; slice 4 finished and committed 7eadac7). If
@@ -79,10 +79,20 @@
       scripts/test.sh green: 11 unit files + 5 property files, zero
       failures, including the new agreement property and both new suites
       in test_ristretto.nim.)
-- [ ] 5b ephemeral secret role (RistrettoEphemeralSecret: move-only, fresh-only,
-      no toBytes, ElGamal-shape/CPace-boundary doc note, borrow-only
-      ristrettoScalarmultBase overload + copy fixture — sink-consume overload
-      and reuse fixture arrive in 7a)
+- [x] 5b ephemeral secret role — commit 3b8a778 (RistrettoEphemeralSecret:
+      secretHooksMoveOnly, canonical-residue-mod-L invariant via wide
+      scReduce, ristrettoEphemeralSecret()/ristrettoEphemeralPair() (fresh
+      from std/sysrand, no from-bytes route, no toBytes), the ElGamal/ECIES
+      borrow-then-consume rationale and the CPace two-mults-one-scalar
+      boundary recorded in the type's doc comment, borrow-only
+      ristrettoScalarmultBase(RistrettoEphemeralSecret) overload (plain
+      non-consuming parameter, the x25519Base(X25519EphemeralSecret)
+      precedent); reject_ristretto_ephemeral_copy fixture,
+      subprocess-nim-c-verified (injectdestructors rejects the copy).
+      Pair/base-mult round-trip + probe-pattern destructor hygiene tests in
+      test_ristretto.nim. sink-consume ristrettoScalarmult overload and
+      reuse fixture deferred to 7a as scoped. scripts/test.sh green: 11
+      unit files + 5 property files, zero failures, 271 [OK] checks.)
 - [ ] 6 hash-to-group (MAP, the remaining three constants via compile-time
       feFromBytes from spec bytes, ALL A.3 vectors incl. the
       four-inputs-one-output convergence set, all-zero/all-0xFF edges)
