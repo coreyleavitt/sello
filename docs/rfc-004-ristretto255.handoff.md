@@ -3,7 +3,8 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 6 (slice 5b finished and
+- **Resume:** grind loop RUNNING at slice 7a (slice 6 finished and
+  committed 97fd40e; slice 5b finished and
   committed 3b8a778; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
   amended to E[4]-only + order-8 negative companion + [2]E/E[4] Context
   reframe in commit 13cd03c — see the RFC's "Stage-3 amendment
@@ -93,9 +94,23 @@
       test_ristretto.nim. sink-consume ristrettoScalarmult overload and
       reuse fixture deferred to 7a as scoped. scripts/test.sh green: 11
       unit files + 5 property files, zero failures, 271 [OK] checks.)
-- [ ] 6 hash-to-group (MAP, the remaining three constants via compile-time
-      feFromBytes from spec bytes, ALL A.3 vectors incl. the
-      four-inputs-one-output convergence set, all-zero/all-0xFF edges)
+- [x] 6 hash-to-group — commit 97fd40e (ristrettoMap, RFC 9496 SS4.3.4's
+      MAP function, private; ristrettoFromUniformBytes, total, splits its
+      64-byte input and adds the two mapped halves; OneMinusDSq/
+      DMinusOneSq/SqrtAdMinusOne via compile-time feFromBytes from the
+      published RFC's own decimal values, each cross-checked in-test
+      against its defining field equation — InvSqrtAMinusD already landed
+      in slice 3. Formula and constants pre-verified against an
+      independent Python transcription of RFC 9496 SS4.3.4/SS4.1 before
+      writing the Nim, fetched directly from rfc-editor.org (not
+      summarized/memory) per the task's own warning about mangled KAT
+      hex. All A.3 vectors bit-exact: the six direct input/output pairs
+      plus the four-inputs-one-output convergence set (checked equal
+      under byte encoding AND cross-checked pairwise equal under quotient
+      `==`); deterministic all-zero/all-0xFF 64-byte edge inputs
+      (re-decode cleanly); determinism + valid-output properties over
+      random 64-byte inputs via proptest. scripts/test.sh green: 11 unit
+      files + 5 property files, zero failures.)
 - [ ] 7a CT variable-base scalarmult (scalar.geScalarmultCT, UNIFORM 256-doubling
       interleaved ladder, table build via geAdd→geP1P1ToP3→geP3ToCached, wipe
       list incl. the two per-iteration temporaries, written loop-composition
