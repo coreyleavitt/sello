@@ -3,25 +3,20 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** BLOCKED at slice 4 on the torsion wrong-spec escalation (see
-  Open forks — recommendation recorded, awaiting Corey's yes/no). On
-  approval, in order: (1) amend the RFC text — torsion property to E[4]-only
-  (identity, (0,−1), (±FeSqrtM1, 0)), add the deterministic order-8
-  NOT-equal negative companion, delete the torsion-provenance risk bullet,
-  reframe the Context "8 points ARE one element" sentence to [2]E/E[4];
-  (2) finish slice 4 in a sonnet subagent — the group ops + axiom tests are
-  already implemented green but UNCOMMITTED in the working tree (ristretto.nim,
-  test_ristretto.nim, test_properties_ristretto.nim) — add the amended torsion
-  tests and commit; (3) re-enter the grind at slice 5a with:
+- **Resume:** grind loop RUNNING at slice 5a (torsion escalation RESOLVED
+  2026-08-14: Corey approved; RFC amended to E[4]-only + order-8 negative
+  companion + [2]E/E[4] Context reframe in commit 13cd03c — see the RFC's
+  "Stage-3 amendment (2026-08-14)" section; slice 4 finished and committed
+  7eadac7). If resuming cold:
   `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 4/15
   done, 11 remaining"); stop when every slice is implemented`
-- **Working tree at pause:** slice-4 source/test edits uncommitted (green,
-  torsion sections reverted out); latest commits main: 5e80640 (slice 3),
-  ea1da76 (bookkeeping), a2983c5 (slice 2), 23b05cd (1c), 4d7e223 (1b),
-  4a3f867 (RFC docs), c95bb16 (1a). Subagents run one slice per grind
-  iteration (sonnet), commit per slice, never pause idle waiting for
-  notifications (recurring failure mode — instruct explicitly).
+- **Grind mechanics:** subagents run one slice per iteration (sonnet,
+  run_in_background), commit per slice on main, never pause idle waiting for
+  notifications (recurring failure mode — instruct explicitly: foreground
+  commands, timeouts up to 600000 ms, sleep-loop polling); no Co-Authored-By
+  trailer, never mention agentic tooling in commits; ScheduleWakeup fallback
+  heartbeat ~1500s with the /loop prompt verbatim.
 
 ## Slices (renumbered by round 1, split further by rounds 2 and 3)
 - [x] 1a CT field primitives — commit c95bb16 (feSqrtRatioM1 THREE-check dance incl. false-branch
@@ -53,19 +48,21 @@
       from §4.1 + defining-equation check, RistrettoIdentity/RistrettoBasePoint
       consts CTFE-verified, round-trips, rejection-sampling generator;
       test_properties_ristretto.nim born AND registered, property tier 4 → 5)
-- [~] 4 group ops — BLOCKED ON ESCALATION, implementation staged but
-      UNCOMMITTED: +/-/unary - via geCachedNegate helper all green; group-axiom
-      unit + property tests green (generator reworked: composing .filter()ed
+- [x] 4 group ops — commit 7eadac7 (+/-/unary - via geCachedNegate; group-axiom
+      unit + property tests; E[4]-only torsion invariance per the amended RFC —
+      four T's built via ristrettoUnchecked, curve-equation + annihilated-by-4
+      cross-checks, two fixed points deterministic + random-P property — and
+      the deterministic order-8 NEGATIVE companion (offline-Python-derived
+      T8 = L·G from a full-order-8L generator, on-curve + NOT annihilated by 4
+      re-verified in Nim, encode(P+T8) != encode(P)). RED discipline caught
+      two test-infra bugs: quotient `==` can't check literal identity (raw
+      X==0,Y==Z compare used instead), and a proc-scoped `check` silently
+      swallows unittest failures (testStatusIMPL is test-block-scoped —
+      helper made a template). Generator rework kept: composing .filter()ed
       draws multiplies rejection rates and hits a coverageGuided engine
-      pathology — documented in the test file). TORSION PREMISE WRONG: the
-      RFC's eight-8-torsion-point invariance fails for the four genuine
-      order-8 points — verified independently in Python AND sello, both
-      byte-identical; ristretto255 is [2]E/E[4], not E/E[8] (dalek issue
-      #312, hdevalence). Encode invariance holds for E[4] (identity, (0,-1),
-      (±sqrt(-1),0)) ONLY. Recommendation: amend the RFC's torsion property
-      to the four E[4] points (all trivially/FeSqrtM1-expressible — the
-      provenance risk and offline derivation disappear entirely) and fix the
-      Context sentence's E/E[8] framing. AWAITING COREY.
+      pathology, so internal-retry + coverageGuided=false, documented in the
+      test file. Preceded by RFC amendment commit 13cd03c resolving the
+      torsion escalation (E/E[8] folklore → [2]E/E[4], dalek issue #312).
 - [ ] 5a static secret role + scalarmult existing registers
       (RistrettoStaticSecret: secretHooks, canonical-residue invariant,
       staticSecret()/staticPair()/Option-returning 32-byte import with
@@ -108,27 +105,11 @@
       CLAUDE.md, version 0.4.0, final full-matrix run)
 
 ## Open forks (awaiting Corey)
-- **WRONG-SPEC ESCALATION (slice 4, 2026-08-14): the torsion-invariance
-  premise.** The RFC specifies encode-invariance under all EIGHT 8-torsion
-  points; mathematically only the four E[4] points preserve the encoding
-  (ristretto255 is [2]E/E[4], not E/E[8] — dalek issue #312; verified
-  independently in Python and sello, byte-identical, A.1 vectors still
-  correct). Recommend (refined after Corey's design-bar challenge, awaiting
-  approval): (1) amend the property to E[4]-only — the E[4] coset IS the
-  quotient's actual representative ambiguity within [2]E, so this corrects
-  scope rather than weakening it, and the four points are
-  trivially/FeSqrtM1-expressible, deleting the provenance risk bullet and
-  offline-derivation machinery entirely; (2) ADD a deterministic negative
-  companion — for the two fixed spot-check points, an order-8 translate must
-  NOT encode equal (agent's verified order-8 coordinates; deterministic only,
-  not a universal property) — pinning the [2]E boundary as documented
-  behavior; (3) reframe Context to [2]E/E[4]. Library code needs NO changes —
-  the error was a test premise, not a design flaw; decode/encode/ops are
-  byte-correct against all spec vectors. Slice-4 group ops are implemented
-  and green but UNCOMMITTED pending this decision. The grind loop is
-  STOPPED; after deciding: apply the RFC amendment, finish/commit slice 4,
-  then restart with the /loop command in Resume.
-- Otherwise none. All three rounds resolved every finding with confident recommendations
+- None. The slice-4 torsion wrong-spec escalation was RESOLVED 2026-08-14:
+  Corey approved the recommended amendment (E[4]-only invariance + order-8
+  negative companion + [2]E/E[4] Context reframe), applied in RFC commit
+  13cd03c and implemented/committed in slice-4 commit 7eadac7 — see the RFC's
+  "Stage-3 amendment (2026-08-14)" section for the full record. All three rounds resolved every finding with confident recommendations
   under the standing fork test; Corey's stage-2 approval of the RFC as a whole
   is the only remaining gate and can veto any of them. Round 3's four
   reversals/renames of round-1/2-recorded details (Scalarmult stem rename,
