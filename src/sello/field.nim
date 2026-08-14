@@ -665,10 +665,19 @@ const
   ]
     ## sqrt(-1) mod p = 2^255 - 19 (ref10 `sqrtm1`, public domain), moved
     ## here from `scalar.nim` by RFC-003 slice 1: this is a property of the
-    ## field alone, with no curve equation baked in, and its only consumer
-    ## is `feSqrtRatioVartime` below -- unexported, since nothing outside
-    ## this function needs it now that `ed25519.nim` no longer hand-rolls
-    ## the retry step itself.
+    ## field alone, with no curve equation baked in. Stays private -- the
+    ## exported door onto it is `FeSqrtM1` below, not this raw array.
+
+const
+  FeSqrtM1* = feFromLimbs(SqrtM1Raw)
+    ## sqrt(-1) mod p, exported again (RFC-004 slice 1a) -- RFC-003 slice 1
+    ## privatized the raw array on a sole-consumer rationale
+    ## (`feSqrtRatioVartime` below was the only consumer at the time); this
+    ## is the honest reversal that rationale itself predicted: `feSqrtRatioM1`
+    ## below and, in later slices, ristretto's MAP and encode are new
+    ## legitimate field-level consumers. The raw limb array stays private;
+    ## this constant, built once via the one audited `feFromLimbs` door, is
+    ## the sole exported door onto it.
 
 func feSqrtRatioVartime*(u, v: Fe): Option[Fe] =
   ## Given field elements `u`, `v` (`v` assumed nonzero by every current
@@ -758,6 +767,125 @@ func feCSwap*(a, b: var Fe; swap: bool) {.noinline.} =
 func clampScalar*(s: var array[32, byte]) {.inline.} =
   s[0] = s[0] and 248
   s[31] = (s[31] and 127) or 64
+
+# ---------------------------------------------------------------------------
+# RFC-004 slice 1a: Ristretto255 (RFC 9496) CT field groundwork
+# ---------------------------------------------------------------------------
+
+func feAbs*(r: var Fe) {.inline.} =
+  ## `CT_ABS` (RFC 9496 §4.2): replaces `r` with its nonnegative
+  ## representative -- leaves `r` unchanged if `feIsNegative(r)` is false,
+  ## negates it otherwise -- via `feCMove` on `feIsNegative`, no
+  ## secret-dependent branch. Appears four times in the RFC 9496 spec
+  ## (sqrt-ratio, encode, and (later slices) the map); one audited home
+  ## next to `feCMove`, its selection primitive.
+  var negR: Fe
+  feNeg(negR, r)
+  feCMove(r, negR, feIsNegative(r))
+
+func feEqualCT*(a, b: Fe): bool {.inline.} =
+  ## Constant-time field equality: `feToBytes` both operands (which fully
+  ## reduces mod p, so two differently-radix-normalized representations of
+  ## the same field element compare equal) and or-accumulate the
+  ## byte-by-byte XOR into one word -- no early exit, no short-circuit
+  ## boolean. `field.nim` had `feIsNonZeroVartime`/`feBytesCanonical`
+  ## (both early-exit, verify-path only) but no CT equality; this is the
+  ## one audited home (the `challenge.nim`/`feFromLimbs` register),
+  ## consumed by `feSqrtRatioM1`'s three checks below and, in a later
+  ## slice, ristretto's `==`.
+  let ab = feToBytes(a)
+  let bb = feToBytes(b)
+  var diff: byte = 0
+  for i in 0..<32:
+    diff = diff or (ab[i] xor bb[i])
+  diff == 0
+
+func feIsZeroCT*(f: Fe): bool {.inline.} =
+  ## Constant-time zero test, in terms of `feEqualCT` above.
+  feEqualCT(f, FeZero)
+
+func feBytesCanonicalCT*(bytes: array[32, byte]): bool {.inline.} =
+  ## Constant-time canonicity check: decode-then-re-encode and compare
+  ## against the input, byte-by-byte or-accumulated -- no early exit.
+  ## `feToBytes` always fully reduces mod p, so a non-canonical input
+  ## (>= p) round-trips to DIFFERENT bytes, which this catches without
+  ## ever branching on which byte first diverges.
+  ##
+  ## NEVER use the existing `feBytesCanonical` in CT code: that function is
+  ## explicitly vartime (an early-exit per-byte loop that leaks WHICH byte
+  ## diverges) -- verify-path only, never on secret-derived data. This is
+  ## the CT counterpart `ristrettoDecode` (a later slice) needs, and the
+  ## same-shaped, adjacent, wrong-register helper an implementer following
+  ## the `pointDecode` precedent-pattern would naturally reach for instead.
+  let roundTrip = feToBytes(feFromBytes(bytes))
+  var diff: byte = 0
+  for i in 0..<32:
+    diff = diff or (roundTrip[i] xor bytes[i])
+  diff == 0
+
+func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] =
+  ## RFC 9496 §4.2 `SQRT_RATIO_M1`, constant-time. NOT a branch-to-cmov
+  ## transliteration of `feSqrtRatioVartime`'s two-case check above: the
+  ## spec primitive is a THREE-check dance -- `correct_sign_sqrt`
+  ## (`v*r^2 == u`), `flipped_sign_sqrt` (`v*r^2 == -u`), and
+  ## `flipped_sign_sqrt_i` (`v*r^2 == -u*SQRT_M1`) -- with
+  ## `was_square = correct_sign_sqrt or flipped_sign_sqrt`, and the
+  ## candidate root corrected by a `SQRT_M1` multiply whenever EITHER
+  ## flipped check fires. The third check exists because the FALSE-branch
+  ## root is load-bearing (unlike `feSqrtRatioVartime`, which only ever
+  ## needs to reject on that branch): the spec requires the false branch to
+  ## return `sqrt(SQRT_M1*u/v)` specifically, a value a future Ristretto MAP
+  ## consumes -- an implementation carrying only the old two checks would
+  ## pass every RFC 8032/Wycheproof vector (`pointDecode` never reads the
+  ## root on reject) and diverge only on that third, currently-untested
+  ## path.
+  ##
+  ## Returns a tuple, not `Option[Fe]` like its vartime predecessor,
+  ## DELIBERATELY: `Option` would discard the failure-branch payload, which
+  ## here is meaningful and consumed downstream (see above) -- so the
+  ## divergence from this module's own `Option`-returning register
+  ## (`feSqrtRatioVartime`) is designed, not an oversight.
+  ##
+  ## Constant-time throughout: the candidate root goes through the existing
+  ## `fePow22523` chain (already a fixed instruction sequence, no data
+  ## dependent branch), all three checks go through `feEqualCT` (above,
+  ## itself branchless), the correction and final sign-normalization go
+  ## through `feCMove`/`feAbs` (masked selects, no branch) -- no
+  ## secret-dependent branch or array index anywhere in this function.
+  var v2, v3, v7: Fe
+  feSq(v2, v)
+  feMul(v3, v2, v)            # v^3
+  feSq(v7, v3)                # v^6
+  feMul(v7, v7, v)            # v^7
+
+  var uv3, uv7: Fe
+  feMul(uv3, u, v3)           # u*v^3
+  feMul(uv7, u, v7)           # u*v^7
+
+  var r: Fe
+  fePow22523(r, uv7)          # (u*v^7)^((p-5)/8)
+  feMul(r, r, uv3)            # r = (u*v^3) * (u*v^7)^((p-5)/8)
+
+  var check: Fe
+  feSq(check, r)
+  feMul(check, check, v)      # check = v * r^2
+
+  var negU, negUSqrtM1: Fe
+  feNeg(negU, u)
+  feMul(negUSqrtM1, negU, FeSqrtM1)
+
+  let correctSignSqrt = feEqualCT(check, u)
+  let flippedSignSqrt = feEqualCT(check, negU)
+  let flippedSignSqrtI = feEqualCT(check, negUSqrtM1)
+
+  var rPrime: Fe
+  feMul(rPrime, FeSqrtM1, r)
+  feCMove(r, rPrime, flippedSignSqrt or flippedSignSqrtI)
+
+  feAbs(r)  # choose the nonnegative square root
+
+  result.wasSquare = correctSignSqrt or flippedSignSqrt
+  result.root = r
 
 {.pop.}
 {.pop.}
