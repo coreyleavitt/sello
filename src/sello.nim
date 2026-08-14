@@ -76,16 +76,43 @@
 ## secret shape the public API hands back to a caller (RFC-001 finding
 ## 11).
 ##
+## **Ristretto255** (RFC 9496, `sello/ristretto`) is a prime-order group
+## quotienting Curve25519's cofactor-8 Edwards curve -- every
+## `RistrettoPoint` names one group element with exactly one canonical
+## 32-byte encoding, closing the cofactor-malleability class of bug a raw
+## curve point invites. `ristrettoDecode`/`ristrettoEncode`/`==`/the
+## one-way map (`ristrettoFromUniformBytes`) are CT by construction; the
+## final accept/reject verdict is inherently caller-visible (see
+## `ristretto.nim`'s module doc for the full CT-posture writeup). Scalar
+## multiplication ships in both registers behind the same secret-scalar
+## type gate the rest of this library uses:
+## `ristrettoScalarmultVartime` accepts only a bare `array[32, byte]`
+## (verify-register protocol steps, the scalar public), while
+## `ristrettoScalarmultBase`/`ristrettoScalarmult` take the ristretto255
+## secret-scalar role types -- `RistrettoStaticSecret` (reusable, a
+## Pedersen key or OPRF server key) and `RistrettoEphemeralSecret`
+## (single-use, move-only, the ElGamal/ECIES-style DH-share role) --
+## mirroring X25519's static/ephemeral split. `RistrettoPoint` itself is
+## freely copyable with no `wipe` overload: elements are PUBLIC-register
+## values in every protocol this serves (a Pedersen commitment, an OPRF
+## blinded element) -- the secret is the scalar that derived it, and that
+## scalar's role type owns the hygiene. This module ships the GROUP, not
+## a scalar-arithmetic API: a Schnorr response or an OPRF client's
+## unblind step both need mod-L scalar operations this library
+## deliberately does not expose at the facade -- see `sello/ristretto`'s
+## module doc comment for the honest boundary.
+##
 ## The submodules (`sello/field`, `sello/scalar`, `sello/wire`,
-## `sello/wipe`, `sello/challenge`, `sello/ed25519`) are implementation
-## layers; importing them directly works but carries no API-stability
-## promise.
+## `sello/wipe`, `sello/challenge`, `sello/ed25519`, `sello/ristretto`) are
+## implementation layers; importing them directly works but carries no
+## API-stability promise.
 
 import sello/wire
 import sello/wipe
 import sello/ed25519
 import sello/x25519
 import sello/signing
+import sello/ristretto
 
 export wire.PublicKey, wire.Signature, verify
 export wire.toPublicKey, wire.toSignature, wire.toBytes
@@ -104,6 +131,26 @@ export signing.Seed, signing.Keypair, signing.toSeed
 export signing.keypair, signing.sign
 export signing.wipe
 export signing.public, signing.toSeedBytes
+# Ristretto255 (RFC 9496) -- ENUMERATED symbol-by-symbol (RFC-004 slice
+# 8d), matching this file's own facade-surface precedent: a concrete list
+# `test_facade.nim`'s reachability suite checks against, not a wildcard
+# `export ristretto`. `ristretto.ristrettoUnchecked` (the raw-`GeP3`
+# construction door) and `scalar.SecretScalar` are DELIBERATELY absent --
+# both bypass invariants this facade exists to hold.
+export ristretto.RistrettoPoint, ristretto.RistrettoEncoded
+export ristretto.RistrettoStaticSecret, ristretto.RistrettoEphemeralSecret
+export ristretto.RistrettoIdentity, ristretto.RistrettoBasePoint
+export ristretto.ristrettoDecode, ristretto.ristrettoEncode
+export ristretto.`+`, ristretto.`-`, ristretto.`==`
+export ristretto.ristrettoScalarmultBase, ristretto.ristrettoScalarmult
+export ristretto.ristrettoScalarmultVartime
+export ristretto.ristrettoFromUniformBytes
+export ristretto.ristrettoStaticSecret, ristretto.ristrettoStaticPair
+export ristretto.toRistrettoStaticSecret, ristretto.toRistrettoStaticSecretWide
+export ristretto.ristrettoEphemeralSecret, ristretto.ristrettoEphemeralPair
+export ristretto.toRistrettoEncoded, ristretto.toBytes
+export ristretto.wipe
+export ristretto.`$`, ristretto.hash
 when defined(selloLibsodium):
   # `sign`/`keypair` declare `SodiumInitError` in their `{.raises.}`
   # effects on this backend; export the type so a caller can catch it by
@@ -121,3 +168,20 @@ when defined(selloLibsodium):
 # `hash`, for Table/HashSet keying) IS exported above, because comparing
 # or hashing a PUBLIC value is a normal, expected operation with no CT
 # requirement of its own.
+#
+# Ristretto255's secret role types (`RistrettoStaticSecret`/
+# `RistrettoEphemeralSecret`) follow the same "no `==` on a secret" rule as
+# `X25519StaticSecret`/`X25519EphemeralSecret` above -- neither has one, and
+# `RistrettoEphemeralSecret` has no `toBytes` either, for the identical
+# unpersistable-by-design reason. `RistrettoPoint`, by contrast, DOES have
+# `==` (exported above) despite holding no secret of its own -- it is a
+# PUBLIC group element (see `ristretto.nim`'s module doc), and its `==` is
+# CT rather than vartime, unlike every other `==` this facade exports:
+# ristretto255 elements are routinely compared in timing-sensitive
+# positions (a DH-share or PAKE-style equality check on a value derived
+# from a live secret) that `PublicKey`/`Signature`/`X25519Public` never
+# see. `RistrettoEncoded`'s own `==` (exported above too) is the ordinary
+# vartime byte-compare -- see `ristretto.nim`'s module doc and
+# `RistrettoEncoded`'s own doc comment for the encode-then-compare timing
+# trap this creates (an operator cannot carry a `Vartime` suffix, so the
+# register switch between the two `==`s is silent at the call site).

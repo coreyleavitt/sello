@@ -7,6 +7,162 @@ sello is pre-1.0: versioning follows semver's spirit but not its letter --
 a breaking change bumps the minor version (0.x.0), not the major version,
 until 1.0.0.
 
+## [0.4.0] - 2026-08-14
+
+RFC-004: ristretto255 (RFC 9496), sello's first new group construction
+since the original ed25519/X25519 core, and slice 8d's own two API
+hardening changes carried forward from the unreleased 0.3.1 tag (see the
+0.3.1 note under Added/Breaking changes below).
+
+### Added
+
+- **`sello/ristretto`** -- a prime-order group (RFC 9496 ristretto255)
+  built on the existing extended-Edwards arithmetic, quotienting away the
+  cofactor-8 ambiguity a raw Curve25519 point carries. Every
+  `RistrettoPoint` names one group element with exactly one canonical
+  32-byte encoding (`RistrettoEncoded`); non-canonical or small-order
+  encodings do not decode. Facade surface (enumerated, `src/sello.nim`):
+  - `RistrettoPoint`/`RistrettoEncoded` and their converters/`==`/`$`/
+    `hash` (`RistrettoEncoded` only -- there is deliberately no
+    `hash(RistrettoPoint)`, see below); `RistrettoIdentity`/
+    `RistrettoBasePoint` fixed constants; `ristrettoDecode`/
+    `ristrettoEncode` (RFC 9496 SS4.3.1/SS4.3.2).
+  - `+`/binary `-`/unary `-` -- this library's first operators:
+    `RistrettoPoint` is a genuine abelian-group public type, unlike the
+    internal `Fe`/`GeP3` representations the rest of the codebase uses
+    verb-prefixed procs for.
+  - `ristrettoFromUniformBytes` (RFC 9496 SS4.3.4, Elligator 2): a total
+    one-way map from 64 caller-hashed bytes to a group element. Hashing is
+    the caller's job -- this module stays nimcrypto-free by design.
+  - Two secret-scalar role types mirroring X25519's static/ephemeral
+    split: `RistrettoStaticSecret` (reusable -- a Pedersen key, an OPRF
+    server key; `ristrettoStaticSecret()`/`ristrettoStaticPair()`,
+    `toRistrettoStaticSecret` (Option, rejects non-canonical input) /
+    `toRistrettoStaticSecretWide` (total, wide-reduces) for import, `wipe`,
+    `toBytes`) and `RistrettoEphemeralSecret` (single-use, move-only -- an
+    ElGamal/ECIES-style one-shot DH share; `ristrettoEphemeralSecret()`/
+    `ristrettoEphemeralPair()`, `wipe`, deliberately no `toBytes`).
+  - Scalar multiplication in both registers behind the same type gate the
+    rest of this library uses: `ristrettoScalarmultVartime` (bare
+    `array[32, byte]` only -- a secret scalar cannot reach it, a compile
+    error, not a convention), `ristrettoScalarmultBase` (CT fixed-base,
+    over the existing `geScalarmultBase`), and `ristrettoScalarmult` (CT
+    variable-base, over new `scalar.geScalarmultCT` -- a uniform
+    256-doubling interleaved radix-16 ladder with a runtime 8-entry table,
+    the operation that makes the group usable for OPRF evaluation,
+    Pedersen commitments, and DH shares over an arbitrary point).
+  - **CT posture:** decode/encode/equality/the map are constant-time by
+    construction (straight-line field arithmetic plus `feCMove`-based
+    selects); the final accept/reject verdict is inherently caller-visible
+    and carries no CT obligation of its own. `RistrettoPoint`'s `==` is CT
+    (diverging deliberately from every other `==` in this library, which
+    compares public wire data); `RistrettoEncoded`'s `==` stays the
+    ordinary vartime byte-compare, an intentional, documented timing-
+    register split an operator cannot self-flag (no `Vartime` suffix on an
+    operator) -- see `sello/ristretto`'s module doc comment and the new
+    README section for the encode-then-compare timing trap this creates.
+  - New field-layer CT primitives backing the above (`field.nim`):
+    `feSqrtRatioM1` (RFC 9496 SS4.2's three-check `SQRT_RATIO_M1`, CT --
+    replacing the deleted vartime `feSqrtRatioVartime`, which
+    `ed25519.pointDecode` now also builds on, one implementation instead
+    of two), `feEqualCT`/`feIsZeroCT`/`feBytesCanonicalCT`, `feAbs`, and a
+    re-exported `FeSqrtM1`.
+  - **Documented boundary (Non-goals):** this ships the group, not a
+    scalar-arithmetic API. A Schnorr response needs `scalar.scMulAdd`
+    (exists, submodule-only, deliberately not facade-exported); an OPRF
+    client's unblind step needs mod-L scalar inversion, which exists
+    nowhere in sello at any layer. v1 serves commitment/DH/blinding-shaped
+    protocols and an OPRF SERVER's evaluation step, not an OPRF client or
+    a Schnorr prover.
+- **Worked-consumer proof spike:** a Pedersen commit/open roundtrip
+  (`tests/unit/test_ristretto.nim`), asserted end to end against the
+  FROZEN FACADE surface only (`import sello`, not the wider
+  `sello/ristretto` submodule surface) -- `commit = xB + rH` with `H` from
+  `ristrettoFromUniformBytes`, open recomputes and verifies via `==`, a
+  wrong opening does not. The same scenario is README's own Ristretto255
+  example.
+- **Validation coverage, matching the existing bar with no new
+  categories invented:** bit-exact RFC 9496 Appendix A vectors (A.1
+  generator small-multiples both directions against an independent
+  `geScalarmultBase` oracle, A.2's full invalid-encoding catalog, A.3's
+  hash-to-group direct pairs and four-input convergence set, A.4's
+  `SQRT_RATIO_M1` vectors); property-based coverage (`test_properties_
+  ristretto.nim`: encode/decode roundtrips, group axioms, E[4]
+  torsion-invariance -- the quotient construction's own crown-jewel
+  property -- plus a deterministic order-8 negative companion pinning the
+  `[2]E/E[4]` boundary, agreement between the CT and vartime scalarmult
+  registers, boundary scalars, hash-to-group determinism); coverage-guided
+  fuzzing of `ristrettoDecode` (the attacker-controlled-input surface,
+  joining the existing three targets); a 20-mutant batch (catalog 50 ->
+  70) covering every new reject/select condition plus `geScalarmultCT`'s
+  own defect class; libsodium differential KATs under `-d:selloLibsodium`
+  (every A.1/A.2/A.3 vector plus random sweeps run through both sello and
+  `crypto_core_ristretto255_*`/`crypto_scalarmult_ristretto255`, gated by
+  a runtime libsodium >= 1.0.18 version assert); four new dudect timing
+  targets (`ristrettoScalarmult`, `ristrettoEncode`, `` `==` ``,
+  `ristrettoFromUniformBytes` -- `ristrettoDecode` stays disclosure-only,
+  attacker-supplied wire input by definition); two new Z3 (`sxUnsat`)
+  proofs (`tests/verify/symex_equal.nim`'s or-accumulate lemma backing
+  `feEqualCT`/`feIsZeroCT`/`feBytesCanonicalCT`, full domain).
+- **`NOTICE`** gains an RFC 9496 attribution entry (IETF Trust license
+  terms); `ristretto.nim` carries inline "RFC 9496 SSX.Y" attributions at
+  each transcription site, the standing per-source ritual. New README
+  "Ristretto255" section (what it's for, the worked Pedersen example, the
+  CT-posture/timing-register/scalar-boundary notes) replaces the old
+  "deferred by design" bullet under "What's not here", which now lists
+  decaf448 and the scalar-arithmetic/batch-op/Elligator-inverse
+  follow-ons instead.
+- **(carried forward from the unreleased `0.3.1` tag, never previously
+  entered in this file -- see the note under Breaking changes below)**
+  `keypair(seed, expectedPublic): Option[Keypair]` (janus consumer
+  finding 2) -- the load-time consistency gate for persisted keys whose
+  storage carries both halves (e.g. OpenSSH's/libsodium's
+  `seed(32) ‖ publicKey(32)` layout): re-derives the public key from the
+  seed and returns `none` on mismatch, instead of sello's re-derivation
+  silently making a corrupted stored key sign successfully under a public
+  key the caller never presented. Extraction idiom for the move-only
+  `Keypair` (`move(loaded.get())`) documented on the proc, the facade, and
+  a README example.
+- **(carried forward from `0.3.1`)** Declared `{.raises.}`/`gcsafe` over
+  the whole public surface (janus consumer finding 3): every module now
+  carries `{.push raises: [], gcsafe.}`, with per-constructor `OSError`
+  overrides on every fresh-secret constructor (five before this release;
+  RFC-004 adds four more ristretto255 ones, bringing the total to nine --
+  see above). Pinned by `test_facade.nim`'s declared-effect-contract
+  suite, which fails to compile if a declared effect grows.
+
+### Changed
+
+- `docs/ct-results.md` and `docs/mutation-results.md` regenerated for the
+  four new dudect targets and the 70-mutant catalog respectively.
+- `CLAUDE.md`'s architecture list, implementation status, script/test
+  inventory, and validation-bar section updated for `ristretto.nim` and
+  its test/verification surface.
+
+### Breaking changes
+
+- None to the existing ed25519/X25519 surface. `sello/ristretto` is
+  wholly new surface area; nothing it depends on (`field.nim`/
+  `scalar.nim`) changed its own public signatures, only gained new
+  exports (`feSqrtRatioM1`, `feEqualCT`, `feIsZeroCT`, `feBytesCanonicalCT`,
+  `feAbs`, re-exported `FeSqrtM1`, `scalar.geScalarmultCT`) -- except
+  `feSqrtRatioVartime`, which is DELETED (RFC-004 slice 1c): its one
+  consumer, `ed25519.pointDecode`, now builds on the new CT
+  `feSqrtRatioM1` instead, closing the two-independently-maintained-
+  sqrt-ratio-implementations drift risk this project exists to avoid.
+  Behavior is pinned unchanged by the full RFC 8032 + Wycheproof gates
+  (zero vector change). Breaking only for a direct `sello/field`
+  submodule importer of the deleted vartime function; the facade never
+  exported it.
+- **Note on the `0.3.1` tag:** commit `8b9ed64` ("0.3.1: persisted-key
+  load gate and compiler-enforced effect contract") bumped
+  `milpa.kdl`/`sello.nimble` to `0.3.1` but that version was never given
+  its own `CHANGELOG.md` entry before RFC-004 work began on top of it.
+  Both of its changes are recorded under Added, above, rather than
+  backfilled as a separate `[0.3.1]` section, since `0.3.1` itself was
+  never a tagged release point distinct from this one in practice --
+  0.4.0 is the first version stamp this changelog documents after 0.3.0.
+
 ## [0.3.0] - 2026-08-07
 
 Nothing was released between 0.2.0 and this version, so this single entry

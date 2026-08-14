@@ -104,6 +104,21 @@ suite "facade - hash() for the public wire types (RFC-002 slice 1)":
     pubSet.incl pub
     check pub in pubSet
 
+  test "RistrettoEncoded is usable as a Table/HashSet key (RFC-004 slice 8d)":
+    ## `RistrettoEncoded` joins the wire-type family above -- see
+    ## `ristretto.nim`'s module doc comment for why there is deliberately
+    ## no `hash(RistrettoPoint)` alongside it (key/dedupe on the encoding,
+    ## always, never the internal representation).
+    let encoded = ristrettoEncode(RistrettoBasePoint)
+
+    var encodedSet = initHashSet[RistrettoEncoded]()
+    encodedSet.incl encoded
+    check encoded in encodedSet
+
+    var encodedTable = initTable[RistrettoEncoded, string]()
+    encodedTable[encoded] = "generator"
+    check encodedTable[encoded] == "generator"
+
 suite "facade - $ for the public wire types (round-4 finding R11)":
   test "$ on PublicKey/Signature/X25519Public matches the underlying bytes' own stringification":
     ## `$` for these three types is `{.borrow.}`ed straight from the
@@ -121,6 +136,11 @@ suite "facade - $ for the public wire types (round-4 finding R11)":
     check len($(kp.public)) > 0
     check len($(sig)) > 0
     check len($(pub)) > 0
+
+  test "$ on RistrettoEncoded matches the underlying bytes' own stringification (RFC-004 slice 8d)":
+    let encoded = ristrettoEncode(RistrettoBasePoint)
+    check $(encoded) == $(toBytes(encoded))
+    check len($(encoded)) > 0
 
 suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
   test "X25519StaticSecret/X25519Public/X25519Shared and their converters are reachable through the facade":
@@ -206,6 +226,79 @@ suite "facade - X25519 three-role API (RFC-001 ledger #29 revisited)":
     wipe(shared)
     check toBytes(shared) == default(array[32, byte])
 
+suite "facade - ristretto255 public surface (RFC-004 slice 8d)":
+  ## The full RistrettoPoint/RistrettoEncoded/RistrettoStaticSecret/
+  ## RistrettoEphemeralSecret surface, reachable through `import sello`
+  ## alone -- no reaching into `sello/ristretto` directly.
+  ## `tests/unit/test_ristretto.nim` owns the actual RFC 9496 behavioral
+  ## coverage; this suite's only job is to catch a facade export that goes
+  ## missing or gets misspelled, the same division of labor as every other
+  ## suite in this file.
+  test "ristrettoStaticPair / ristrettoScalarmultBase / ristrettoScalarmult / == round trip through the facade":
+    let (aSecret, aPublic) = ristrettoStaticPair()
+    let (bSecret, bPublic) = ristrettoStaticPair()
+    check aPublic == ristrettoScalarmultBase(aSecret)
+    let sharedA = ristrettoScalarmult(aSecret, bPublic)
+    let sharedB = ristrettoScalarmult(bSecret, aPublic)
+    check sharedA == sharedB
+
+  test "toRistrettoStaticSecret / toRistrettoStaticSecretWide are reachable through the facade":
+    let (secret, public) = ristrettoStaticPair()
+    let raw = toBytes(secret)
+    let reimported = toRistrettoStaticSecret(raw)
+    check reimported.isSome
+    check ristrettoScalarmultBase(reimported.get()) == public
+
+    var wideRaw: array[64, byte]
+    for i in 0 ..< 32: wideRaw[i] = raw[i]
+    let widened = toRistrettoStaticSecretWide(wideRaw)
+    discard ristrettoScalarmultBase(widened) # reachability only; RFC-004
+                                              # slice 5a/test_ristretto.nim
+                                              # owns the reduce-vs-reject
+                                              # behavioral distinction
+
+  test "wipe(RistrettoStaticSecret) is reachable through the facade":
+    var (secret, _) = ristrettoStaticPair()
+    doAssert toBytes(secret) != default(array[32, byte])
+    wipe(secret)
+    check toBytes(secret) == default(array[32, byte])
+
+  test "RistrettoEphemeralSecret / ristrettoEphemeralPair / consuming ristrettoScalarmult are reachable through the facade":
+    var (eph, ephPublic) = ristrettoEphemeralPair()
+    check ephPublic == ristrettoScalarmultBase(eph)
+    let (peerSecret, peerPublic) = ristrettoStaticPair()
+    let shared = ristrettoScalarmult(move(eph), peerPublic)
+    check shared == ristrettoScalarmult(peerSecret, ephPublic)
+
+  test "wipe(sink RistrettoEphemeralSecret) is reachable through the facade":
+    ## `wipe` takes `sink`, so `move(eph)` is required inside `test:`'s
+    ## implicit try/finally even for this sole remaining use -- the same
+    ## ceremony `wipe(sink X25519EphemeralSecret)`'s own facade test needs.
+    var eph = ristrettoEphemeralSecret()
+    wipe(move(eph))
+
+  test "ristrettoDecode / ristrettoEncode / toRistrettoEncoded / toBytes(RistrettoEncoded) round trip through the facade":
+    let encoded = ristrettoEncode(RistrettoBasePoint)
+    let decoded = ristrettoDecode(encoded)
+    check decoded.isSome
+    check decoded.get() == RistrettoBasePoint
+    let reimported = toRistrettoEncoded(toBytes(encoded))
+    check reimported == encoded
+
+  test "ristrettoScalarmultVartime is reachable through the facade":
+    let raw = [1'u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+    check ristrettoScalarmultVartime(raw, RistrettoBasePoint) == RistrettoBasePoint
+
+  test "group operators +, binary -, unary - are reachable through the facade":
+    let p = RistrettoBasePoint
+    check (p + p) - p == p
+    check p + (-p) == RistrettoIdentity
+
+  test "ristrettoFromUniformBytes is reachable through the facade":
+    let point = ristrettoFromUniformBytes(default(array[64, byte]))
+    check ristrettoDecode(ristrettoEncode(point)).get() == point
+
 suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
   test "a bare array[32, byte] is not implicitly usable as a PublicKey":
     check(not compiles(block:
@@ -268,6 +361,80 @@ suite "facade - nominal typing (RFC-001 finding 9, compile-time)":
       discard toX25519EphemeralSecret(raw)
     ))
 
+  test "a RistrettoEncoded is not implicitly usable as a PublicKey":
+    check(not compiles(block:
+      let encoded = ristrettoEncode(RistrettoBasePoint)
+      let sig = default(Signature)
+      discard verify(encoded, "msg", sig)
+    ))
+
+  test "a RistrettoEncoded is not implicitly usable as an X25519Public":
+    check(not compiles(block:
+      let encoded = ristrettoEncode(RistrettoBasePoint)
+      let secret = x25519StaticSecret()
+      discard x25519(secret, encoded)
+    ))
+
+  test "a RistrettoEncoded does not implicitly convert to a Signature or array[32, byte]":
+    check(not compiles(block:
+      let encoded = ristrettoEncode(RistrettoBasePoint)
+      let sig: Signature = encoded
+    ))
+    check(not compiles(block:
+      let encoded = ristrettoEncode(RistrettoBasePoint)
+      let raw: array[32, byte] = encoded
+    ))
+
+  test "a PublicKey/X25519Public is not implicitly usable as a RistrettoEncoded":
+    check(not compiles(block:
+      let pk = toPublicKey(default(array[32, byte]))
+      discard ristrettoDecode(pk)
+    ))
+    check(not compiles(block:
+      let pub = x25519Base(x25519StaticSecret())
+      discard ristrettoDecode(pub)
+    ))
+
+  test "RistrettoStaticSecret does not implicitly convert to X25519StaticSecret or Seed":
+    check(not compiles(block:
+      let secret = ristrettoStaticSecret()
+      let x25519secret: X25519StaticSecret = secret
+    ))
+    check(not compiles(block:
+      let secret = ristrettoStaticSecret()
+      let seed: Seed = secret
+    ))
+
+  test "RistrettoStaticSecret does not implicitly convert to array[32, byte]":
+    check(not compiles(block:
+      let secret = ristrettoStaticSecret()
+      let raw: array[32, byte] = secret
+    ))
+
+  test "RistrettoEphemeralSecret does not implicitly convert to X25519EphemeralSecret":
+    check(not compiles(block:
+      var secret = ristrettoEphemeralSecret()
+      let x25519secret: X25519EphemeralSecret = move(secret)
+    ))
+
+  test "RistrettoEphemeralSecret has no toBytes overload (unpersistable by design)":
+    check(not compiles(block:
+      let eph = ristrettoEphemeralSecret()
+      discard toBytes(eph)
+    ))
+
+  test "ristrettoScalarmultVartime does not accept a RistrettoStaticSecret or scalar.SecretScalar (round-3 finding A3 boundary, reused for ristretto255)":
+    ## The full compile-error proof for the move-only violation class
+    ## lives in the subprocess-`nim c`-driven
+    ## `tests/unit/fixtures/reject_secretscalar_ristretto_vartime.nim`
+    ## (`compiles()` cannot see everything that fixture proves); this is
+    ## the ordinary type-mismatch half, which `not compiles(...)` can see
+    ## directly.
+    check(not compiles(block:
+      let secret = ristrettoStaticSecret()
+      discard ristrettoScalarmultVartime(secret, RistrettoBasePoint)
+    ))
+
 suite "facade - declared effect contract (janus finding 3)":
   ## The "nothing else in the pure surface raises" promise used to be
   ## prose, held only by downstream consumers' own `{.raises: [].}`
@@ -292,6 +459,27 @@ suite "facade - declared effect contract (janus finding 3)":
     let (sb, pb) = x25519StaticPair()
     check pinDh(sa, pb).get().toBytes() == pinDh(sb, pa).get().toBytes()
 
+  test "ristrettoDecode / ristrettoEncode / the scalarmult family / == satisfy {.raises: [], gcsafe.} by declaration (RFC-004 slice 8d)":
+    proc pinDecode(e: RistrettoEncoded): Option[RistrettoPoint] {.raises: [], gcsafe.} =
+      ristrettoDecode(e)
+    proc pinEncode(p: RistrettoPoint): RistrettoEncoded {.raises: [], gcsafe.} =
+      ristrettoEncode(p)
+    proc pinEq(a, b: RistrettoPoint): bool {.raises: [], gcsafe.} =
+      a == b
+    proc pinScalarmultBase(s: RistrettoStaticSecret): RistrettoPoint {.raises: [], gcsafe.} =
+      ristrettoScalarmultBase(s)
+    proc pinScalarmult(s: RistrettoStaticSecret; p: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe.} =
+      ristrettoScalarmult(s, p)
+    proc pinScalarmultVartime(s: array[32, byte]; p: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe.} =
+      ristrettoScalarmultVartime(s, p)
+
+    let (secret, public) = ristrettoStaticPair()
+    let encoded = pinEncode(public)
+    check pinDecode(encoded).isSome
+    check pinEq(pinDecode(encoded).get(), public)
+    check pinScalarmultBase(secret) == public
+    check pinEq(pinScalarmult(secret, public), pinScalarmultVartime(toBytes(secret), public))
+
   test "sign / keypair(seed) / keypair(seed, expectedPublic) declare exactly the backend's effect set":
     when defined(selloLibsodium):
       proc pinSign(kp: Keypair; msg: string): Signature {.raises: [SodiumInitError], gcsafe.} =
@@ -312,7 +500,7 @@ suite "facade - declared effect contract (janus finding 3)":
     check verify(kp.public, "m", pinSign(kp, "m"))
     check pinLoad(toSeed(toSeedBytes(kp)), kp.public).isSome
 
-  test "the five fresh-secret constructors declare {.raises: [OSError].}":
+  test "the nine fresh-secret constructors declare {.raises: [OSError].} (RFC-004 slice 8d: five becomes nine)":
     when defined(selloLibsodium):
       proc pinFresh(): Keypair {.raises: [OSError, SodiumInitError], gcsafe.} =
         keypair()
@@ -327,6 +515,14 @@ suite "facade - declared effect contract (janus finding 3)":
       x25519StaticPair()
     proc pinEphPair(): tuple[secret: X25519EphemeralSecret, public: X25519Public] {.raises: [OSError], gcsafe.} =
       x25519EphemeralPair()
+    proc pinRistrettoStatic(): RistrettoStaticSecret {.raises: [OSError], gcsafe.} =
+      ristrettoStaticSecret()
+    proc pinRistrettoStaticPair(): tuple[secret: RistrettoStaticSecret, public: RistrettoPoint] {.raises: [OSError], gcsafe.} =
+      ristrettoStaticPair()
+    proc pinRistrettoEph(): RistrettoEphemeralSecret {.raises: [OSError], gcsafe.} =
+      ristrettoEphemeralSecret()
+    proc pinRistrettoEphPair(): tuple[secret: RistrettoEphemeralSecret, public: RistrettoPoint] {.raises: [OSError], gcsafe.} =
+      ristrettoEphemeralPair()
 
     let kp = pinFresh()
     check verify(kp.public, "m", kp.sign("m"))
@@ -337,3 +533,10 @@ suite "facade - declared effect contract (janus finding 3)":
     var (es, ep) = pinEphPair()
     check x25519(move(es), sp).isSome
     check x25519(ss, ep).isSome
+
+    let ristrettoStat = pinRistrettoStatic()
+    discard ristrettoScalarmultBase(ristrettoStat)
+    wipe(pinRistrettoEph())
+    let (rss, rsp) = pinRistrettoStaticPair()
+    var (res, rep) = pinRistrettoEphPair()
+    check ristrettoScalarmult(move(res), rsp) == ristrettoScalarmult(rss, rep)

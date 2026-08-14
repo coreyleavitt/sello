@@ -346,6 +346,73 @@ Dispatches `sign`/`keypair` to libsodium's `crypto_sign_seed_keypair` /
 an ordinary linker error). `verify` is unaffected. There is no other API
 change; code written against the pure-Nim backend recompiles as-is.
 
+### Ristretto255
+
+[RFC 9496](https://www.rfc-editor.org/info/rfc9496) ristretto255: a
+prime-order group built on top of the same Curve25519 curve, closing the
+cofactor-malleability class of bug a raw curve point invites (Monero's
+key-image double-spend is the canonical real-world casualty). It is the
+substrate modern protocol work assumes -- Pedersen commitments, DH shares,
+OPRF evaluation, Schnorr proofs-of-knowledge -- where a raw Edwards point's
+small-order components and non-unique encodings are a foot-gun. Every
+`RistrettoPoint` names one group element with exactly one canonical
+32-byte encoding; non-canonical or small-order garbage does not decode.
+
+```nim
+import sello
+
+# H: an independent generator with no known discrete log relative to the
+# base point, derived via the one-way hash-to-group map from 64
+# domain-separated bytes (a real protocol hashes its own context string;
+# this example hardcodes bytes only so it is deterministic).
+var hSeed: array[64, byte]
+for i in 0 ..< 64: hSeed[i] = byte(i * 7 + 11)
+let h = ristrettoFromUniformBytes(hSeed)
+
+# A Pedersen commitment to value x, blinded by r: commit = xB + rH.
+let x = ristrettoStaticSecret()   # the committed value
+let r = ristrettoStaticSecret()   # the blinding factor
+let commitment = ristrettoScalarmultBase(x) + ristrettoScalarmult(r, h)
+
+# Open: recompute from the revealed (x, r) and compare via ==.
+doAssert (ristrettoScalarmultBase(x) + ristrettoScalarmult(r, h)) == commitment
+```
+
+`ristrettoDecode`/`ristrettoEncode`/`==`/`ristrettoFromUniformBytes` are
+constant-time by construction (the final accept/reject verdict is
+inherently caller-visible and carries no CT obligation of its own -- see
+`sello/ristretto`'s module doc comment for the full CT-posture writeup).
+Scalar multiplication follows the same CT-vs-vartime type gate as the rest
+of this library: `ristrettoScalarmultVartime` accepts only a bare
+`array[32, byte]` (public-scalar protocol steps), while
+`ristrettoScalarmultBase`/`ristrettoScalarmult` above take one of two
+secret-scalar role types mirroring X25519's static/ephemeral split --
+`RistrettoStaticSecret` (reusable, used above) or `RistrettoEphemeralSecret`
+(single-use, move-only, for an ElGamal/ECIES-style one-shot DH share).
+
+**Two `==` operators, two timing registers -- read this before comparing
+in a timing-sensitive position.** `RistrettoPoint`'s `==` (used above) is
+constant-time; `RistrettoEncoded`'s `==` is the ordinary vartime
+byte-compare every other wire type in this library uses. An operator
+cannot carry a `Vartime` suffix, so the register switch is silent at the
+call site -- compare `RistrettoPoint`s directly in any timing-sensitive
+position; calling `ristrettoEncode` on both sides first (the natural move
+for a caller about to serialize anyway) silently downgrades a CT
+comparison to vartime. There is also deliberately no `hash(RistrettoPoint)`
+-- key or dedupe on `RistrettoEncoded` (encode first), never on the point.
+
+**What this ships, and what it doesn't:** this is the GROUP --
+decode/encode/equality/the hash-to-group map/group operators/scalar
+multiplication -- not a scalar-arithmetic API. That's enough for
+commitment/DH/blinding-shaped protocols (Pedersen commit/open above,
+ElGamal/ECIES-style encryption, an OPRF SERVER's evaluation step) but not
+for protocols whose secret math goes further: a Schnorr response needs
+mod-L scalar multiply-add, and an OPRF CLIENT's unblind step needs mod-L
+scalar inversion -- neither is exposed at this facade (the multiply-add
+exists submodule-only in `sello/scalar`; the inversion exists nowhere in
+sello at any layer). See `sello/ristretto`'s module doc comment for the
+full boundary.
+
 ## Building and testing
 
 sello is developed against milpa (Corey's Nim dependency resolver), not
@@ -422,8 +489,16 @@ proves instead.
 
 ## What's not here
 
-- **Ristretto255** -- deferred by design; the module layering leaves a
-  clean extension point but nothing is built yet.
+- **decaf448** -- no Curve448 core exists in sello and none is planned;
+  ristretto255 (Curve25519-based) above is the only prime-order group this
+  library ships.
+- **A public scalar-arithmetic API** on the ristretto255 group -- see the
+  Ristretto255 section above for the boundary this draws (commitment/DH/
+  blinding-shaped protocols are served; Schnorr responses and OPRF client
+  unblinding are not).
+- **Batch/double-scalar ristretto255 operations** and **Elligator inverse**
+  (element to uniform bytes, for censorship-resistant transports) -- real
+  features, deferred until a consumer exists to size them.
 - **Ed25519ctx / Ed25519ph** (RFC 8032 SS5.1's context and prehash
   variants) and **key-container formats** (PKCS#8/JWK/OpenSSH) -- out of
   scope for now; sello speaks raw 32-byte seeds and signs full in-memory

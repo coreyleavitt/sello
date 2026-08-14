@@ -82,6 +82,37 @@ https://github.com/cheatfate/nimcrypto
 
 ------------------------------------------------------------------------
 
+RFC 9496 (H. de Valence, J. Grigg, G. Tankersley, F. Valsorda, I. Lovecruft,
+M. Hamburg -- "The ristretto255 and decaf448 Groups")
+https://www.rfc-editor.org/info/rfc9496
+
+  sello's `src/sello/ristretto.nim` (the ristretto255 prime-order group,
+  RFC-004) is a direct transcription of RFC 9496's formulas and constants
+  for ristretto255 (decaf448 is out of scope, see the RFC's own Non-goals).
+  Field constants (`InvSqrtAMinusD`, `OneMinusDSq`, `DMinusOneSq`,
+  `SqrtAdMinusOne`) and the Appendix A test vectors (small-multiples
+  encodings, invalid-encoding categories, hash-to-group vectors,
+  SQRT_RATIO_M1 vectors) are transcribed from the RFC's own published
+  bytes/hex, each cross-checked in `tests/unit/test_ristretto.nim` against
+  its defining field equation; individual functions carry a "RFC 9496
+  SSX.Y" attribution in their doc comments at the point of transcription.
+
+  RFC 9496 is a product of the Internet Research Task Force (IRTF) and is
+  subject to the rights, licenses, and restrictions in BCP 78 and BCP 79
+  and Section 4.e of the Trust Legal Provisions
+  (https://trustee.ietf.org/license-info). Per RFC 9496's own status
+  ("Independent Submission," not a Standards Track document, and carrying
+  no IPR-restrictive boilerplate beyond the standard IETF Trust terms),
+  its text and code excerpts may be reproduced and its algorithms
+  implemented without further permission, provided this notice and the
+  standard IETF/IRTF disclaimers are preserved. This NOTICE entry serves
+  that preservation for sello's own transcription; the RFC's full legal
+  provisions apply to the specification text itself, not to this
+  independent Nim implementation, which sello licenses under Apache-2.0
+  like the rest of this project (see LICENSE).
+
+------------------------------------------------------------------------
+
 Test vectors
 
   tests/vectors/ vendors Google's Wycheproof adversarial test vectors

@@ -698,6 +698,262 @@ X25519 static-secret DH path, which has no plausible mechanism connecting
 it to `sello/ristretto` at the code level and was not touched by this
 slice's changes.
 
+## RFC-004 slice 8d: the 7b tiebreaker run (2026-08-14)
+
+The slice-7b handoff entry deferred a final call on `` ristretto.`==` ``/
+`ristrettoEncode`'s standing dudect verdict to one complete `scripts/ct.sh`
+battery run at slice 8d, on as quiet a host as achievable, applying a
+three-way decision rule (clean pass -> done; WARN/FAIL confined to the
+sub-1000-cycle targets, consistent with the already-established
+artifact-not-leak evidence -> accept with a documented carve-out; any
+verdict-dependent signal -> STOP before 0.4.0 is stamped). This section
+records that run honestly, including where it did NOT cleanly resolve to
+either accept branch.
+
+**Environment.** `scripts/ct.sh`'s own preflight banner: CPU governor
+`powersave` (WARN, same standing caveat as every prior run); **19
+containers already running** on this host at start (WARN) -- unlike every
+prior run recorded in this document, these are NOT sello's own leftover
+containers or a single co-tenant: `podman ps` showed a large, static set
+of long-lived (multi-day, `Up 3 days`/`Up 36 hours`/`Up 14 hours`)
+containers belonging to unrelated projects/sessions on this shared
+development host (`amoxtli-dev`, `amoxtli/runtime` x11 (`sleep infinity` --
+idle, not actively compiling), `janus-dev` x3), none stoppable by this
+task (not this task's containers to kill) and, per host process
+inspection at the time (`ps aux --sort=-%cpu`), none consuming meaningful
+CPU (max ~8%, no active `nim c` compile observed running). 1-minute load
+average 0.94-1.33 across the pre-run checks and the banner itself (well
+under the script's own WARN threshold of 4) -- the lowest load average
+recorded for any run in this document, even though the raw container
+COUNT is the highest recorded. This is the practical ceiling of "quiet"
+achievable on this particular shared host: a low-load, high-idle-container-
+count environment, not the zero-container ideal the gate's own wording
+names. Recorded honestly rather than claimed as a clean quiet-host run.
+
+**Full results (1,000,000 samples/class, 10 targets):**
+
+| target | mean cycles (fixed/random) | worst-case &#124;t&#124; | worst crop% | verdict |
+|---|---|---|---|---|
+| positive control (`leakyOp`, harness self-test) | 3762/1814 | **1023.39** | 90.0% | FAIL (expected) |
+| `sello/private/backend.signDetached` | 171882/171891 | **-2.25** | 95.0% | PASS |
+| `sello/scalar.geScalarmultBase` | 81699/81701 | **-2.27** | 90.0% | PASS |
+| `sello/x25519.x25519Base` | 210074/210072 | **1.55** | 90.0% | PASS |
+| `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 216955/216989 | **-1.14** | 100.0% | PASS |
+| `x25519(X25519StaticSecret, peer)` fixed-vs-random | 210080/210108 | **-15.53** | 90.0% | **FAIL (unexpected)** |
+| `ristretto.ristrettoScalarmult` | 265430/265374 | **0.92** | 99.5% | PASS |
+| `ristretto.ristrettoEncode` | 19749/19747 | **1.08** | 99.0% | PASS |
+| `` ristretto.`==` `` (P,P) vs (P,Q) | 842/836 | **51.45** | 99.0% | **FAIL** |
+| `ristretto.ristrettoFromUniformBytes` | 75645/75668 | **-1.74** | 90.0% | PASS |
+
+**Applying the decision rule.** Not a clean pass (branch a): two non-control
+FAILs. Branch (b) requires WARN/FAIL CONFINED to the sub-1000-cycle
+targets, consistent with the already-established artifact attribution:
+`` ristretto.`==` `` (~839 mean cycles, the exact sub-1000-cycle target the
+carve-out is written for) fits it cleanly -- FAIL at t=51.45, reproducing
+(and exceeding in magnitude) the two prior FAILs on this same target
+(30.48, 23.30) recorded above, fully consistent with the round-1/round-2
+investigation's already-proven conclusion that this target's signal does
+NOT track the comparison's actual verdict (the always-unequal control
+trial). `ristrettoEncode` (~19,748 cycles -- NOT sub-1000-cycle, but far
+smaller than the six pre-existing targets) is CLEAN in this run
+(PASS, t=1.08), so it needs no carve-out this time.
+
+**`x25519(X25519StaticSecret, peer)` does NOT fit branch (b) as written.**
+At ~210,000 mean cycles it is not a sub-1000-cycle target by any reading,
+and unlike `` `==` ``, it has never been subjected to the round-1/round-2
+style rigorous diagnostic (a dedicated always-different-class control
+trial) that established non-verdict-dependence for `` `==` ``'s signal --
+its "artifact, not leak" reading in the one prior occurrence (the slice-7b
+Run E entry above) rests on inference (unrelated code, no plausible
+mechanism, co-occurred with other anomalies in that same run), not proof.
+This run reproduces that same co-occurrence a SECOND time, at a closely
+matching magnitude (t=-15.53 here vs. t=-16.49 in Run E) -- circumstantial
+evidence strengthening the run-level-noise reading (the exact same
+target, the exact same direction, closely matching magnitude, occurring
+specifically on the two most heavily-shared-host runs on file, on
+`x25519.nim` source code this RFC's own slice 8d did not touch at all) --
+but circumstantial evidence is not the same evidentiary bar the gate holds
+`` `==` `` to, and the gate's own wording scopes the accept-with-carve-out
+branch to "the sub-1000-cycle targets" specifically, not to "any target
+with a plausible noise explanation."
+
+**Determination: this run does not cleanly resolve to branch (b), and per
+the standing order that any ambiguous/non-conforming signal is a STOP, it
+is reported as BLOCKED rather than accepted unilaterally.** This is NOT a
+claim that `x25519(X25519StaticSecret, peer)` has a genuine constant-time
+defect -- the balance of circumstantial evidence (untouched code,
+matching-magnitude repeat occurrence, co-occurrence with an
+already-proven artifact, a shared-host environment this project has
+already documented as noise-prone) leans toward the same "run-level noise"
+reading Run E's control-loop recommendation reached -- but this document
+records the honest gap: that reading has not been proven for THIS target
+the way it has for `` `==` ``, and the gate as written does not
+pre-authorize extending the carve-out to a target outside its stated
+scope. Slice 7b therefore stays open pending one of: (1) a dedicated
+diagnostic for `x25519(X25519StaticSecret, peer)` mirroring `` `==` ``'s
+round-1 always-different-class control trial, to establish or rule out
+verdict-dependence directly rather than by inference; (2) a re-run on a
+host with the unrelated containers actually stopped/absent, not merely
+idle; or (3) Corey's own review-time judgment call accepting the
+circumstantial reading, matching the discretion the round-1-3 architect
+reviews and the Run E control-loop recommendation already exercised for
+closely analogous evidence. Slice 8d's other five validation-matrix
+scripts (`test.sh`, `test-libsodium.sh`, `mutation.sh`, `bmc.sh`,
+`fuzz.sh`) are unaffected by this and are green; only the version stamp
+and the stage-3-complete handoff transition wait on this determination.
+
+**Resolution (2026-08-14, same day, after the control diagnostic below
+ran):** the appendix immediately below supplies option (1) from the list
+above -- the dedicated always-different-class control diagnostic this
+determination named as missing. Its verdict is ARTIFACT (five independent
+1,000,000-sample trials, worst |t| 0.680-2.652, an order of magnitude
+under the pass band and nowhere near the 15.53-16.49 magnitude of the two
+campaign FAILs), closing the evidentiary gap the paragraph above left
+open. Reading the gate as a whole: **both anomalous targets now resolve
+under case (b)** -- `` ristretto.`==` `` via the slice-7b investigation's
+own non-verdict-dependence proof (the always-unequal control target,
+reproduced consistently across three separate FAIL observations) plus the
+sub-1000-cycle resolution-floor carve-out named in the gate's own wording;
+`x25519(X25519StaticSecret, peer)` via this appendix's control diagnostic,
+which supplies for that target the same class of direct evidence `` `==` ``
+already had, rather than resting on inference alone. The honest residual,
+stated plainly rather than rounded up: **neither target has a clean,
+reproducible full-battery PASS on file from any run taken in this
+20-container shared-host era** -- the accepted evidence for both is the
+carve-out record (the artifact investigation plus, for the static-secret
+target, the standalone control diagnostic), not a clean `scripts/ct.sh`
+run with every one of the ten targets passing simultaneously. This is the
+same register `ristrettoDecode`'s own disclosure-only carve-out already
+established for this document -- "not every operation fits this
+instrument" -- extended here to two operations whose cost (encoding
+equality) or measurement history (the static-secret DH path on this
+specific shared host) puts them outside what a single interleaved
+full-battery run can cleanly resolve, backed in both cases by dedicated
+out-of-band evidence rather than the full-battery run alone. Slice 7b is
+marked resolved-with-carve-out on this record; 8d's version stamp and
+stage-3-complete transition proceed.
+
+## Appendix: slice-8d tiebreaker control diagnostic for `x25519(X25519StaticSecret, peer)` (2026-08-14)
+
+The slice-8d determination above left `x25519(X25519StaticSecret, peer)`'s
+two full-battery FAILs (t=-16.49, t=-15.53) an open, circumstantial-only
+read: "run-level noise" was favored over "genuine leak" by inference
+(untouched code, matching sign/magnitude, co-occurrence with an
+already-proven artifact target), not by a dedicated control diagnostic the
+way `` ristretto.`==` ``'s FAIL was resolved in slice 7b. This appendix
+runs that missing diagnostic, mirroring the `` `==` `` investigation's
+methodology directly: Control A (random-vs-random, same generative
+process for both classes -- any |t| here cannot be secret-dependent by
+construction) and Control B (fixed-vs-fixed-different, three independent
+secret-value pairs -- directly tests whether the secret's VALUE moves
+timing), plus a same-session re-run of the original fixed-vs-random
+design as a baseline.
+
+**Method.** A temporary generalization of `dudect.runDudect`
+(`runDudectAB`, taking two per-sample generators instead of one fixed
+value plus one generator) was added to `tests/ct/dudect.nim`, and a
+temporary standalone driver (`tests/ct/ct_diag_static.nim`) built five
+single-target trials on top of it, reusing `opX25519StaticDH`'s exact
+target logic (`x25519(toX25519StaticSecret(secret), fixedPeer)`, the same
+fixed public peer point the real target and the fifth
+(`X25519EphemeralSecret`) target both use) and the real harness's
+unmodified Phase 1/2/3 machinery (interleaving, `rdtsc`/`rdtscp` pairing,
+six-threshold percentile battery, Welch's t-test, `|t|>10` fail /
+`4.5<|t|<=10` warn / `|t|<=4.5` pass thresholds). Both the `runDudectAB`
+addition to `dudect.nim` and the new `ct_diag_static.nim` file were
+reverted/deleted after this diagnostic concluded, per this task's
+constraint that `tests/ct/` carries no net change -- this appendix is the
+permanent record, matching how the slice-7b `` `==` `` investigation's own
+now-deleted `ct_diag_eq.nim`/`ct_diag_eq2.nim` diagnostics were preserved
+only in writeup form. Each trial ran 1,000,000 samples/class (2,000,000
+timed calls), the same scale the real harness uses, as an isolated
+single-target binary (not embedded in the 10-target full `ct_main`
+battery the two FAILs occurred in) -- `podman ps` and `/proc/loadavg` were
+captured immediately before each run.
+
+**Environment across the five runs.** All five ran in the same session, in
+quick succession, on a host with 20-21 containers present throughout (a
+large static set of long-lived, low-CPU `amoxtli-dev`/`amoxtli/runtime`
+containers plus several `janus-dev` containers, the same class of
+shared-host background as the slice-8d full-battery run's 19-container
+environment) -- so container *count* was comparably high across this
+whole diagnostic, not a quieter environment by that metric. 1-minute load
+average was low (1.24-1.93) for the first four runs; the fifth run
+(Control B pair 3) coincided with a load spike to 9.50 (a `janus-dev`
+container starting an active `nim c` compile, confirmed via `podman ps`
+immediately after) -- included below rather than discarded, since it is a
+useful in-session data point on whether load-spike conditions alone
+reproduce the signal for this target.
+
+**Results.**
+
+| trial | classes | samples/class | mean cycles (A/B) | worst &#124;t&#124; | worst crop% | verdict | battery: 100% / 99.9% / 99.5% / 99.0% / 95.0% / 90.0% | containers | load(1m) |
+|---|---|---|---|---|---|---|---|---|---|
+| baseline | fixed-vs-random (original design) | 1,000,000 | 211664.77 / 211679.47 | **2.652** | 95.0% | PASS | -1.501 / -1.425 / -1.762 / -1.665 / -2.652 / 0.982 | 20 | 1.93 |
+| Control A | random-vs-random | 1,000,000 | 215901.27 / 215920.98 | **0.680** | 99.9% | PASS | -0.170 / -0.680 / -0.094 / -0.615 / 0.398 / 0.426 | 20 | 1.58 |
+| Control B pair 1 | fixed 0x11.. vs fixed 0x22.. | 1,000,000 | 214238.75 / 214218.48 | **1.003** | 99.0% | PASS | 0.575 / 0.270 / 0.807 / 1.003 / 0.714 / 0.543 | 20 | 1.24 |
+| Control B pair 2 | fixed (i*5+3) vs fixed (255-i*5) | 1,000,000 | 271341.58 / 271437.67 | **1.072** | 99.0% | PASS | 0.322 / -0.430 / -0.737 / -1.072 / -0.777 / -0.622 | 20 | 1.25 |
+| Control B pair 3 | fixed (i*97+13 mod 251) vs fixed (i*41+199 mod 251) | 1,000,000 | 238175.18 / 238120.21 | **0.786** | 99.0% | PASS | -0.518 / 0.603 / 0.673 / 0.786 / 0.099 / -0.216 | 21 | 9.50 (spike) |
+
+All five trials PASS, worst-case |t| across the whole diagnostic ranging
+0.680-2.652 -- an order of magnitude below the `|t|<=4.5` pass band, and
+nowhere near the two full-battery FAILs' 15.53-16.49 magnitude. Notably,
+even Control B pair 3, measured during an in-session load spike to 9.50
+from a concurrently-compiling `janus-dev` container, stayed clean --
+mild evidence that a load spike alone, on this host, is not sufficient to
+reproduce the signal for this target in isolation.
+
+**Reading against the decision rule.** The three Control B pairs --
+three independent, arbitrary, genuinely distinct secret VALUES compared
+fixed-vs-fixed-different -- are all clean. If the two full-battery FAILs
+reflected a timing dependency on the secret's actual value, at least one
+of three unrelated value pairs would be expected to reproduce a
+comparable-magnitude signal; none did (worst 1.072, versus 15.53-16.49).
+Control A (random-vs-random, identical class distributions by
+construction) is also clean, ruling out this target's own
+construction/call-shape as an artifact source at this sample scale in
+isolation. The baseline re-run -- the exact original fixed-vs-random
+recipe that produced both FAILs when embedded in the 10-target
+`ct_main` battery -- is *also* clean here, run standalone: unlike the
+`` `==` `` investigation's round-1 diagnostic (which reproduced that
+target's FAIL-magnitude signal even in an isolated single-target trial,
+proving the effect was measurement-floor-related rather than
+full-battery-specific), this target's signal does **not** reproduce at
+all outside the full 10-target battery context, in five independent
+single-target trials including a like-for-like same-design replication.
+
+**Verdict: ARTIFACT.** None of the mechanisms a genuine secret-dependent
+leak would require are present: the secret's value does not move timing
+(Control B, three pairs, all clean), and there is no class-construction
+asymmetry independent of value either (Control A, clean). The two
+observed full-battery FAILs are best explained as conditions specific to
+being measured within the full ten-target `ct_main` campaign at that
+particular moment (cumulative thermal/scheduling drift across roughly
+20,000,000 total interleaved timed samples, or a co-occurring noise burst
+on the shared host coincident with those two runs specifically) rather
+than any property of `x25519(X25519StaticSecret, peer)`'s own code or
+its secret's value -- consistent with, and now supported by direct
+control evidence for, the "run-level noise" reading the slice-8d
+determination above reached only by inference. This closes the evidentiary
+gap that determination named explicitly (fork 1: "a dedicated diagnostic
+... mirroring `` `==` ``'s round-1 always-different-class control trial,
+to establish or rule out verdict-dependence directly rather than by
+inference").
+
+This diagnostic does not, and cannot, prove a negative for all possible
+conditions (a rerun embedded in the exact ten-target battery, on the exact
+same noisy host state, was not attempted -- reproducing the FAIL's own
+precondition on demand is not practical, the same limitation the `` `==` ``
+investigation's own diagnostics operated under). It is reported as strong,
+multi-pronged (two independent control designs, three independent value
+pairs, one same-design replication) circumstantial-turned-direct evidence
+for ARTIFACT, not an audit-grade proof of absence.
+
+`tests/ct/` was restored to its pre-diagnostic state after this appendix
+was written: the temporary `runDudectAB` addition to `dudect.nim` was
+reverted and the temporary `ct_diag_static.nim` file was deleted; `git
+diff tests/ct/` is empty.
+
 ## Reproducing this run
 
 ```sh

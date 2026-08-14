@@ -28,40 +28,60 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 7a scope** (this file, so far -- superseding slice 6's own
-## summary, which this paragraph always restates as current state):
-## everything slice 4 landed (`RistrettoPoint`/`RistrettoEncoded` and their
-## basic borrows, the `ristrettoUnchecked` construction door, quotient
-## `==`, `ristrettoDecode`, `ristrettoEncode` plus its `InvSqrtAMinusD`
-## constant, the fixed `RistrettoIdentity`/`RistrettoBasePoint` consts, and
-## the group operators `+`/binary `-`/unary `-`, this codebase's first
-## operators -- see their own doc comments for the canonical-spacing note),
-## PLUS the reusable static secret-scalar role (`RistrettoStaticSecret`,
-## the `x25519.X25519StaticSecret` shape -- copyable, self-wiping,
-## always a canonical residue mod L) and its scalarmults:
-## `ristrettoScalarmultBase` (CT fixed-base, over `scalar.geScalarmultBase`),
-## `ristrettoScalarmultVartime` (vartime variable-base, over
-## `scalar.scalarmultVartime`, type-gated away from secret material --
-## accepts only a bare `array[32, byte]`), and `ristrettoScalarmult` (CT
-## variable-base, over the new `scalar.geScalarmultCT` -- slice 7a's
-## headline addition, the operation that makes this group usable for OPRF
-## evaluation, Pedersen commitments, and DH shares, where the point IS
-## secret-derived even though the group element itself carries no CT
-## hygiene of its own), PLUS the single-use ephemeral secret role
+## **Full v1 surface (RFC-004 slices 1a-8d, this file is complete as of
+## slice 8d):** `RistrettoPoint`/`RistrettoEncoded` and their basic borrows,
+## the `ristrettoUnchecked` construction door (module-internal only, never
+## facade-exported), quotient `==`, `ristrettoDecode`, `ristrettoEncode`
+## plus its `InvSqrtAMinusD` constant, the fixed
+## `RistrettoIdentity`/`RistrettoBasePoint` consts, the group operators
+## `+`/binary `-`/unary `-` (this codebase's first operators -- see their
+## own doc comments for the canonical-spacing note), the reusable static
+## secret-scalar role (`RistrettoStaticSecret`, the
+## `x25519.X25519StaticSecret` shape -- copyable, self-wiping, always a
+## canonical residue mod L) and its scalarmults
+## (`ristrettoScalarmultBase`/`ristrettoScalarmultVartime`/
+## `ristrettoScalarmult`, the last one CT variable-base over
+## `scalar.geScalarmultCT` -- the operation that makes this group usable
+## for OPRF evaluation, Pedersen commitments, and DH shares, where the
+## point IS secret-derived even though the group element itself carries no
+## CT hygiene of its own), the single-use ephemeral secret role
 ## (`RistrettoEphemeralSecret`, the `x25519.X25519EphemeralSecret` shape --
-## move-only, fresh-only, no `toBytes`), its borrow-only
-## `ristrettoScalarmultBase` overload, and (slice 7a) its own CONSUMING
-## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` overload --
-## the `x25519.x25519(sink X25519EphemeralSecret, ...)` precedent, reused
+## move-only, fresh-only, no `toBytes`) with its borrow-only
+## `ristrettoScalarmultBase` overload and its own CONSUMING
+## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` overload (the
+## `x25519.x25519(sink X25519EphemeralSecret, ...)` precedent, reused
 ## verbatim, pinned by
-## `tests/unit/fixtures/reject_ristretto_ephemeral_reuse.nim` -- PLUS the
-## one-way hash-to-group map (RFC 9496 SS4.3.4): `ristrettoFromUniformBytes`,
-## its private `ristrettoMap` helper, and the three remaining SS4.1
-## implementation constants (`OneMinusDSq`, `DMinusOneSq`, `SqrtAdMinusOne`
-## -- `InvSqrtAMinusD` already landed with encode in slice 3).
-## NOT yet present: a facade export -- later slice (8d).
-## `RistrettoPoint` has deliberately no `wipe` overload even now that every
-## scalarmult is present: see its own doc comment below.
+## `tests/unit/fixtures/reject_ristretto_ephemeral_reuse.nim`), the one-way
+## hash-to-group map (RFC 9496 SS4.3.4: `ristrettoFromUniformBytes`, its
+## private `ristrettoMap` helper, and the three remaining SS4.1
+## implementation constants `OneMinusDSq`/`DMinusOneSq`/`SqrtAdMinusOne` --
+## `InvSqrtAMinusD` landed with encode). Facade-exported (slice 8d) as the
+## ENUMERATED symbol list in `src/sello.nim` -- see that module's doc
+## comment; `ristrettoUnchecked` and `scalar.SecretScalar` are deliberately
+## NOT among them. `RistrettoPoint` has deliberately no `wipe` overload
+## even now that every scalarmult is present: see its own doc comment
+## below.
+##
+## **The scalar-arithmetic boundary (Schnorr / OPRF-client honesty):** this
+## module ships the GROUP -- decode/encode/equality/the map/group
+## ops/scalarmult -- and nothing that does mod-L arithmetic ON an exposed
+## scalar. That is enough for commitment/DH/blinding-shaped protocols
+## (Pedersen commit/open, ElGamal/ECIES-style encryption, an OPRF SERVER's
+## evaluation step -- one CT scalarmult each) but NOT for protocols whose
+## secret math goes further: a Schnorr response `s = k + c*x` needs
+## `scalar.scMulAdd`, which exists in this codebase (mutation- and
+## dudect-covered, takes `SecretScalar` operands) but stays
+## submodule-only, never facade-exported -- exporting it would drag the
+## bare, hygiene-free `scalar.SecretScalar` into the public surface,
+## exactly what `RistrettoStaticSecret`/`RistrettoEphemeralSecret` exist to
+## avoid. An OPRF CLIENT's unblind step needs scalar INVERSION mod L,
+## which exists NOWHERE in sello at any layer (`field.feInvert` is mod-p
+## field inversion, an unrelated operation). So of the OPRF roles this
+## module's motivating protocols repeatedly invoke, v1 fully serves the
+## SERVER and cannot serve the CLIENT even by reaching into `scalar.nim`
+## directly. This boundary is documented, not implied -- see RFC-004's
+## Non-goals section for the full reasoning; a future scalar-arithmetic RFC
+## is the closing move, not a silent gap in this one.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -69,6 +89,17 @@
 ## equality (two different-looking representations of the SAME element
 ## must hash the same, which only the canonical encoding guarantees).
 ## Key/dedupe on `RistrettoEncoded` (encode first), never on the point.
+##
+## **Encode-then-compare silently downgrades CT to vartime:** `==` on
+## `RistrettoPoint` is CT; `==` on `RistrettoEncoded` is the ordinary
+## `wire.nim`-style vartime byte-compare (an operator cannot carry a
+## `Vartime` suffix, so this register switch is silent at the call site).
+## The two predicates can never disagree ON VALUE (RFC 9496's encoding is
+## unique per element), only on TIMING -- so the rule, stated outright:
+## compare `RistrettoPoint`s directly in any timing-sensitive position;
+## calling `ristrettoEncode` on both sides first (the natural move for a
+## caller about to serialize anyway) silently trades CT equality for
+## vartime. See `RistrettoEncoded`'s own doc comment for the full writeup.
 
 import std/[hashes, options, sysrand]
 import sello/field
@@ -904,6 +935,26 @@ proc ristrettoEphemeralPair*(): tuple[secret: RistrettoEphemeralSecret, public: 
   ct.wipe(raw)
   ct.wipe(reduced)
   ct.wipe(sc)
+
+proc wipe*(s: sink RistrettoEphemeralSecret) =
+  ## Early disposal of an ephemeral secret that was generated but never
+  ## consumed by `ristrettoScalarmult` (e.g. the caller decided not to
+  ## complete the ElGamal/ECIES exchange) -- the
+  ## `x25519.wipe(sink X25519EphemeralSecret)` precedent, reused verbatim
+  ## for this role. `=destroy` performs the same wipe automatically at
+  ## scope exit; this exists for callers that want it sooner.
+  ##
+  ## Takes `sink`, not `var` (the same round-4 finding R4 reasoning as the
+  ## X25519 counterpart): a `var` `wipe` would not consume its argument, so
+  ## a caller could write `wipe(eph)` and then still reach the consuming
+  ## `ristrettoScalarmult(move(eph), p)` -- which would compile and run the
+  ## CT ladder on just-zeroed scalar bytes (all-zero reduces to scalar 0,
+  ## a valid if degenerate input -- `geScalarmultCT` has no small-order
+  ## rejection to catch it the way `x25519`'s ladder does), silently
+  ## defeating the single-use guarantee. With `sink`, `wipe(move(eph))`
+  ## consumes `eph`; any later reference (including a second `wipe`, or the
+  ## consuming scalarmult) is a compile error, not a runtime hazard.
+  ct.wipe(s.bytes)
 
 func ristrettoScalarmultBase*(secret: RistrettoEphemeralSecret): RistrettoPoint =
   ## CT fixed-base scalar multiplication over the ephemeral secret role --

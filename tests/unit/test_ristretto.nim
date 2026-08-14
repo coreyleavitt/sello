@@ -2,6 +2,13 @@ import std/[unittest, options, strutils, os, osproc]
 import sello/ristretto
 import sello/scalar
 import sello/field
+import sello # RFC-004 slice 8d's Pedersen worked-consumer scenario is
+             # written against the FACADE surface only (the RFC's own
+             # proof-spike register) -- this import is used by that one
+             # suite alone; every other suite in this file exercises
+             # `sello/ristretto` (and `sello/scalar`/`sello/field` for
+             # defining-equation cross-checks) directly, the white-box
+             # submodule-test register the rest of the file uses.
 
 proc hexToArray32(s: string): array[32, byte] =
   doAssert s.len == 64
@@ -800,4 +807,51 @@ suite "OneMinusDSq / DMinusOneSq / SqrtAdMinusOne -- defining equations (RFC 949
     feSub(expected, ad, FeOne)
     feSq(sq, SqrtAdMinusOne)
     check feEqualCT(sq, expected)
+
+# ---------------------------------------------------------------------------
+# Pedersen commit/open worked-consumer scenario (RFC-004 slice 8d)
+#
+# The proof-spike register: a real protocol (Pedersen commitment) built
+# and asserted end-to-end against the FROZEN FACADE surface only (`import
+# sello` above, not `sello/ristretto`'s wider submodule surface -- no
+# `ristrettoUnchecked`, no `scalar.SecretScalar` reach-in), so the facade
+# is validated by one running consumer rather than only by README's
+# compile-checked-but-not-asserted fences. `H` (the second, independent
+# generator) is derived via `ristrettoFromUniformBytes` from fixed,
+# nothing-up-my-sleeve bytes -- a stand-in for a protocol's own
+# domain-separated H in a real deployment, chosen here only so the test
+# is deterministic. `RistrettoStaticSecret` -- the reusable secret-scalar
+# role -- stands in for both the committed VALUE and the BLINDING factor;
+# nothing about Pedersen commitments requires a single-use scalar, so the
+# ephemeral role is not the fit here.
+# ---------------------------------------------------------------------------
+
+suite "Pedersen commitment worked-consumer scenario (RFC-004 slice 8d, facade-only proof spike)":
+  test "commit = xB + rH; open recomputes and verifies via ==; a wrong opening does not":
+    # H: an independent generator, derived from fixed 64 bytes via the
+    # one-way hash-to-group map -- RFC 9496's own "no known discrete log
+    # relative to B" construction (SS4.3.4 is precisely designed so no
+    # party can compute log_B(H)).
+    var hSeed: array[64, byte]
+    for i in 0 ..< 64: hSeed[i] = byte(i * 7 + 11) # fixed, arbitrary, deterministic
+    let h = ristrettoFromUniformBytes(hSeed)
+
+    # The committer's secrets: the committed value x and the blinding
+    # factor r, both reusable ristretto255 scalars via the facade's
+    # RistrettoStaticSecret role.
+    let x = ristrettoStaticSecret()
+    let r = ristrettoStaticSecret()
+
+    let commitment = ristrettoScalarmultBase(x) + ristrettoScalarmult(r, h)
+
+    # Open: the committer reveals (x, r); anyone recomputes and compares.
+    let reopened = ristrettoScalarmultBase(x) + ristrettoScalarmult(r, h)
+    check reopened == commitment
+
+    # A wrong opening (either the value or the blinding factor differs)
+    # must NOT verify.
+    let wrongX = ristrettoStaticSecret()
+    let wrongR = ristrettoStaticSecret()
+    check (ristrettoScalarmultBase(wrongX) + ristrettoScalarmult(r, h)) != commitment
+    check (ristrettoScalarmultBase(x) + ristrettoScalarmult(wrongR, h)) != commitment
 
