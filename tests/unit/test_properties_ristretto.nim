@@ -190,3 +190,29 @@ suite "ristretto property: E[4] torsion invariance":
     given p in randomRistrettoPoints()
     for t in e4Points:
       ensure toBytes(ristrettoEncode(p + t)) == toBytes(ristrettoEncode(p))
+
+# ---------------------------------------------------------------------------
+# RistrettoStaticSecret -- fixed-base vs vartime scalarmult agreement
+# (RFC-004 slice 5a).
+# ---------------------------------------------------------------------------
+
+proc randomCanonicalScalarBytes(): Strategy[array[32, byte]] =
+  ## Random CANONICAL (< L) scalar bytes, via wide-reduction (`scReduce`)
+  ## of a uniformly random 64-byte draw -- the same route
+  ## `ristrettoStaticSecret()`/`toRistrettoStaticSecretWide` use internally,
+  ## so this generator draws from the type's own invariant domain (always
+  ## a canonical residue mod L) rather than from raw unreduced bytes, which
+  ## `toRistrettoStaticSecret` would reject roughly `1 - L/2^256` of the
+  ## time (astronomically rare, but the wide-reduce route is both correct
+  ## and total, so there is no reason to court that rejection at all).
+  arrays[64, byte](randByte()).map(proc(wide: array[64, byte]): array[32, byte] =
+    scReduce(result, wide))
+
+suite "ristretto property: ristrettoScalarmultBase / ristrettoScalarmultVartime agreement":
+  property "ristrettoScalarmultBase(secret) == ristrettoScalarmultVartime(secret.toBytes, RistrettoBasePoint)":
+    with propertySettings50
+    given bytes in randomCanonicalScalarBytes()
+    let secretOpt = toRistrettoStaticSecret(bytes)
+    ensure secretOpt.isSome
+    let secret = secretOpt.get()
+    ensure ristrettoScalarmultBase(secret) == ristrettoScalarmultVartime(toBytes(secret), RistrettoBasePoint)

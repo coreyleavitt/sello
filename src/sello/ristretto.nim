@@ -28,15 +28,24 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 4 scope** (this file, so far): `RistrettoPoint`/
-## `RistrettoEncoded` and their basic borrows, the `ristrettoUnchecked`
-## construction door, quotient `==`, `ristrettoDecode`, `ristrettoEncode`
-## (plus its `InvSqrtAMinusD` constant), the fixed
-## `RistrettoIdentity`/`RistrettoBasePoint` consts, and now the group
-## operators `+`/binary `-`/unary `-` (this codebase's first operators --
-## see their own doc comments for the canonical-spacing note). NOT yet
-## present: scalar multiplication, the one-way map, the secret-scalar role
-## types, or a facade export -- later slices. `RistrettoPoint` has
+## **Slice 5a scope** (this file, so far -- superseding slice 4's own
+## summary, which this paragraph always restates as current state):
+## everything slice 4 landed (`RistrettoPoint`/`RistrettoEncoded` and their
+## basic borrows, the `ristrettoUnchecked` construction door, quotient
+## `==`, `ristrettoDecode`, `ristrettoEncode` plus its `InvSqrtAMinusD`
+## constant, the fixed `RistrettoIdentity`/`RistrettoBasePoint` consts, and
+## the group operators `+`/binary `-`/unary `-`, this codebase's first
+## operators -- see their own doc comments for the canonical-spacing note),
+## PLUS the reusable static secret-scalar role (`RistrettoStaticSecret`,
+## the `x25519.X25519StaticSecret` shape -- copyable, self-wiping,
+## always a canonical residue mod L) and its two existing-register
+## scalarmults: `ristrettoScalarmultBase` (CT fixed-base, over
+## `scalar.geScalarmultBase`) and `ristrettoScalarmultVartime` (vartime
+## variable-base, over `scalar.scalarmultVartime`, type-gated away from
+## secret material -- accepts only a bare `array[32, byte]`). NOT yet
+## present: the single-use ephemeral secret role, the CT variable-base
+## scalarmult (`scalar.geScalarmultCT` / `ristrettoScalarmult`), the
+## one-way map, or a facade export -- later slices. `RistrettoPoint` has
 ## deliberately no `wipe` overload even once those land: see its own doc
 ## comment below.
 ##
@@ -47,9 +56,11 @@
 ## must hash the same, which only the canonical encoding guarantees).
 ## Key/dedupe on `RistrettoEncoded` (encode first), never on the point.
 
-import std/[hashes, options]
+import std/[hashes, options, sysrand]
 import sello/field
 import sello/scalar
+import sello/private/ct
+import sello/private/secret_hooks
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy.
@@ -539,5 +550,206 @@ func `-`*(p: RistrettoPoint): RistrettoPoint =
   var negP3: GeP3
   geP1P1ToP3(negP3, negP1P1)
   ristrettoUnchecked(negP3)
+
+# ---------------------------------------------------------------------------
+# RistrettoStaticSecret -- the reusable secret-scalar role (RFC-004 slice 5a)
+# ---------------------------------------------------------------------------
+
+type
+  RistrettoStaticSecret* = object
+    ## A reusable ristretto255 secret scalar -- the Pedersen-key/OPRF-
+    ## server-key role. One-field object over `array[32, byte]`, NOT
+    ## `distinct array[32, byte]`, for the exact empirically-established
+    ## reason `signing.Seed`/`x25519.X25519StaticSecret` are: a bare
+    ## `distinct array` local's `=destroy` silently never fires under ORC
+    ## on Nim 2.2.10 -- see `signing.Seed`'s doc comment for the full
+    ## writeup (confirmed there by inspecting the generated C, not
+    ## assumed).
+    ##
+    ## `secretHooks`-instantiated below: `=destroy` wipes via `ct.wipe`,
+    ## and -- like `X25519StaticSecret`, unlike `Keypair`/`Seed` -- this
+    ## type is deliberately COPYABLE: no `=copy` override, so every copy
+    ## carries its own destructor and self-wipes independently at its own
+    ## scope exit. Falls under the copyable-self-wiping-holder half of the
+    ## move-only-vs-copyable policy `X25519StaticSecret`'s own doc comment
+    ## states (round-4 finding R9 on the X25519 side): a reusable
+    ## long-term secret holder, with no paired public value whose
+    ## invariant a second live copy could violate, so duplication costs
+    ## nothing beyond the copy itself.
+    ##
+    ## **Invariant: always a canonical residue mod L** (`bytes < L`),
+    ## load-bearing twice over -- reduced means `< L < 2^253`, so
+    ## `scalar.recodeScalarRadix16`'s bit-255-clear precondition (which
+    ## `geScalarmultBase`'s own debug-only assert checks) holds by
+    ## construction for every value this type can hand to a CT scalarmult
+    ## (an unreduced scalar with bit 255 set would otherwise SILENTLY
+    ## compute a wrong multiple -- `cmovCached` matches nothing for an
+    ## out-of-range digit and contributes the identity, no diagnostic) --
+    ## and it matches the dalek convention that a scalar IS a canonical
+    ## residue. Every constructor below establishes this: the fresh
+    ## constructors wide-reduce via `scalar.scReduce` (uniform sampling mod
+    ## L), the 32-byte import REJECTS non-canonical input (`Option`,
+    ## dalek's `from_canonical_bytes` register) rather than silently
+    ## reducing it, and the 64-byte wide import reduces (it is total --
+    ## see each constructor's own doc comment for why reduce-vs-reject
+    ## differs between the two).
+    ##
+    ## **Repr-disclosure line (this family's first explicit one, RFC-004
+    ## round-3 pin):** no `$` is defined for this type -- `echo secret`
+    ## fails to compile -- but Nim's `repr`/reflective dumps print any
+    ## object's raw fields regardless of that. Out of scope to prevent, in
+    ## scope to disclose: every sello secret type shares this residual gap;
+    ## this is simply the first one to state it explicitly.
+    bytes: array[32, byte]
+
+## Type hooks must be declared immediately after the type they attach to --
+## see `signing.nim`'s module doc comment for why (Nim may otherwise
+## synthesize a default hook first and reject an explicit one declared
+## later). Copyable (no `=copy` restriction): every copy self-wipes
+## independently at its own scope exit, the same register as
+## `x25519.X25519StaticSecret`.
+secretHooks(RistrettoStaticSecret, bytes)
+
+func toRistrettoStaticSecret*(bytes: array[32, byte]): Option[RistrettoStaticSecret] =
+  ## Key IMPORT (dalek's `from_canonical_bytes` register): REJECTS a
+  ## non-canonical scalar (`>= L`) via `scalar.scIsCanonical` rather than
+  ## silently reducing it -- reduce-vs-reject is a security-semantic
+  ## difference (silent reduction would accept corrupted or
+  ## cross-protocol key material and make `toBytes` round-trip to a
+  ## DIFFERENT value than was imported), so this is a distinct behavior
+  ## from `toRistrettoStaticSecretWide` below, not an overload of it (see
+  ## that constructor's own doc comment for why they must have different
+  ## names). `none` on reject.
+  ##
+  ## Both paths wipe this proc's own local scratch copy of the caller's
+  ## input before returning (the `signing.keypair(seed, expectedPublic)`
+  ## none-path-wipe register): nothing secret-derived that passed through
+  ## this proc's own stack survives past the call, on either verdict --
+  ## the object handed back on the `some` path already holds its own
+  ## independent copy of the bytes by then, made before the wipe below
+  ## runs, so the wipe cannot affect the returned value.
+  var scratch = bytes
+  try:
+    if scIsCanonical(scratch):
+      result = some(RistrettoStaticSecret(bytes: scratch))
+    else:
+      result = none(RistrettoStaticSecret)
+  finally:
+    ct.wipe(scratch)
+
+func toRistrettoStaticSecretWide*(bytes: array[64, byte]): RistrettoStaticSecret =
+  ## TOTAL key import (dalek's `from_bytes_mod_order_wide` register): every
+  ## 64-byte input reduces mod L via `scalar.scReduce`, the unbiased
+  ## KDF/hash-derived route. Named DISTINCTLY from `toRistrettoStaticSecret`
+  ## above rather than as a same-name overload-by-array-length (round-3 of
+  ## the RFC's review): reject-vs-silently-reduce is a security-semantic
+  ## difference an overload would hide from a call-site skim, and dalek
+  ## itself separates these two constructors by name for exactly this
+  ## reason. Wideness is why no canonicity expectation exists to violate
+  ## here, unlike the 32-byte import -- reduce-not-reject is correct HERE
+  ## and only here.
+  ##
+  ## Constructor-internal reduction scratch is wiped before return.
+  var reduced: array[32, byte]
+  scReduce(reduced, bytes)
+  result = RistrettoStaticSecret(bytes: reduced)
+  ct.wipe(reduced)
+
+proc ristrettoStaticSecret*(): RistrettoStaticSecret {.raises: [OSError].} =
+  ## Fresh secret via `std/sysrand`: 64 random bytes, wide-reduced mod L
+  ## via `scalar.scReduce` (uniform sampling mod L -- the
+  ## `x25519.x25519StaticSecret()` in-place-fill/`OSError`-on-failure
+  ## discipline, adapted to ristretto255's prime-order-group shape rather
+  ## than X25519's raw-clamped-scalar one). Constructor-internal secret
+  ## temporaries (the sysrand buffer, the reduction scratch) are wiped
+  ## before return.
+  var raw: array[64, byte]
+  if not urandom(raw):
+    raise newException(OSError, "sello.ristrettoStaticSecret: sysrand.urandom failed")
+  var reduced: array[32, byte]
+  scReduce(reduced, raw)
+  result = RistrettoStaticSecret(bytes: reduced)
+  ct.wipe(raw)
+  ct.wipe(reduced)
+
+proc ristrettoStaticPair*(): tuple[secret: RistrettoStaticSecret, public: RistrettoPoint] {.raises: [OSError].} =
+  ## Fresh static secret plus its `ristrettoScalarmultBase` image, in one
+  ## call -- `x25519.x25519StaticPair()`'s ergonomic (RFC-003 slice 1 item
+  ## 5 there): the common case ("I want a reusable identity and its public
+  ## element together") needs one call instead of two. Computes the public
+  ## element via the same `toSecretScalar`/`geScalarmultBase` sequence
+  ## `ristrettoScalarmultBase` below uses, rather than calling that public
+  ## wrapper directly (`x25519.x25519StaticPair`'s own precedent, calling
+  ## the private `ladder` rather than `x25519Base`): Nim requires a callee
+  ## be declared earlier in the module, and `ristrettoScalarmultBase` is
+  ## declared below this proc. Constructor-internal secret temporaries are
+  ## wiped before return, same as `ristrettoStaticSecret()` above.
+  var raw: array[64, byte]
+  if not urandom(raw):
+    raise newException(OSError, "sello.ristrettoStaticPair: sysrand.urandom failed")
+  var reduced: array[32, byte]
+  scReduce(reduced, raw)
+  result.secret = RistrettoStaticSecret(bytes: reduced)
+  var sc = toSecretScalar(reduced)
+  result.public = ristrettoUnchecked(geScalarmultBase(sc))
+  ct.wipe(raw)
+  ct.wipe(reduced)
+  ct.wipe(sc)
+
+func toBytes*(s: RistrettoStaticSecret): array[32, byte] {.inline.} =
+  ## Deliberate export for persistence/interop. The returned copy is
+  ## caller-owned and NOT wiped by this call -- wipe it yourself (e.g.
+  ## `wipe(var RistrettoStaticSecret)` below) once you are done with it.
+  s.bytes
+
+proc wipe*(s: var RistrettoStaticSecret) =
+  ## Explicit early wipe, e.g. right after deriving a public element when
+  ## the caller does not need to retain the raw secret. `=destroy`
+  ## performs the same wipe automatically at scope exit; this exists for
+  ## callers that want it sooner. Calls `ct.wipe` directly (round-4
+  ## finding R10's simplification, `x25519.nim`'s own register), not a
+  ## named `zeroize<Type>` proc.
+  ct.wipe(s.bytes)
+
+func ristrettoScalarmultBase*(secret: RistrettoStaticSecret): RistrettoPoint =
+  ## CT fixed-base scalar multiplication over the static secret role, via
+  ## `scalar.geScalarmultBase` (already CT, already dudect-covered,
+  ## already R1-wipe-disciplined internally). Bridges
+  ## `RistrettoStaticSecret` to `scalar.SecretScalar` at this module's
+  ## boundary -- the `signing.nim` -> `private/backend.nim` pattern: the
+  ## `SecretScalar` is assembled here (`secret.bytes` is always a
+  ## canonical residue mod L by this type's own invariant, discharging
+  ## `geScalarmultBase`'s bit-255-clear precondition by construction),
+  ## consumed by `geScalarmultBase`, and wiped once no longer needed --
+  ## `geScalarmultBase` independently wipes its OWN internal copy of the
+  ## scalar it receives; the wipe below is of THIS proc's separate local
+  ## copy (`sc`), which `geScalarmultBase`'s pass-by-value parameter does
+  ## not touch.
+  var sc = toSecretScalar(secret.bytes)
+  try:
+    result = ristrettoUnchecked(geScalarmultBase(sc))
+  finally:
+    ct.wipe(sc)
+
+func ristrettoScalarmultVartime*(s: array[32, byte]; p: RistrettoPoint): RistrettoPoint =
+  ## Vartime variable-base scalar multiplication, via
+  ## `scalar.scalarmultVartime` -- the verify-path-style register, for
+  ## protocol steps where the scalar is public. Accepts ONLY a bare
+  ## `array[32, byte]`: neither `RistrettoStaticSecret` nor
+  ## `scalar.SecretScalar` has a converter to it, so passing secret-typed
+  ## material here is an ordinary compile-time type mismatch, not merely a
+  ## naming-convention violation -- see
+  ## `tests/unit/fixtures/reject_secretscalar_ristretto_vartime.nim`, the
+  ## `scalar.SecretScalar`-vs-`scalarmultVartime` type boundary (round-3
+  ## finding A3) reused for this module's secret role. `p` need not be
+  ## reduced or canonical in any sense beyond already being a valid
+  ## `RistrettoPoint` -- `s` itself need not be canonical either:
+  ## `scalarmultVartime` computes the literal 256-bit multiple, with no
+  ## reduction assumed (the boundary scalar `s = L` deliberately reaches
+  ## this path unreduced in `tests/unit/test_ristretto.nim`, landing on the
+  ## identity for any point of order L).
+  var r: GeP3
+  scalarmultVartime(r, s, p.p)
+  ristrettoUnchecked(r)
 
 {.pop.}

@@ -1,4 +1,4 @@
-import std/[unittest, options, strutils]
+import std/[unittest, options, strutils, os, osproc]
 import sello/ristretto
 import sello/scalar
 import sello/field
@@ -416,4 +416,149 @@ suite "RistrettoEncoded -- wire.nim-style borrows":
     let a = toRistrettoEncoded(hexToArray32(A1Encodings[8]))
     let b = toRistrettoEncoded(hexToArray32(A1Encodings[8]))
     check hash(a) == hash(b)
+
+# ---------------------------------------------------------------------------
+# RFC-004 slice 5a -- RistrettoStaticSecret + ristrettoScalarmultBase/Vartime
+# ---------------------------------------------------------------------------
+
+proc lMinus1Bytes(): array[32, byte] =
+  ## The largest valid canonical scalar (L - 1). L's low byte (0xED) has no
+  ## borrow to propagate when decremented by 1.
+  result = L
+  result[0] = result[0] - 1
+
+proc wideLBytes(): array[64, byte] =
+  ## L represented as a 64-byte little-endian integer (L in the low 32
+  ## bytes, zero in the high 32) -- the exact integer L, so
+  ## `toRistrettoStaticSecretWide`'s reduction mod L lands on 0.
+  for i in 0 ..< 32: result[i] = L[i]
+
+suite "RistrettoStaticSecret -- constructors and the canonical-residue invariant (RFC-004 slice 5a)":
+  test "toRistrettoStaticSecret accepts a canonical scalar and round-trips via toBytes":
+    let bytes = scalarFromSmallInt(7)
+    let secretOpt = toRistrettoStaticSecret(bytes)
+    check secretOpt.isSome
+    check toBytes(secretOpt.get()) == bytes
+
+  test "toRistrettoStaticSecret accepts s = L - 1 (the largest valid canonical scalar)":
+    let bytes = lMinus1Bytes()
+    let secretOpt = toRistrettoStaticSecret(bytes)
+    check secretOpt.isSome
+    check toBytes(secretOpt.get()) == bytes
+
+  test "toRistrettoStaticSecret rejects s = L (non-canonical -- the 32-byte import's whole point)":
+    check toRistrettoStaticSecret(L).isNone
+
+  test "toRistrettoStaticSecretWide totally accepts s = L, reducing it to the zero scalar":
+    let secret = toRistrettoStaticSecretWide(wideLBytes())
+    check toBytes(secret) == default(array[32, byte])
+
+  test "toRistrettoStaticSecretWide reduces an all-zero 64-byte input to the zero scalar":
+    let secret = toRistrettoStaticSecretWide(default(array[64, byte]))
+    check toBytes(secret) == default(array[32, byte])
+
+  test "ristrettoStaticSecret() generates a canonical scalar (< L)":
+    let secret = ristrettoStaticSecret()
+    check scIsCanonical(toBytes(secret))
+
+  test "ristrettoStaticPair() generates a canonical secret whose public element matches ristrettoScalarmultBase":
+    let (secret, public) = ristrettoStaticPair()
+    check scIsCanonical(toBytes(secret))
+    check ristrettoScalarmultBase(secret) == public
+
+suite "RistrettoStaticSecret -- secret hygiene (=destroy / wipe, the X25519StaticSecret probe-pattern precedent)":
+  ## Same methodology as test_x25519.nim's "X25519 - secret hygiene" suite:
+  ## a raw pointer captured before the wipe, memory re-read after.
+  ## RistrettoStaticSecret is a one-field object (same representation as
+  ## X25519StaticSecret/Seed, and for the same reason), so a pointer to the
+  ## object aliases its sole `bytes` field.
+  test "=destroy wipes RistrettoStaticSecret's memory at scope exit":
+    var probe: ptr array[32, byte]
+    let bytes = scalarFromSmallInt(7)
+    block:
+      var s = toRistrettoStaticSecret(bytes).get()
+      probe = cast[ptr array[32, byte]](addr s)
+      check probe[] == bytes # sanity: the probe aliases the real bytes
+    check probe[] == default(array[32, byte])
+
+  test "a COPIED RistrettoStaticSecret also wipes independently at its own scope exit":
+    let bytes = scalarFromSmallInt(9)
+    let original = toRistrettoStaticSecret(bytes).get()
+    var probeCopy: ptr array[32, byte]
+    block:
+      var copy = original
+      probeCopy = cast[ptr array[32, byte]](addr copy)
+      check probeCopy[] == bytes # sanity: the copy holds the same bytes
+    check probeCopy[] == default(array[32, byte])
+    check toBytes(original) == bytes # original unaffected by the copy's wipe
+
+  test "wipe(var RistrettoStaticSecret) zeroes the underlying bytes in place":
+    var s = toRistrettoStaticSecret(scalarFromSmallInt(11)).get()
+    let probe = cast[ptr array[32, byte]](addr s)
+    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe
+    wipe(s)
+    check probe[] == default(array[32, byte])
+
+suite "ristrettoScalarmultBase / ristrettoScalarmultVartime -- deterministic boundary scalars (RFC-004 slice 5a)":
+  ## s=0 and s=L -> identity, s=1 -> RistrettoBasePoint, s=L-1 -> -RistrettoBasePoint
+  ## (the additive-inverse axiom checked a second way, matching scReduce's
+  ## own boundary-scalar discipline). s=L reaches these operations only via
+  ## the wide constructor (fixed-base) and the bare-array vartime path
+  ## (variable-base) -- the 32-byte import rejects L by design, pinned in
+  ## the constructor suite above.
+  test "s = 0 -> identity (fixed-base)":
+    let secret = toRistrettoStaticSecret(default(array[32, byte])).get()
+    check ristrettoScalarmultBase(secret) == RistrettoIdentity
+
+  test "s = 1 -> RistrettoBasePoint (fixed-base)":
+    let secret = toRistrettoStaticSecret(scalarFromSmallInt(1)).get()
+    check ristrettoScalarmultBase(secret) == RistrettoBasePoint
+
+  test "s = L - 1 -> -RistrettoBasePoint (fixed-base, additive-inverse check)":
+    let secret = toRistrettoStaticSecret(lMinus1Bytes()).get()
+    check ristrettoScalarmultBase(secret) == (-RistrettoBasePoint)
+
+  test "s = L -> identity (wide constructor, fixed-base)":
+    let secret = toRistrettoStaticSecretWide(wideLBytes())
+    check ristrettoScalarmultBase(secret) == RistrettoIdentity
+
+  test "s = 0 -> identity (vartime)":
+    check ristrettoScalarmultVartime(default(array[32, byte]), RistrettoBasePoint) == RistrettoIdentity
+
+  test "s = 1 -> RistrettoBasePoint (vartime)":
+    check ristrettoScalarmultVartime(scalarFromSmallInt(1), RistrettoBasePoint) == RistrettoBasePoint
+
+  test "s = L - 1 -> -RistrettoBasePoint (vartime, additive-inverse check)":
+    check ristrettoScalarmultVartime(lMinus1Bytes(), RistrettoBasePoint) == (-RistrettoBasePoint)
+
+  test "s = L -> identity (bare-array vartime path, deliberately unreduced input)":
+    ## scalarmultVartime performs no reduction -- it computes the literal
+    ## 256-bit multiple, so L*RistrettoBasePoint lands on the identity
+    ## because RistrettoBasePoint has order exactly L.
+    check ristrettoScalarmultVartime(L, RistrettoBasePoint) == RistrettoIdentity
+
+suite "RistrettoStaticSecret -- ristrettoScalarmultVartime type boundary (compile-time)":
+  test "RistrettoStaticSecret has no implicit converter to array[32, byte]":
+    ## `compiles()` CAN see this one (an ordinary type mismatch) -- pinned
+    ## directly first, cheaply, before the subprocess fixture below
+    ## re-confirms it as a literal compiler diagnostic, matching
+    ## test_scalar.nim's SecretScalar-vs-scalarmultVartime suite.
+    check(not compiles(block:
+      let secretOpt = toRistrettoStaticSecret(default(array[32, byte]))
+      let secret = secretOpt.get()
+      discard ristrettoScalarmultVartime(secret, RistrettoBasePoint)
+    ))
+
+  test "ristrettoScalarmultVartime(secret, p) is rejected (subprocess compile)":
+    ## Same subprocess-`nim c` methodology as test_scalar.nim's
+    ## `reject_secretscalar_vartime.nim` check --
+    ## `reject_secretscalar_ristretto_vartime.nim`'s own doc comment
+    ## explains why this error class is ALSO visible to `compiles()` above.
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_secretscalar_ristretto_vartime.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_secretscalar_ristretto_vartime") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "type mismatch" in output
 
