@@ -28,13 +28,15 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 2 scope** (this file, so far): `RistrettoPoint`/
+## **Slice 3 scope** (this file, so far): `RistrettoPoint`/
 ## `RistrettoEncoded` and their basic borrows, the `ristrettoUnchecked`
-## construction door, quotient `==`, and `ristrettoDecode`. NOT yet
-## present: `ristrettoEncode`, the group operators (`+`/`-`), scalar
-## multiplication, the one-way map, the secret-scalar role types, or a
-## facade export -- later slices. `RistrettoPoint` has deliberately no
-## `wipe` overload even once those land: see its own doc comment below.
+## construction door, quotient `==`, `ristrettoDecode`, `ristrettoEncode`
+## (plus its `InvSqrtAMinusD` constant), and the fixed
+## `RistrettoIdentity`/`RistrettoBasePoint` consts. NOT yet present: the
+## group operators (`+`/`-`), scalar multiplication, the one-way map, the
+## secret-scalar role types, or a facade export -- later slices.
+## `RistrettoPoint` has deliberately no `wipe` overload even once those
+## land: see its own doc comment below.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -216,6 +218,44 @@ func hash*(e: RistrettoEncoded): Hash {.inline.} =
   hash(array[32, byte](e))
 
 # ---------------------------------------------------------------------------
+# InvSqrtAMinusD -- RFC 9496 §4.1 implementation constant
+# ---------------------------------------------------------------------------
+
+const InvSqrtAMinusD* = feFromBytes([
+  0xea'u8, 0x40, 0x5d, 0x80, 0xaa, 0xfd, 0xc8, 0x99,
+  0xbe, 0x72, 0x41, 0x5a, 0x17, 0x16, 0x2f, 0x9d,
+  0x40, 0xd8, 0x01, 0xfe, 0x91, 0x7b, 0xc2, 0x16,
+  0xa2, 0xfc, 0xaf, 0xcf, 0x05, 0x89, 0x6c, 0x78,
+])
+  ## RFC 9496 §4.1: `INVSQRT_A_MINUS_D = 1/sqrt(a - d)` where `a = -1` and
+  ## `d` is the Curve25519 Edwards `d` parameter -- the correction constant
+  ## `ristrettoEncode`'s "enchanted denominator" step below multiplies by.
+  ##
+  ## Built via the compile-time-`feFromBytes` mechanism the RFC's Operations
+  ## section specifies for every new constant it introduces (`field.FeSqrtM1`
+  ## and `scalar.Ed25519D_Raw`/`Ed25519Gx_Raw`/`Ed25519Gy_Raw` are the
+  ## existing precedent for hand-decomposed-limb constants; this file's
+  ## constants instead decode RFC 9496's own published byte encoding, never
+  ## a hand radix-converted limb array -- exactly the transcription-risk
+  ## avoidance the RFC calls out). `GeBaseTable` in `scalar.nim` already
+  ## proves the Nim VM evaluates far heavier compile-time `Fe`/point
+  ## arithmetic than this one `feFromBytes` call, empirically confirmed
+  ## again here: this file compiles and this constant's own defining-
+  ## equation test (`tests/unit/test_ristretto.nim`) passes.
+  ##
+  ## The 32 bytes above are the little-endian encoding of the decimal value
+  ## RFC 9496 §4.1 publishes for `INVSQRT_A_MINUS_D`
+  ## (5446930700890931692099581386874514160539359729292745692120531289631172101
+  ## 7578) -- the ONE transcribed artifact, per the RFC's own risk register;
+  ## everything else (the byte encoding, the field arithmetic) is mechanical
+  ## and machine-checked. Cross-checked against its defining equation in
+  ## `tests/unit/test_ristretto.nim`: `InvSqrtAMinusD^2 * (a - d) == 1` where
+  ## `a = -1` and `d = feFromLimbs(scalar.Ed25519D_Raw)` -- verified
+  ## independently (outside this codebase) against the decimal value before
+  ## the byte encoding above was derived from it, so the test is a
+  ## cross-check of the transcription, not merely of arithmetic closure.
+
+# ---------------------------------------------------------------------------
 # ristrettoDecode -- RFC 9496 §4.3.1
 # ---------------------------------------------------------------------------
 
@@ -299,5 +339,112 @@ func ristrettoDecode*(e: RistrettoEncoded): Option[RistrettoPoint] =
   p.z = FeOne
   p.t = t
   some(ristrettoUnchecked(p))
+
+# ---------------------------------------------------------------------------
+# ristrettoEncode -- RFC 9496 §4.3.2
+# ---------------------------------------------------------------------------
+
+func ristrettoEncode*(pt: RistrettoPoint): RistrettoEncoded =
+  ## RFC 9496 §4.3.2 Encode: the torsion-quotienting direction, taking one
+  ## internal extended-coordinate representative (x0, y0, z0, t0) of `pt`'s
+  ## group element to its unique canonical 32-byte encoding. CT throughout,
+  ## per this module's headline posture -- every step below runs
+  ## unconditionally, and the two conditional steps the spec itself calls
+  ## out (the sqrt(-1) "rotation" and the final sign correction) are
+  ## `feCMove` selects, never a branch.
+  ##
+  ## `i = 0` (the identity) is the degenerate case worth naming explicitly:
+  ## `SQRT_RATIO_M1(1, 0)` -- `u1 = (z0+y0)*(z0-y0) = 0` for the identity's
+  ## `(0, 1, 1, 0)` representation, so `u1*u2^2 = 0` and `feSqrtRatioM1`
+  ## takes its `v = 0, u != 0` branch, returning `(false, 0)`. Every
+  ## downstream product involving `invsqrt` collapses to zero, and the
+  ## function lands on the all-zero 32-byte encoding -- RFC 9496 Appendix
+  ## A.1's own `i=0` vector, and `tests/unit/test_ristretto.nim` pins this
+  ## exact path by name rather than leaving it as incidental i=0 coverage.
+  let x0 = pt.p.x
+  let y0 = pt.p.y
+  let z0 = pt.p.z
+  let t0 = pt.p.t
+
+  var zPlusY, zMinusY, u1, u2: Fe
+  feAdd(zPlusY, z0, y0)
+  feSub(zMinusY, z0, y0)
+  feMul(u1, zPlusY, zMinusY)          # u1 = (z0 + y0) * (z0 - y0)
+  feMul(u2, x0, y0)                   # u2 = x0 * y0
+
+  var u2Sq, u1u2Sq: Fe
+  feSq(u2Sq, u2)
+  feMul(u1u2Sq, u1, u2Sq)
+  let (_, invsqrt) = feSqrtRatioM1(FeOne, u1u2Sq)
+    # "Ignore was_square since this is always square" (RFC 9496 §4.3.2) --
+    # every valid RistrettoPoint's internal representation makes u1*u2^2 a
+    # square by construction, so the accept flag carries no information
+    # here; only the root is consumed.
+
+  var den1, den2: Fe
+  feMul(den1, invsqrt, u1)            # den1 = invsqrt * u1
+  feMul(den2, invsqrt, u2)            # den2 = invsqrt * u2
+
+  var zInv: Fe
+  feMul(zInv, den1, den2)
+  feMul(zInv, zInv, t0)               # z_inv = den1 * den2 * t0
+
+  var ix0, iy0: Fe
+  feMul(ix0, x0, FeSqrtM1)            # ix0 = x0 * SQRT_M1
+  feMul(iy0, y0, FeSqrtM1)            # iy0 = y0 * SQRT_M1
+
+  var enchantedDenominator: Fe
+  feMul(enchantedDenominator, den1, InvSqrtAMinusD)
+
+  var tZinv: Fe
+  feMul(tZinv, t0, zInv)
+  let rotate = feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
+
+  # Conditionally rotate x and y (CT_SELECT via feCMove -- no branch).
+  var x, y, denInv: Fe
+  x = x0
+  feCMove(x, iy0, rotate)
+  y = y0
+  feCMove(y, ix0, rotate)
+  denInv = den2
+  feCMove(denInv, enchantedDenominator, rotate)
+
+  var xZinv, negY: Fe
+  feMul(xZinv, x, zInv)
+  feNeg(negY, y)
+  feCMove(y, negY, feIsNegative(xZinv))
+    # y = CT_SELECT(-y IF IS_NEGATIVE(x * z_inv) ELSE y)
+
+  var zMinusFinalY, s: Fe
+  feSub(zMinusFinalY, z0, y)          # z = z0 (unchanged; spec's "z")
+  feMul(s, denInv, zMinusFinalY)      # s = den_inv * (z - y)
+  feAbs(s)                            # s = CT_ABS(...)
+
+  toRistrettoEncoded(feToBytes(s))
+
+# ---------------------------------------------------------------------------
+# Fixed compile-time constants -- the identity and the canonical generator
+# ---------------------------------------------------------------------------
+
+const RistrettoIdentity* = ristrettoUnchecked(
+  GeP3(x: FeZero, y: FeOne, z: FeOne, t: FeZero))
+  ## The ristretto255 group identity. Fixed value, `const` per the codebase
+  ## convention for fixed group elements (`x25519.X25519BasePoint`) rather
+  ## than a zero-arg constructor proc. Internal representation is the
+  ## Edwards identity `(0, 1, 1, 0)` -- one of the eight extended-coordinate
+  ## representatives this module's quotient construction treats as the same
+  ## ristretto255 element; `ristrettoUnchecked`'s debug-only curve-identity
+  ## assert (evaluated here at compile time) confirms it is a well-formed
+  ## point before this constant is ever consumed.
+
+const RistrettoBasePoint* = ristrettoUnchecked(geBasePoint())
+  ## The ristretto255 canonical generator: internally the SAME `GeP3` as the
+  ## RFC 8032 Curve25519 base point `B` (`scalar.geBasePoint()`) -- RFC 9496
+  ## §4.1 chooses this generator specifically so implementations can reuse
+  ## existing Curve25519 base-point precomputation (`scalar.GeBaseTable`)
+  ## for ristretto255 scalar multiplication. Its encoding (checked in
+  ## `tests/unit/test_ristretto.nim` against `ristrettoEncode`) is RFC 9496
+  ## §3's own published canonical-generator encoding, matching Appendix
+  ## A.1's `i=1` vector.
 
 {.pop.}

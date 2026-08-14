@@ -1,6 +1,7 @@
 import std/[unittest, options, strutils]
 import sello/ristretto
 import sello/scalar
+import sello/field
 
 proc hexToArray32(s: string): array[32, byte] =
   doAssert s.len == 64
@@ -142,6 +143,54 @@ suite "RistrettoPoint -- quotient equality (RFC 9496 SS4.3.3)":
     let viaDecode = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[0]))).get()
     let viaScalarmult = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(0))))
     check viaDecode == viaScalarmult
+
+suite "ristrettoEncode -- RFC 9496 Appendix A.1 (encode direction)":
+  test "encode(i*B) == A.1 encoding, for i in 0..15, incl. i=0 (identity -- exercises SQRT_RATIO_M1(1, 0)'s degenerate branch)":
+    for i in 0 ..< A1Encodings.len:
+      let point = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(i))))
+      let encoded = ristrettoEncode(point)
+      check toBytes(encoded) == hexToArray32(A1Encodings[i])
+
+suite "ristrettoEncode / ristrettoDecode -- round-trips over the A.1 set":
+  test "decode(A.1[i]) |> encode == A.1[i]":
+    for i in 0 ..< A1Encodings.len:
+      let encoded = toRistrettoEncoded(hexToArray32(A1Encodings[i]))
+      let decoded = ristrettoDecode(encoded)
+      check decoded.isSome
+      check ristrettoEncode(decoded.get()) == encoded
+
+  test "encode(i*B) |> decode == i*B":
+    for i in 0 ..< A1Encodings.len:
+      let point = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(i))))
+      let decoded = ristrettoDecode(ristrettoEncode(point))
+      check decoded.isSome
+      check decoded.get() == point
+
+suite "InvSqrtAMinusD -- defining equation (RFC 9496 SS4.1)":
+  test "InvSqrtAMinusD^2 * (a - d) == 1, where a = -1 and d is the Edwards d parameter":
+    # a = -1 (the twisted Edwards curve parameter for Curve25519/ristretto255)
+    var a, d, aMinusD, invSq, product: Fe
+    feNeg(a, FeOne)
+    d = feFromLimbs(Ed25519D_Raw)
+    feSub(aMinusD, a, d)
+    feSq(invSq, InvSqrtAMinusD)
+    feMul(product, invSq, aMinusD)
+    check feEqualCT(product, FeOne)
+
+suite "RistrettoIdentity / RistrettoBasePoint -- fixed compile-time consts":
+  test "RistrettoIdentity encodes to the all-zero A.1[0] encoding":
+    check toBytes(ristrettoEncode(RistrettoIdentity)) == hexToArray32(A1Encodings[0])
+
+  test "RistrettoBasePoint encodes to the A.1[1] encoding (the canonical generator)":
+    check toBytes(ristrettoEncode(RistrettoBasePoint)) == hexToArray32(A1Encodings[1])
+
+  test "RistrettoIdentity equals the identity reached via geScalarmultBase(0)":
+    let viaScalarmult = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(0))))
+    check RistrettoIdentity == viaScalarmult
+
+  test "RistrettoBasePoint equals the generator reached via geScalarmultBase(1)":
+    let viaScalarmult = ristrettoUnchecked(geScalarmultBase(toSecretScalar(scalarFromSmallInt(1))))
+    check RistrettoBasePoint == viaScalarmult
 
 suite "RistrettoEncoded -- wire.nim-style borrows":
   test "toRistrettoEncoded / toBytes round-trip":

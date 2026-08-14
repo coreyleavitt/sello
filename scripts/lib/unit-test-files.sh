@@ -23,11 +23,12 @@ unit_test_files=(
   tests/unit/test_properties_scalar.nim
   tests/unit/test_properties_signing.nim
   tests/unit/test_properties_x25519.nim
+  tests/unit/test_properties_ristretto.nim
 )
 
 # proptest is an OPTIONAL milpa dep (see scripts/test.sh's header comment):
 # a fresh clone's plain `milpa fetch` never populates `_deps/proptest`, so
-# the four `test_properties_*.nim` files above fail to compile with a bare
+# the five `test_properties_*.nim` files above fail to compile with a bare
 # "cannot open file: proptest" error mid-loop -- there is no graceful
 # skip today (RFC-003 slice 2 item 4). Detect proptest's presence HERE,
 # once, so both scripts/test.sh and scripts/test-libsodium.sh (which both
