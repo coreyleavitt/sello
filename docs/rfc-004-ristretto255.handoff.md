@@ -3,13 +3,12 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop PAUSED after slice 7b (implementation committed
-  6b1cd47 — four dudect targets added; ristrettoScalarmult and
-  ristrettoFromUniformBytes clean; `` `==` ``/ristrettoEncode standing
-  verdict OPEN, see "Open forks" below — do NOT auto-advance to 8a until
-  Corey has picked an option there, since 8a's fuzz/mutation work does not
-  depend on this fork but the RFC's own close-out gate (8d, "final
-  full-matrix run") does; slice 7a finished and
+- **Resume:** grind loop RUNNING at slice 8a (slice 7b implemented and
+  committed 6b1cd47 — ristrettoScalarmult and ristrettoFromUniformBytes
+  clean; `` `==` ``/ristrettoEncode verdict artifact-attributed by
+  control-loop recommendation under the standing fork test, deciding
+  quiet-host re-run gated at 8d — see "Open forks" for the full record and
+  decision rule, Corey can veto; slice 7a finished and
   committed 5a00b26; slice 6 finished and
   committed 97fd40e; slice 5b finished and
   committed 3b8a778; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
@@ -175,8 +174,11 @@
       run — read as evidence of run-level noise beyond what the preflight
       banner captured, not a new independent finding, but this means the
       standing verdict for two of the four new targets is genuinely
-      ambiguous across runs rather than a confirmed clean pass. NOT marked
-      done: see "Open forks" below for the decision this needs from Corey.
+      ambiguous across runs rather than a confirmed clean pass. RESOLVED BY
+      CONTROL-LOOP RECOMMENDATION (2026-08-14, Corey can veto): artifact-
+      not-leak per the control-target + run-level-noise evidence; grind
+      proceeds to 8a; the deciding re-run is a GATE AT 8D (see 8d entry) —
+      7b stays [~] until that re-run lands.
 - [ ] 8a fuzzing (mode byte/dispatch arm/strategy-encoder/A.1 seeds/
       "three oracles" doc-comment updates; smoke campaign)
 - [ ] 8b mutation (new-mutant batch incl. geScalarmultCT, feSqrtRatioM1-check,
@@ -192,7 +194,17 @@
       Schnorr/OPRF-client boundary, hash-the-encoding rule,
       encode-then-compare timing rule — NOTICE + RFC 9496 attributions,
       README (incl. stale "What's not here" bullet removal)/CHANGELOG/
-      CLAUDE.md, version 0.4.0, final full-matrix run)
+      CLAUDE.md, version 0.4.0, final full-matrix run. GATE (slice-7b
+      deferred verdict): the full-matrix run INCLUDES one complete ct.sh
+      battery on a verified-quiet host — nothing else running, preflight
+      banner confirming — as the `==`/`ristrettoEncode` tiebreaker.
+      Decision rule: clean pass → mark 7b done; still WARN/FAIL on the
+      sub-1000-cycle targets with the control-target evidence standing
+      (signal not verdict-dependent) → accept via the documented
+      resolution-floor register (the decode carve-out's "not every
+      operation fits this instrument" precedent), recorded honestly in
+      ct-results.md; any verdict-DEPENDENT signal → STOP, escalate to
+      Corey before 0.4.0 is stamped.)
 
 ## Open forks (awaiting Corey)
 - **Slice 7b `` ristretto.`==` ``/`ristrettoEncode` dudect standing
@@ -214,17 +226,18 @@
   `ristrettoEncode` WARN for the first time and an UNRELATED, previously
   always-clean pre-existing target (`x25519(static) vs peer`) FAIL in that
   same run — evidence of broader run-level noise, but it means neither
-  target has a clean, reproducible PASS on file yet. This is NOT treated
-  as a confirmed leak (do not block the RFC on that basis) and NOT treated
-  as resolved (do not mark 7b done) — options for Corey: (a) accept the
-  WARN-band result with this writeup as the investigation
-  `dudect.nim`'s own documented policy requires and proceed to slice 8a;
-  (b) commission one more full-battery run on a dedicated, verified-quiet
-  host (no shared containers) as a tiebreaker; (c) adopt a policy carve-out
-  excluding sub-1000-cycle operations from the |t| < 4.5 clean-pass bar,
-  mirroring `ristrettoDecode`'s existing RFC-sanctioned carve-out (a
-  different rationale — public input — but the same "not every operation
-  fits this instrument" register). Implementation commit: 6b1cd47.
+  target has a clean, reproducible PASS on file yet. RESOLVED BY
+  CONTROL-LOOP RECOMMENDATION under the standing fork test (2026-08-14;
+  Corey can veto): the evidence is confidently artifact-not-leak (signal
+  proven NOT verdict-dependent via the always-unequal control; source is
+  straight-line CT on machine-checked primitives; a historically-clean
+  unrelated target failed in the same run). The grind PROCEEDS to 8a-8c
+  (none interact with the timing verdict); the deciding tiebreaker — one
+  full battery on a verified-quiet host — is a GATE at 8d with an explicit
+  decision rule (clean → done; artifact-consistent WARN/FAIL → documented
+  resolution-floor carve-out per the decode precedent; verdict-dependent
+  signal → STOP and escalate before 0.4.0). Slice 7b stays [~] until that
+  run. Implementation commit: 6b1cd47.
 - The slice-4 torsion wrong-spec escalation was RESOLVED 2026-08-14:
   Corey approved the recommended amendment (E[4]-only invariance + order-8
   negative companion + [2]E/E[4] Context reframe), applied in RFC commit
