@@ -1,10 +1,11 @@
 # RFC-004: Ristretto255 (RFC 9496)
 
-- **Status:** DRAFT — architect rounds 1, 2 AND 3 COMPLETE (rounds 1–2
-  2026-08-09, round 3 2026-08-13; all rounds' four-lens findings applied to this
-  text — see "Open questions — resolved in round 1", "Round-2 changes", and
-  "Round-3 changes"). Slicing frozen as written; awaiting Corey's
-  approval before `/tdd`. Unlike RFC-002/003 this is a fresh feature RFC, not an
+- **Status:** APPROVED (Corey, 2026-08-13) — architect rounds 1, 2 AND 3 COMPLETE
+  (rounds 1–2 2026-08-09, round 3 2026-08-13; all rounds' four-lens findings
+  applied to this text — see "Open questions — resolved in round 1", "Round-2
+  changes", and "Round-3 changes"). Stage 3 (implementation grind) in progress;
+  one wrong-spec escalation amended mid-grind — see "Stage-3 amendment
+  (2026-08-14)". Unlike RFC-002/003 this is a fresh feature RFC, not an
   audit output, so the architect rounds were NOT waived.
 - **Handoff doc:** `docs/rfc-004-ristretto255.handoff.md` (live progress ledger — read it
   first when resuming).
@@ -23,9 +24,12 @@ Ristretto255 is the brief's last undelivered chapter (`prompt.md` step 7: "leave
 extension point, do not build yet" — the extension point has since been built:
 RFC-003 slice 1 extracted the sqrt-ratio dance into `field.nim` precisely so a Ristretto
 decode would not have to import the verify-only module). It constructs a **prime-order
-group** of order L as a quotient of the Curve25519 group by its 8-torsion: the 8 curve
-points differing by torsion ARE one Ristretto element, every element has exactly one
-valid 32-byte encoding, and non-canonical or small-order garbage does not decode. That
+group** of order L as the quotient [2]E/E[4] (the image of doubling, modulo the
+4-torsion — NOT E/E[8], a common misstatement this RFC itself carried until round 3's
+implementation caught it; dalek issue #312 is the canonical reference): within [2]E,
+the four curve points differing by an E[4] point ARE one Ristretto element, every
+element has exactly one valid 32-byte encoding, and non-canonical or small-order
+garbage does not decode. That
 is the substrate modern protocol work (Schnorr PoKs, Pedersen commitments, VRFs, OPRFs,
 Bulletproofs) assumes, and the cofactor bug class it kills (Monero's key-image
 double-spend being the canonical casualty) is exactly the kind sello's Wycheproof
@@ -516,20 +520,27 @@ finding 3's compile-time gate, not prose review.
   for the generator). Properties: encode∘decode = id over all valid vectors and random
   elements; decode∘encode = id; group axioms (associativity, identity, inverse —
   including P + (−P) == RistrettoIdentity) over random elements;
-  **torsion invariance** — the white-box crown jewel: for each of the eight 8-torsion
-  Edwards points T, `ristrettoEncode(P + T) == ristrettoEncode(P)` for random P —
-  this property IS the quotient, tested directly. Because this property is the
-  ONLY exercise of the quotient construction anywhere in the plan and property
-  files skip silently when proptest isn't fetched, slice 4 ALSO pins a
-  deterministic plain-unittest torsion spot-check in `test_ristretto.nim` (two
-  fixed points, all eight T's) — quotient coverage that cannot be skipped
-  (round 2). All EIGHT torsion points'
-  coordinates are HARDCODED constants cross-checked in-test against their defining
-  equations (on-curve; annihilated by 8; the order-8 four not annihilated by 4) —
-  the identity, (0,−1), and (±sqrt(−1), 0) are trivial-or-`FeSqrtM1`-expressible,
-  but the four order-8 points need a square root NOT expressible via sqrt(−1)
-  alone, and deriving them at test time through the library's own `feSqrtRatioM1`
-  would make the test circular in exactly the primitive it most needs to check;
+  **torsion invariance** — the white-box crown jewel: for each of the FOUR E[4]
+  Edwards points T (identity, (0,−1), (±sqrt(−1), 0)),
+  `ristrettoEncode(P + T) == ristrettoEncode(P)` for random P — this property IS
+  the quotient, tested directly. E[4]-only is the CORRECT scope, not a weakening:
+  ristretto255 is [2]E/E[4], and the E[4] coset is the quotient's entire
+  representative ambiguity within [2]E — the four genuine order-8 points do NOT
+  preserve the encoding (verified independently in Python and against sello,
+  byte-identical; dalek issue #312). Slice 4 therefore ALSO pins the [2]E
+  boundary as documented behavior with a deterministic NEGATIVE companion: for
+  the two fixed spot-check points, an order-8 translate must NOT encode equal
+  (hardcoded verified order-8 coordinates; a deterministic spot-check, not a
+  universal property). Because the invariance property is the ONLY exercise of
+  the quotient construction anywhere in the plan and property files skip
+  silently when proptest isn't fetched, slice 4 ALSO pins a deterministic
+  plain-unittest torsion spot-check in `test_ristretto.nim` (two fixed points,
+  all four E[4] T's) — quotient coverage that cannot be skipped (round 2). All
+  four E[4] points' coordinates are trivial-or-`FeSqrtM1`-expressible constants,
+  cross-checked in-test against their defining equations (on-curve; annihilated
+  by 4) — no offline derivation machinery needed; the order-8 coordinates used
+  by the negative companion are hardcoded and cross-checked the same way
+  (on-curve; NOT annihilated by 4);
   equality-operator consistency with encoding equality; CT-vs-vartime scalarmult
   agreement (and, with slice 7, three-way agreement) plus boundary scalars pinned
   deterministically (s=0 and s=L → identity, s=1 → P, s=L−1 → −P — the
@@ -687,11 +698,13 @@ finding 3's compile-time gate, not prose review.
    wiring — the array is hand-maintained; there is no glob).
 6. **(4) Group ops.** `+`/`-`/negation (the private cached-negation helper),
    group-axiom properties, the
-   torsion-invariance property (eight HARDCODED torsion points, defining-equation
-   cross-checks in-test — never derived through the library's own sqrt machinery),
-   plus the deterministic plain-unittest torsion spot-check in
-   `test_ristretto.nim` (two fixed points, all eight T's — quotient coverage
-   that survives a proptest-less build).
+   torsion-invariance property (the four E[4] points — identity, (0,−1),
+   (±`FeSqrtM1`, 0) — defining-equation cross-checks in-test), the deterministic
+   order-8 NEGATIVE companion (an order-8 translate must NOT encode equal —
+   the [2]E/E[4] boundary pinned as documented behavior), plus the
+   deterministic plain-unittest torsion spot-check in `test_ristretto.nim`
+   (two fixed points, all four E[4] T's — quotient coverage that survives a
+   proptest-less build).
 7. **(5a) Static secret role + scalarmult, existing registers.**
    `RistrettoStaticSecret` (secretHooks, canonical-residue invariant,
    `ristrettoStaticSecret()`/`ristrettoStaticPair()`, the Option-returning
@@ -828,10 +841,6 @@ finding 3's compile-time gate, not prose review.
   `cmovCached`, the recoding through the Z3-proven `recodeScalarRadix16` (its
   bit-255 precondition discharged by the secret role types' canonical-residue
   invariant), and dudect measuring the result in 7b.
-- **Risk: torsion-point test-vector provenance.** All eight coordinates are
-  hardcoded and cross-checked in-test against their defining equations (on-curve,
-  exact order) — never derived at test time through the library's own sqrt
-  machinery, which would be circular in the primitive under test.
 
 ## Non-goals (considered and declined this round)
 
@@ -1038,3 +1047,31 @@ Corey's approval accordingly (the approval gate can veto any of them):
     `array[64, byte]` map parameter's checked-copy idiom made a doc
     obligation; unary-vs-binary `-` whitespace pinned for examples; the
     secret role types carry the family's first explicit repr-disclosure line.
+
+## Stage-3 amendment (2026-08-14): torsion property corrected to E[4]
+
+The one wrong-spec escalation of the implementation grind, raised by slice 4's
+implementer per the standing orders (STOP, never silently patch the spec) and
+approved by Corey. The RFC — through all three review rounds — specified
+encode-invariance under all EIGHT 8-torsion points. That premise is
+mathematically wrong: ristretto255 is the quotient [2]E/E[4] (image of
+doubling, modulo the 4-torsion), NOT E/E[8], and encode-invariance holds
+exactly for the four E[4] points — identity, (0,−1), (±sqrt(−1), 0). The four
+genuine order-8 points do NOT preserve the encoding. Verified three ways
+before amending: an independent Python implementation, sello's own staged
+slice-4 code (byte-identical to Python on the same points), and the upstream
+record (curve25519-dalek issue #312, hdevalence). Notably, RFC 9496 itself
+never states the eight-point claim — it was folklore this RFC imported, and no
+document-review round could catch a claim absent from the source spec;
+computation caught it, before any wrong commit. Amendments applied: (1) the
+torsion-invariance property re-scoped to the four E[4] points — a scope
+CORRECTION, not a weakening, since the E[4] coset is the quotient's entire
+representative ambiguity within [2]E; all four points are
+trivially/`FeSqrtM1`-expressible, so the offline-derivation machinery and the
+torsion-provenance risk bullet (deleted) evaporate; (2) a deterministic
+NEGATIVE companion added — for the two fixed spot-check points, an order-8
+translate must NOT encode equal — pinning the [2]E boundary as documented
+behavior; (3) the Context framing corrected from "quotient by its 8-torsion /
+8 points ARE one element" to [2]E/E[4]. Library code needed NO changes — the
+error lived only in the test plan's premise; decode/encode/group ops are
+byte-correct against every RFC 9496 vector.
