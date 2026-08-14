@@ -231,6 +231,37 @@ proc decrementLE(b: array[32, byte]; amount: int): array[32, byte] =
       borrow = 0
     inc i
 
+suite "scalarmultVartime -- s = 0 (RFC-004 slice 7a finding)":
+  ## Regression pin for a pre-existing bug discovered while cross-checking
+  ## `geScalarmultCT` against this function at s=0: `started` never flips
+  ## true for an all-zero scalar, so the loop body never assigns to `r`,
+  ## and a freshly-declared `var r: GeP3` caller-side used to come back
+  ## with Nim's implicit all-zero object fields -- (0:0:0:0), NOT the
+  ## identity (0:1:1:0) -- rather than the mathematically correct [0]p.
+  ## `RistrettoPoint`'s quotient `==` could not catch this (every
+  ## cross-product collapses to 0 when x1=y1=0, so it degenerately treats
+  ## the all-zero garbage as "equal to the identity" without it actually
+  ## holding the identity's real coordinates); `pointEncode` comparison,
+  ## used below and throughout this file, does not have that blind spot.
+  ## Fixed by seeding `r` with the identity before the digit loop.
+  test "[0]P equals the identity via pointEncode, for the base point":
+    var r: GeP3
+    scalarmultVartime(r, default(array[32, byte]), geBasePoint())
+    var identity: GeP3
+    identity.y = FeOne; identity.z = FeOne
+    check pointEncode(r) == pointEncode(identity)
+
+  test "[0]P equals the identity via pointEncode, for an arbitrary non-base point":
+    var arbitrary: GeP3
+    var five: array[32, byte]
+    five[0] = 5
+    scalarmultVartime(arbitrary, five, geBasePoint())
+    var r: GeP3
+    scalarmultVartime(r, default(array[32, byte]), arbitrary)
+    var identity: GeP3
+    identity.y = FeOne; identity.z = FeOne
+    check pointEncode(r) == pointEncode(identity)
+
 suite "geScalarmultBase (RFC-001 slice 4)":
   test "[1]B equals the base point itself (RED anchor vector)":
     var s: array[32, byte]
@@ -288,6 +319,107 @@ suite "geScalarmultBase (RFC-001 slice 4)":
       let r = decrementLE(L, amount)
       check scIsCanonical(r)
       check pointEncode(geScalarmultBase(toSecretScalar(r))) == refBaseMultEncoded(r)
+
+# ---------------------------------------------------------------------------
+# geScalarmultCT (RFC-004 slice 7a) -- CT variable-base scalar
+# multiplication: the uniform 256-doubling interleaved ladder over a
+# runtime-built 8-entry table. Same false-negative trap as
+# geScalarmultBase above (two algorithms reaching the same point generally
+# land on different, equally-valid projective representatives), so every
+# check compares via pointEncode against scalarmultVartime -- exercised
+# here against ARBITRARY points (not the base point), since this is a
+# variable-base operation and geScalarmultBase's own suite above already
+# covers the base-point case exhaustively (and `ristretto.nim`'s own tests
+# cross-check the base-point case a second, higher-level way: `[s]B` via
+# `geScalarmultCT` must equal `[s]B` via `geScalarmultBase`).
+# ---------------------------------------------------------------------------
+
+proc refVarScalarmultEncoded(s: array[32, byte]; p: GeP3): array[32, byte] =
+  var r: GeP3
+  scalarmultVartime(r, s, p)
+  pointEncode(r)
+
+proc arbitraryPoint(seed: uint64): GeP3 =
+  ## A non-identity, non-base point: seed*B via the already-vector-trusted
+  ## scalarmultVartime, so the point itself carries no correctness
+  ## assumption from the code under test.
+  scalarmultVartime(result, prngScalar32(seed), geBasePoint())
+
+suite "geScalarmultCT (RFC-004 slice 7a)":
+  test "[1]P equals P itself (RED anchor vector)":
+    let p = arbitraryPoint(1000)
+    var s: array[32, byte]
+    s[0] = 1
+    check pointEncode(geScalarmultCT(toSecretScalar(s), p)) == pointEncode(p)
+
+  test "[0]P equals the identity, matching scalarmultVartime":
+    let p = arbitraryPoint(1001)
+    let s = default(array[32, byte])
+    check pointEncode(geScalarmultCT(toSecretScalar(s), p)) == refVarScalarmultEncoded(s, p)
+
+  test "clamped domain: RFC 8032 test-vector-1 seed, expanded and clamped, against an arbitrary point":
+    let seed: array[32, byte] = [
+      0x9d'u8, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
+      0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
+      0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
+      0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
+    ]
+    var sha: sha512
+    sha.init()
+    sha.update(seed)
+    var expanded: array[64, byte]
+    sha.finish(expanded)
+    var a: array[32, byte]
+    for i in 0 ..< 32: a[i] = expanded[i]
+    clampScalar(a)
+    let p = arbitraryPoint(1002)
+    check pointEncode(geScalarmultCT(toSecretScalar(a), p)) == refVarScalarmultEncoded(a, p)
+
+  test "clamped domain: 50 random clamped scalars match scalarmultVartime, over 5 distinct points":
+    var checked = 0
+    for pi in 0'u64 ..< 5:
+      let p = arbitraryPoint(2000 + pi)
+      for i in 0'u64 ..< 50:
+        var s = prngScalar32(pi * 1000 + i)
+        clampScalar(s)
+        check pointEncode(geScalarmultCT(toSecretScalar(s), p)) == refVarScalarmultEncoded(s, p)
+        inc checked
+    check checked == 250
+
+  test "clamped domain: maximal clamped scalar (top byte 0x7F, final-carry boundary)":
+    var s: array[32, byte]
+    for i in 0 ..< 32: s[i] = 0xFF
+    clampScalar(s)
+    check s[0] == 0xF8
+    check s[31] == 0x7F
+    let p = arbitraryPoint(1003)
+    check pointEncode(geScalarmultCT(toSecretScalar(s), p)) == refVarScalarmultEncoded(s, p)
+
+  test "r-shaped domain: 50 random reduced-mod-L scalars match scalarmultVartime, over 5 distinct points":
+    var checked = 0
+    for pi in 0'u64 ..< 5:
+      let p = arbitraryPoint(3000 + pi)
+      for i in 0'u64 ..< 50:
+        let r = prngReducedScalar32(pi * 1000 + i)
+        check scIsCanonical(r)
+        check pointEncode(geScalarmultCT(toSecretScalar(r), p)) == refVarScalarmultEncoded(r, p)
+        inc checked
+    check checked == 250
+
+  test "r-shaped domain: values just below L (bit-252 boundary region)":
+    let p = arbitraryPoint(1004)
+    for amount in [1, 2, 3, 17, 255]:
+      let r = decrementLE(L, amount)
+      check scIsCanonical(r)
+      check pointEncode(geScalarmultCT(toSecretScalar(r), p)) == refVarScalarmultEncoded(r, p)
+
+  test "agrees with geScalarmultBase at the base point itself (cross-check between the two CT ladders)":
+    for i in 0'u64 ..< 20:
+      var s = prngScalar32(4000 + i)
+      clampScalar(s)
+      let viaCT = geScalarmultCT(toSecretScalar(s), geBasePoint())
+      let viaFixedBase = geScalarmultBase(toSecretScalar(s))
+      check pointEncode(viaCT) == pointEncode(viaFixedBase)
 
 suite "recodeScalarRadix16 (RFC-001 slice 4, white-box)":
   test "digit range is asymmetric: [-8,7] for positions 0..62, [-8,8] for 63":

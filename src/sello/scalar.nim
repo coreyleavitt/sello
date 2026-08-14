@@ -237,6 +237,20 @@ func geAdd*(r: var GeP1P1; p: GeP3; q: GeCached) {.inline.} =
   feAdd(r.z, D, C)          # Z = 2*Z*Zq + C
   feSub(r.t, D, C)          # T = 2*Z*Zq - C
 
+func geP3Identity(): GeP3 {.inline.} =
+  ## The extended-coordinate identity point (0, 1, 1, 0). RFC-004 slice 7a
+  ## consolidation (optional per that RFC's own slice text, taken here
+  ## since `geScalarmultCT` below makes this the THIRD inline construction
+  ## of the identity in this file -- `scalarmultVartime`'s `pts[0]` and
+  ## `geScalarmultBase`'s `acc` init, both refactored to call this instead,
+  ## field-for-field identical to what they wrote before, a pure rename
+  ## with no behavior change). Not exported: every caller lives in this
+  ## file.
+  result.x = FeZero
+  result.y = FeOne
+  result.z = FeOne
+  result.t = FeZero
+
 # ---------------------------------------------------------------------------
 # Scalar multiplication: variable-base, unsigned 4-bit windows
 # ---------------------------------------------------------------------------
@@ -262,7 +276,7 @@ func scalarmultVartime*(r: var GeP3; s: array[32, byte]; p: GeP3) =
 
   # Build pts[0] = identity, pts[1] = P, pts[2] = 2P, ..., pts[15] = 15P
   # Then cch[k] = cached(pts[k]).
-  pts[0].x = FeZero; pts[0].y = FeOne; pts[0].z = FeOne; pts[0].t = FeZero
+  pts[0] = geP3Identity()
   geP3ToCached(cch[0], pts[0])
 
   pts[1] = p
@@ -273,7 +287,23 @@ func scalarmultVartime*(r: var GeP3; s: array[32, byte]; p: GeP3) =
     geP1P1ToP3(pts[i], dbl)
     geP3ToCached(cch[i], pts[i])
 
-  # Process nibbles from high to low
+  # Process nibbles from high to low. `r` is seeded with the identity
+  # up front (RFC-004 slice 7a finding, discovered while cross-checking
+  # `geScalarmultCT` against this function at s=0 via `pointEncode`
+  # rather than `RistrettoPoint`'s quotient `==`, which degenerately
+  # accepts the all-zero (0:0:0:0) GeP3 Nim's implicit object
+  # zero-initialization used to leave `r` as -- every cross-product in the
+  # quotient-equality check collapses to 0 when x1=y1=0, so an all-zero
+  # `r` passed as "equal to the identity" without actually holding it):
+  # for an all-zero `s`, `started` never flips true and the loop below
+  # never assigns to `r` at all, so without this line the caller's `var r:
+  # GeP3` would be returned exactly as it arrived (implicit all-zero
+  # fields for a freshly-declared local, not the mathematically correct
+  # identity [0]p). Harmless for every `started = true` path: the first
+  # nonzero digit's `r = pts[window]` (below) overwrites this
+  # unconditionally, so this line changes output only for the all-zero-
+  # scalar case.
+  r = pts[0]
   var started = false
 
   for i in countdown(63, 0):
@@ -496,8 +526,7 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
     {.pop.}
   var digits = recodeScalarRadix16(sBytes)
 
-  var acc: GeP3
-  acc.x = FeZero; acc.y = FeOne; acc.z = FeOne; acc.t = FeZero
+  var acc: GeP3 = geP3Identity()
 
   var u: GeCached
   var step: GeP1P1
@@ -515,6 +544,179 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
 
     for i in countup(0, 62, 2):
       cmovCached(u, GeBaseTable[i div 2], digits[i])
+      geAdd(step, acc, u)
+      geP1P1ToP3(acc, step)
+
+    result = acc
+
+    ct.wipe(digits)
+    ct.wipe(acc)
+    ct.wipe(u)
+    ct.wipe(step)
+  finally:
+    ct.wipe(sBytes)
+    ct.wipe(digits)
+    ct.wipe(acc)
+    ct.wipe(u)
+    ct.wipe(step)
+
+{.pop.}
+
+# ---------------------------------------------------------------------------
+# Variable-base CONSTANT-TIME scalar multiplication (RFC-004 slice 7a).
+#
+# This is Ristretto255's headline new secret-scalar operation: `[s]P` for a
+# secret `s` and an ARBITRARY (not fixed) point `P` -- the operation OPRF
+# evaluation, Pedersen commitments, and ElGamal-style DH shares over the
+# group all need, and the one operation the fixed-base-only pair
+# (`geScalarmultBase`/`scalarmultVartime`) cannot provide safely (the
+# former is fixed-base only; the latter is variable-base but vartime).
+#
+# **UNIFORM interleaved ladder, NOT geScalarmultBase's odds/x16/evens
+# shape** (RFC-004 Design, rounds 1-2): `geScalarmultBase`'s table is built
+# at COMPILE TIME with every row `i` pre-scaled by 16^(2*i) -- that
+# factoring is exactly what lets it split 64 digits into two half-passes
+# with one 4-doubling scale-by-16 between them, touching the table twice.
+# A single RUNTIME table built from an arbitrary `p` (below) has no such
+# pre-scaling available, so cloning that shape here would compute the
+# WRONG multiple. Instead, the standard interleaved high-to-low form: the
+# accumulator starts at the identity, and for each of the 64 signed
+# radix-16 digits of `s`, high to low, four doublings of the accumulator
+# are followed by one constant-time table select + add -- a UNIFORM 256
+# doublings + 64 adds, every iteration identical in shape. The first
+# iteration's four doublings act on the identity and are deliberately NOT
+# special-cased away: an initial-load idiom (skip the first four doublings,
+# reconstruct the accumulator from the selected `GeCached` directly) would
+# save about 1.5% of the doublings at the cost of a second, non-uniform
+# loop shape for the exact-string mutation catalog and cost model to track
+# separately -- not worth it for a ~1.5% constant.
+#
+# **Table build is PUBLIC, not CT.** `p` is a public group element in every
+# protocol this operation serves -- a Pedersen commitment before
+# publication, an OPRF blinded element -- the SECRET is the scalar `s`,
+# never the point being multiplied (see `ristretto.nim`'s module-doc
+# headline for the full posture this rests on). Building the 8-entry table
+# `[1*P .. 8*P]` at runtime therefore carries no CT obligation, and reuses
+# `scalarmultVartime`'s own table-build pattern (above in this file): plain
+# `geAdd` -> `geP1P1ToP3` -> `geP3ToCached`, sized to 8 rather than that
+# function's 16 since `cmovCached`'s built-in conditional negation already
+# covers the negative half of the signed [-8, 8] digit domain
+# `recodeScalarRadix16` produces -- confirmed against `cmovCached`'s own
+# source (round 3): no new CT negate helper is needed. Only the per-digit
+# LOOKUP into this table must be constant-time, and it is the exact same
+# `cmovCached` select `geScalarmultBase` already uses against its own
+# (compile-time, pre-scaled) table -- one audited select, two callers.
+#
+# **Written loop-composition argument** (RFC-004's symex decline register:
+# a whole-loop Z3 query was considered and declined up front, per the
+# `symex_reduce.nim` resource-wall precedent, in favor of this written
+# argument over already-individually-proven components -- see the RFC's
+# Validation battery "symex (Z3)" bullet): the loop below is constant-time
+# on `s` because every one of its three moving parts is:
+#   1. SHAPE. The loop runs exactly 64 iterations; each does exactly 4
+#      doublings (`geP3Double`, itself unconditional field arithmetic --
+#      `geP3ToP2`/`geP2Dbl`/`geP1P1ToP3` contain no data-dependent branch)
+#      plus exactly one `cmovCached` select and one `geAdd`/`geP1P1ToP3`.
+#      The iteration COUNT and the operation SEQUENCE within an iteration
+#      never depend on `digits[i]`'s VALUE -- only on the loop index `i`,
+#      which is a compile-time-fixed schedule, not data derived from `s`.
+#   2. SELECTION. The one data-dependent step -- choosing which table
+#      entry (and its sign) feeds the add -- routes entirely through
+#      `cmovCached`, whose masked-select/masked-negate arithmetic is
+#      machine-checked full-domain in `tests/verify/symex_mask.nim`
+#      (`cmoveSelectStep`/`cswapSelectStep`), and whose own 8-entry scan is
+#      itself a fixed, secret-independent iteration count with no early
+#      exit.
+#   3. RECODING. `digits` comes from `recodeScalarRadix16`, whose
+#      digit-range invariant is machine-checked in
+#      `tests/verify/symex_recode.nim` (the per-iteration lemma plus the
+#      63-step composition, both `sxUnsat`) and whose own body is
+#      unconditional carry-propagation arithmetic with no branch on `s`'s
+#      byte values. Its one precondition (bit 255 of `s` clear) is
+#      discharged below, the same debug-only assert `geScalarmultBase`
+#      carries.
+# Composing (1)-(3): the loop's total instruction sequence and iteration
+# count are fixed at compile time, and the only quantities that vary with
+# `s` are field-arithmetic operand VALUES flowing through already-CT
+# primitives -- exactly the composition argument `geScalarmultBase` above
+# already rests on for its own two half-passes, extended here to one
+# uniform pass over a runtime table. No new solver query is introduced
+# because no new primitive is: `geAdd`, `geP3Double`, `cmovCached`, and
+# `recodeScalarRadix16` are all pure reuse, individually already proven.
+# ---------------------------------------------------------------------------
+
+{.push checks: off.}
+
+func geScalarmultCT*(s: SecretScalar; p: GeP3): GeP3 =
+  ## r = [s]p — variable-base scalar multiplication, CONSTANT-TIME on `s`.
+  ## The CT sibling of `geScalarmultBase` (CT fixed-base) and
+  ## `scalarmultVartime` (vartime variable-base) -- see the region doc
+  ## comment immediately above for the full ladder-shape/table-build/
+  ## loop-composition writeup; not repeated per-line here.
+  ##
+  ## Precondition: bit 255 of `s` is 0 -- identical to `geScalarmultBase`'s
+  ## own precondition (see `recodeScalarRadix16`'s doc comment), discharged
+  ## by construction for every real caller: the secret role types
+  ## consuming this (`ristretto.RistrettoStaticSecret`/
+  ## `RistrettoEphemeralSecret`) hold only canonical residues mod L
+  ## (< L < 2^253).
+  ##
+  ## `s: SecretScalar`, not a bare `array[32, byte]` (matching
+  ## `geScalarmultBase`'s own type boundary, round-3 finding A3): this is
+  ## an entry point a real caller (`ristretto.ristrettoScalarmult`) hands a
+  ## real secret scalar to.
+  ##
+  ## Wipe discipline (RFC finding R1, extended to this function by RFC-004
+  ## slice 7a): every secret local this function touches -- `sBytes` (a
+  ## fresh copy of the raw secret scalar), `digits` (its directly-
+  ## invertible radix-16 decomposition), the secret-dependent accumulator
+  ## `acc`, and the two per-iteration temporaries `u` (the
+  ## `cmovCached`-selected `GeCached`) and `step` (the completed-point
+  ## temp) -- is wiped via `ct.wipe` once no longer needed, under the same
+  ## `try`/`finally` net `geScalarmultBase` uses. `u`/`step` are declared
+  ## ONCE outside the loop and reused every iteration (`geScalarmultBase`'s
+  ## own pattern): only their FINAL leftover values persist on the stack
+  ## once the loop ends, so one wipe after the loop covers every
+  ## iteration's stale value, not just the last -- each earlier iteration's
+  ## value was already overwritten by the next iteration's `cmovCached`/
+  ## `geAdd` call before this function returns. The runtime table
+  ## (`table`/`pts` below) is PUBLIC (see the region doc comment) and is
+  ## NOT wiped -- same register as `GeBaseTable` (unwiped, compile-time,
+  ## public) and `scalarmultVartime`'s own `pts`/`cch` tables.
+  ## `result = acc` copies `acc`'s value out before `acc` itself is wiped,
+  ## so the wipe cannot affect the returned point.
+  var sBytes = secretScalarBytes(s)
+  when not defined(release):
+    {.push assertions: on.}
+    assert (sBytes[31] and 0x80'u8) == 0, "geScalarmultCT: bit 255 of s must be 0"
+    {.pop.}
+  var digits = recodeScalarRadix16(sBytes)
+
+  # Runtime table build: [1*P .. 8*P], PUBLIC (see region doc comment) --
+  # scalarmultVartime's own geAdd -> geP1P1ToP3 -> geP3ToCached pattern,
+  # sized to 8 (not that function's 16) since cmovCached's built-in
+  # negation already covers digits -1..-8.
+  var pts: array[8, GeP3]
+  var table: array[8, GeCached]
+  pts[0] = p
+  geP3ToCached(table[0], pts[0])
+  for i in 1 ..< 8:
+    var step0: GeP1P1
+    geAdd(step0, pts[i - 1], table[0])
+    geP1P1ToP3(pts[i], step0)
+    geP3ToCached(table[i], pts[i])
+
+  var acc: GeP3 = geP3Identity()
+  var u: GeCached
+  var step: GeP1P1
+
+  try:
+    ct.wipe(sBytes)
+
+    for i in countdown(63, 0):
+      for _ in 0 ..< 4:
+        acc = geP3Double(acc)
+      cmovCached(u, table, digits[i])
       geAdd(step, acc, u)
       geP1P1ToP3(acc, step)
 

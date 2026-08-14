@@ -609,6 +609,90 @@ suite "RistrettoEphemeralSecret -- move-only copy rejection (compile-time, subpr
     check "=copy" in output
 
 # ---------------------------------------------------------------------------
+# RFC-004 slice 7a -- ristrettoScalarmult: CT variable-base scalar
+# multiplication over scalar.geScalarmultCT (the static + sink-ephemeral
+# wrappers), three-way agreement, and boundary scalars.
+# ---------------------------------------------------------------------------
+
+suite "ristrettoScalarmult -- CT variable-base, three-way agreement + boundary scalars (RFC-004 slice 7a)":
+  ## `p` below is 3*RistrettoBasePoint (A1Encodings[3]) -- a genuine
+  ## non-identity, non-base point, so these checks exercise the variable-
+  ## base ladder against a point the runtime table build actually has to
+  ## compute from scratch, not merely re-derive the fixed-base table
+  ## already covers.
+  test "ristrettoScalarmult(secret, p) agrees with ristrettoScalarmultVartime(secret.toBytes, p), for a non-base point":
+    let secret = toRistrettoStaticSecret(scalarFromSmallInt(7)).get()
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ristrettoScalarmult(secret, p) == ristrettoScalarmultVartime(toBytes(secret), p)
+
+  test "ristrettoScalarmult(secret, RistrettoBasePoint) agrees with BOTH ristrettoScalarmultBase(secret) and ristrettoScalarmultVartime(secret.toBytes, RistrettoBasePoint) -- three-way agreement at the base point":
+    let secret = toRistrettoStaticSecret(scalarFromSmallInt(11)).get()
+    let viaCT = ristrettoScalarmult(secret, RistrettoBasePoint)
+    let viaFixedBase = ristrettoScalarmultBase(secret)
+    let viaVartime = ristrettoScalarmultVartime(toBytes(secret), RistrettoBasePoint)
+    check viaCT == viaFixedBase
+    check viaCT == viaVartime
+
+  test "s = 0 -> identity (CT variable-base)":
+    let secret = toRistrettoStaticSecret(default(array[32, byte])).get()
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ristrettoScalarmult(secret, p) == RistrettoIdentity
+
+  test "s = 1 -> p (CT variable-base)":
+    let secret = toRistrettoStaticSecret(scalarFromSmallInt(1)).get()
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ristrettoScalarmult(secret, p) == p
+
+  test "s = L - 1 -> -p (CT variable-base, additive-inverse check)":
+    let secret = toRistrettoStaticSecret(lMinus1Bytes()).get()
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ristrettoScalarmult(secret, p) == (-p)
+
+  test "s = L -> identity (CT variable-base, wide constructor -- L rejected by the 32-byte import by design)":
+    let secret = toRistrettoStaticSecretWide(wideLBytes())
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
+    check ristrettoScalarmult(secret, p) == RistrettoIdentity
+
+suite "RistrettoEphemeralSecret -- consuming ristrettoScalarmult (RFC-004 slice 7a)":
+  test "ristrettoScalarmult(move(ephemeral), RistrettoBasePoint) agrees with the pair's own ristrettoScalarmultBase-derived public element (fixed-base vs CT variable-base, same secret, via the pair)":
+    ## `RistrettoEphemeralSecret` has no from-bytes route (freshness by
+    ## construction, see the type's own doc comment), so there is no way to
+    ## put "the same bytes" into a `RistrettoStaticSecret` for a direct
+    ## vartime cross-check. Instead: `ristrettoEphemeralPair()` already
+    ## computes `viaBase = ristrettoScalarmultBase(k)` internally for the
+    ## SAME secret `k` this test then consumes via `ristrettoScalarmult` --
+    ## since `RistrettoBasePoint` IS the fixed base `ristrettoScalarmultBase`
+    ## multiplies against, `ristrettoScalarmult(k, RistrettoBasePoint)`
+    ## computes the identical `[k]B` via the NEW CT variable-base ladder
+    ## instead of the fixed-base one, a genuine cross-check of
+    ## `geScalarmultCT` against `geScalarmultBase` for a secret this test
+    ## never sees as raw bytes.
+    var (secret, viaBase) = ristrettoEphemeralPair()
+    let viaCT = ristrettoScalarmult(move(secret), RistrettoBasePoint)
+    check viaCT == viaBase
+
+  test "ristrettoScalarmult(move(ephemeral), p) produces a valid, non-identity point for a non-base p":
+    let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[5]))).get()
+    var secret = ristrettoEphemeralSecret()
+    let consumed = ristrettoScalarmult(move(secret), p)
+    check not (consumed == RistrettoIdentity)
+
+suite "RistrettoEphemeralSecret -- consuming scalarmult single-use (compile-time, subprocess-verified, RFC-004 slice 7a)":
+  ## Neither `compiles()` nor `nim check` can see this violation -- it is
+  ## raised by the `injectdestructors` pass, which runs later in the
+  ## pipeline than either reaches (`x25519.x25519(sink X25519EphemeralSecret, ...)`'s
+  ## own `reject_ephemeral_reuse.nim` precedent, reused verbatim here for
+  ## this module's consuming variable-base scalarmult).
+  test "reusing a consumed RistrettoEphemeralSecret via ristrettoScalarmult is a compile error (subprocess compile)":
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_ristretto_ephemeral_reuse.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_ristretto_ephemeral_reuse") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "=copy" in output
+
+# ---------------------------------------------------------------------------
 # RFC-004 slice 6 -- hash-to-group (ristrettoFromUniformBytes / the MAP
 # function) and the three remaining SS4.1 implementation constants
 # ---------------------------------------------------------------------------

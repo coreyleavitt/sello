@@ -28,7 +28,7 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 6 scope** (this file, so far -- superseding slice 5b's own
+## **Slice 7a scope** (this file, so far -- superseding slice 6's own
 ## summary, which this paragraph always restates as current state):
 ## everything slice 4 landed (`RistrettoPoint`/`RistrettoEncoded` and their
 ## basic borrows, the `ristrettoUnchecked` construction door, quotient
@@ -38,24 +38,30 @@
 ## operators -- see their own doc comments for the canonical-spacing note),
 ## PLUS the reusable static secret-scalar role (`RistrettoStaticSecret`,
 ## the `x25519.X25519StaticSecret` shape -- copyable, self-wiping,
-## always a canonical residue mod L) and its two existing-register
-## scalarmults: `ristrettoScalarmultBase` (CT fixed-base, over
-## `scalar.geScalarmultBase`) and `ristrettoScalarmultVartime` (vartime
-## variable-base, over `scalar.scalarmultVartime`, type-gated away from
-## secret material -- accepts only a bare `array[32, byte]`), PLUS the
-## single-use ephemeral secret role (`RistrettoEphemeralSecret`, the
-## `x25519.X25519EphemeralSecret` shape -- move-only, fresh-only, no
-## `toBytes`) and its own borrow-only `ristrettoScalarmultBase` overload,
-## PLUS the one-way hash-to-group map (RFC 9496 SS4.3.4):
-## `ristrettoFromUniformBytes`, its private `ristrettoMap` helper, and the
-## three remaining SS4.1 implementation constants (`OneMinusDSq`,
-## `DMinusOneSq`, `SqrtAdMinusOne` -- `InvSqrtAMinusD` already landed with
-## encode in slice 3).
-## NOT yet present: the CT variable-base scalarmult (`scalar.geScalarmultCT`
-## / `ristrettoScalarmult`, including `RistrettoEphemeralSecret`'s own
-## CONSUMING overload, which needs it), or a facade export -- later slices.
-## `RistrettoPoint` has deliberately no `wipe` overload even once those
-## land: see its own doc comment below.
+## always a canonical residue mod L) and its scalarmults:
+## `ristrettoScalarmultBase` (CT fixed-base, over `scalar.geScalarmultBase`),
+## `ristrettoScalarmultVartime` (vartime variable-base, over
+## `scalar.scalarmultVartime`, type-gated away from secret material --
+## accepts only a bare `array[32, byte]`), and `ristrettoScalarmult` (CT
+## variable-base, over the new `scalar.geScalarmultCT` -- slice 7a's
+## headline addition, the operation that makes this group usable for OPRF
+## evaluation, Pedersen commitments, and DH shares, where the point IS
+## secret-derived even though the group element itself carries no CT
+## hygiene of its own), PLUS the single-use ephemeral secret role
+## (`RistrettoEphemeralSecret`, the `x25519.X25519EphemeralSecret` shape --
+## move-only, fresh-only, no `toBytes`), its borrow-only
+## `ristrettoScalarmultBase` overload, and (slice 7a) its own CONSUMING
+## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` overload --
+## the `x25519.x25519(sink X25519EphemeralSecret, ...)` precedent, reused
+## verbatim, pinned by
+## `tests/unit/fixtures/reject_ristretto_ephemeral_reuse.nim` -- PLUS the
+## one-way hash-to-group map (RFC 9496 SS4.3.4): `ristrettoFromUniformBytes`,
+## its private `ristrettoMap` helper, and the three remaining SS4.1
+## implementation constants (`OneMinusDSq`, `DMinusOneSq`, `SqrtAdMinusOne`
+## -- `InvSqrtAMinusD` already landed with encode in slice 3).
+## NOT yet present: a facade export -- later slice (8d).
+## `RistrettoPoint` has deliberately no `wipe` overload even now that every
+## scalarmult is present: see its own doc comment below.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -760,6 +766,26 @@ func ristrettoScalarmultVartime*(s: array[32, byte]; p: RistrettoPoint): Ristret
   scalarmultVartime(r, s, p.p)
   ristrettoUnchecked(r)
 
+func ristrettoScalarmult*(secret: RistrettoStaticSecret; p: RistrettoPoint): RistrettoPoint =
+  ## CT variable-base scalar multiplication over the static secret role
+  ## (RFC-004 slice 7a), via `scalar.geScalarmultCT` -- the operation that
+  ## makes this group usable for OPRF evaluation, Pedersen commitments, and
+  ## DH shares over an ARBITRARY (not fixed) point, where that point IS
+  ## secret-derived even though the group element itself carries no CT
+  ## hygiene of its own (see the module doc's CT-posture headline: the
+  ## SECRET is the scalar, and CT protection belongs on this bridge and the
+  ## ladder it calls into, not on `RistrettoPoint`). Same
+  ## `RistrettoStaticSecret` -> `scalar.SecretScalar` bridge as
+  ## `ristrettoScalarmultBase` above -- see that function's doc comment for
+  ## the wipe-of-this-proc's-own-copy rationale, identical here (this
+  ## proc's own local `sc`; `geScalarmultCT` independently wipes its own
+  ## copy of the scalar it receives).
+  var sc = toSecretScalar(secret.bytes)
+  try:
+    result = ristrettoUnchecked(geScalarmultCT(sc, p.p))
+  finally:
+    ct.wipe(sc)
+
 # ---------------------------------------------------------------------------
 # RistrettoEphemeralSecret -- the single-use secret-scalar role (RFC-004 slice 5b)
 # ---------------------------------------------------------------------------
@@ -894,6 +920,42 @@ func ristrettoScalarmultBase*(secret: RistrettoEphemeralSecret): RistrettoPoint 
   var sc = toSecretScalar(secret.bytes)
   try:
     result = ristrettoUnchecked(geScalarmultBase(sc))
+  finally:
+    ct.wipe(sc)
+
+func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoint): RistrettoPoint =
+  ## CT variable-base scalar multiplication that CONSUMES the ephemeral
+  ## secret (RFC-004 slice 7a) -- the ONE consuming call in the
+  ## ElGamal/ECIES-style flow `RistrettoEphemeralSecret`'s own doc comment
+  ## names: ephemeral k, `C1 = ristrettoScalarmultBase(k)` (the
+  ## non-consuming borrow above) sent alongside the ciphertext, then
+  ## `S = k*P` against the recipient's public element -- this proc -- k
+  ## dead thereafter. `sink` plus `RistrettoEphemeralSecret`'s move-only
+  ## `=copy {.error.}` together make reuse a compile error rather than a
+  ## documented caller obligation -- the
+  ## `x25519.x25519(sink X25519EphemeralSecret, ...)` precedent, reused
+  ## verbatim: see that function's doc comment for the full empirical
+  ## Nim-ownership writeup this one cross-references rather than
+  ## re-derives, including the `move()` requirement after any earlier
+  ## touch of the same variable (a plain `ristrettoScalarmultBase(secret)`
+  ## borrow counts) and its honest, inherent `move()`-override residual
+  ## gap. Pinned by
+  ## `tests/unit/fixtures/reject_ristretto_ephemeral_reuse.nim`, subprocess
+  ## `nim c`-verified -- same methodology as `reject_ephemeral_reuse.nim`:
+  ## the `=copy` violation this raises is only surfaced by the
+  ## `injectdestructors` pass, later in the pipeline than `compiles()`/
+  ## `nim check` reach.
+  ##
+  ## Same `RistrettoEphemeralSecret` -> `scalar.SecretScalar` bridge as the
+  ## static-role `ristrettoScalarmult` overload above -- see its doc
+  ## comment for the wipe-of-this-proc's-own-copy rationale, identical
+  ## here. `secret` itself is a local owned by this proc for the duration
+  ## of the call and is wiped by its own `=destroy` when it goes out of
+  ## scope at return, the same automatic-wipe guarantee every other
+  ## secret-holding type in this codebase carries.
+  var sc = toSecretScalar(secret.bytes)
+  try:
+    result = ristrettoUnchecked(geScalarmultCT(sc, p.p))
   finally:
     ct.wipe(sc)
 

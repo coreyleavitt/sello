@@ -223,6 +223,29 @@ suite "ristretto property: ristrettoScalarmultBase / ristrettoScalarmultVartime 
     ensure ristrettoScalarmultBase(secret) == ristrettoScalarmultVartime(toBytes(secret), RistrettoBasePoint)
 
 # ---------------------------------------------------------------------------
+# ristrettoScalarmult -- CT variable-base three-way agreement (RFC-004
+# slice 7a): geScalarmultCT vs scalarmultVartime over a random point, and
+# (at the base point specifically) vs geScalarmultBase too.
+# ---------------------------------------------------------------------------
+
+suite "ristretto property: ristrettoScalarmult (CT variable-base) agreement":
+  property "ristrettoScalarmult(secret, p) == ristrettoScalarmultVartime(secret.toBytes, p), for random secret and random point":
+    with pointPropertySettings50
+    given bytes in randomCanonicalScalarBytes(), p in randomRistrettoPoints()
+    let secretOpt = toRistrettoStaticSecret(bytes)
+    ensure secretOpt.isSome
+    let secret = secretOpt.get()
+    ensure ristrettoScalarmult(secret, p) == ristrettoScalarmultVartime(toBytes(secret), p)
+
+  property "ristrettoScalarmult(secret, RistrettoBasePoint) == ristrettoScalarmultBase(secret), for random secret (three-way agreement at the base point)":
+    with propertySettings50
+    given bytes in randomCanonicalScalarBytes()
+    let secretOpt = toRistrettoStaticSecret(bytes)
+    ensure secretOpt.isSome
+    let secret = secretOpt.get()
+    ensure ristrettoScalarmult(secret, RistrettoBasePoint) == ristrettoScalarmultBase(secret)
+
+# ---------------------------------------------------------------------------
 # ristrettoFromUniformBytes -- determinism and valid-output (RFC-004 slice 6,
 # RFC 9496 SS4.3.4). `randomBytes64` is total (a plain `arrays[64, byte]`
 # draw, no `.filter()`), so `propertySettings50`'s coverage-guided default is
