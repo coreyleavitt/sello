@@ -3,12 +3,26 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 8c (slice 8b implemented and
-  committed dc42755 — 20-mutant ristretto batch, catalog 50 -> 70, 70/70
-  killed, 0 survivors; scripts/test.sh green; see the slice-8b ledger entry
-  below for the full breakdown, incl. the S07 re-anchoring side-quest).
-  Next: 8c libsodium differential KATs (test-libsodium.sh, needs the
-  sello-dev image). Slice 8a implemented and
+- **Resume:** grind loop RUNNING at slice 8d (slice 8c implemented and
+  committed 4249655 — ristretto255 FFI bindings added to
+  `private/backend_sodium.nim` (`crypto_core_ristretto255_is_valid_point`/
+  `_from_hash`, `crypto_scalarmult_ristretto255[_base]`,
+  `sodium_library_version_major`/`_minor`) plus a differential suite in
+  `test_libsodium_interop.nim`: every RFC 9496 Appendix A.1 (16)/A.2 (29)/
+  A.3 (7 direct + 4 convergence) vector, deterministic scalarmult boundary
+  cases (incl. libsodium's identity-refusal edge cases), 20 random-secret
+  scalarmult checks, and a 3-property random-input sweep (50 examples each:
+  decode verdict, hash-to-group value, scalarmult value) — all run through
+  both sello and libsodium, verdict-and-value agreement, ZERO mismatches.
+  Guarded by a runtime `libsodium >= 1.0.18` preflight assert
+  ((major, minor) >= (10, 3), empirically derived from libsodium's own
+  `configure.ac` at the 1.0.17/1.0.18 tags, not assumed — see the module doc
+  comments). scripts/test-libsodium.sh green (11 unit files + 5 property
+  files, this build's linked libsodium 1.0.22 / ABI (26, 4)); plain
+  scripts/test.sh confirmed still on the no-op skip path. See the slice-8c
+  ledger entry below for the full breakdown.
+  Next: 8d facade + docs + close-out (see that ledger entry for the full
+  scope). Slice 8a implemented and
   committed 4026895 — ristrettoDecode joins fuzz_external_target.nim as
   mode byte 3, dispatch arm mirrors pointDecode's determinism +
   accept-implies-identity-re-encode oracle shape; fuzz_common.nim/
@@ -247,9 +261,49 @@
       compile-error, 0 timeout), 0 survivors, 566s wall clock.
       scripts/test.sh green: 11 unit files + 5 property files, 303 [OK]
       checks.
-- [ ] 8c libsodium differential KATs (A.1/A.2/A.3 + random sweep through both
-      backends, verdict-and-value agreement, libsodium ≥ 1.0.18 version assert,
-      via test-libsodium.sh)
+- [x] 8c libsodium differential KATs — commit 4249655 (`private/backend_sodium.nim`
+      gains four ristretto255 oracle wrappers over libsodium's own API
+      (`sodiumRistrettoIsValidPoint`/`sodiumRistrettoFromHash`/
+      `sodiumRistrettoScalarmult`/`sodiumRistrettoScalarmultBase`) plus
+      `sodiumLibraryVersion` (the runtime `sodium_library_version_major`/
+      `_minor` query) — all four oracle wrappers oracle-only, never
+      `signing.nim`'s dispatch, matching `sodiumVerifyDetached`/
+      `sodiumScalarmult`'s existing register. `test_libsodium_interop.nim`
+      adds: an up-front module-init `doAssert` gating on
+      `(major, minor) >= (10, 3)` (libsodium >= 1.0.18, the release that
+      shipped `crypto_core_ristretto255_*`/`crypto_scalarmult_ristretto255`
+      — confirmed directly against libsodium's own `configure.ac` at the
+      1.0.17 (10, 2) and 1.0.18 (10, 3) tags, not assumed); A.1 (16
+      encodings) decode-verdict agreement via
+      `crypto_core_ristretto255_is_valid_point`; A.2 (29 reject vectors
+      across all five categories) verdict agreement; A.3 (7 direct pairs +
+      4 convergence-set inputs) value agreement via
+      `crypto_core_ristretto255_from_hash`; scalarmult value agreement via
+      `crypto_scalarmult_ristretto255[_base]` — deterministic scalars
+      (0, 1, 2, L-1, L, L+1) against both the base point and a fixed
+      non-base point, plus 20 random-`RistrettoStaticSecret` base-mult and
+      variable-base-mult checks; and a 3-property random-input sweep
+      (`maxExamples = 50` each, matching the round-3 B1 sweep style):
+      decode verdict, hash-to-group value, and scalarmult value agreement
+      on uniformly random inputs. Scalarmult agreement uses a
+      probe-verified predicate, not raw byte equality: libsodium's
+      `crypto_scalarmult_ristretto255[_base]` documents (and this slice's
+      own C probe against the sello-dev image's libsodium 1.0.22 directly
+      confirmed) that it REFUSES — returns -1, no output — whenever the
+      literal scalar multiple is the identity element, including simply
+      because the scalar is zero mod L; sello's scalarmult family carries
+      no such carve-out and returns `RistrettoIdentity` as an ordinary
+      result, so agreement is `(sodium succeeded and bytes match) or
+      (sodium failed and sello's result is RistrettoIdentity)` — see
+      `sodiumRistrettoScalarmult`'s doc comment for the full empirical
+      writeup. Vector values transcribed independently into the test file
+      (not imported from `test_ristretto.nim`'s private consts), per the
+      `fuzz_common.nim` per-module-transcription precedent. Zero
+      mismatches across every suite. scripts/test-libsodium.sh green: 11
+      unit files + 5 property files (this run's linked libsodium 1.0.22,
+      ABI (26, 4)); scripts/test.sh confirmed unaffected — plain build
+      stays on `test_libsodium_interop.nim`'s existing no-op skip path (no
+      `sello/ristretto`/`sello/scalar`/`backend_sodium` import reached).)
 - [ ] 8d facade + docs + close-out (ENUMERATED facade exports, test_facade
       reachability + declared-effect extension (four OSError pins, "the five"
       becomes nine) + RistrettoEncoded into the named hash/$ suites +
