@@ -11,6 +11,10 @@
 #     file's own RESOURCE WALL section) an attempted, empirically
 #     intractable-in-this-environment whole-body composition (round-3
 #     fix batch Z, items Z2/Z3).
+#   - tests/verify/symex_equal.nim: the or-accumulate shape shared by
+#     field.feEqualCT/feIsZeroCT/feBytesCanonicalCT (RFC-004 slice 1b):
+#     the accumulated word is zero iff every byte pair is equal, over the
+#     full 32-byte-pair composition in one query.
 # See each file's own module doc comment for exactly what is and isn't
 # proved -- do not assume parity between them; each documents its own
 # scope, encoding choices, and honest limits.
@@ -21,7 +25,7 @@
 # query). A hung solver here must never peg a box indefinitely -- this
 # script `timeout --signal=KILL`s the whole podman run and tears down the
 # container even if the podman client itself is what gets killed. The
-# three files below run as three SEPARATE `nim c -r` invocations chained
+# four files below run as four SEPARATE `nim c -r` invocations chained
 # with `&&`, not one combined binary -- so a kill mid-way still shows,
 # via each file's own stdout already flushed, which ones completed before
 # the timeout hit, rather than losing all progress to one opaque kill.
@@ -70,12 +74,14 @@ timeout --signal=KILL "$timeout_secs" podman run --rm --name "$cname" \
     nim c --threads:on --hints:off -r tests/verify/symex_recode.nim
     nim c --threads:on --hints:off -r tests/verify/symex_mask.nim
     nim c --threads:on --hints:off -r tests/verify/symex_reduce.nim
+    nim c --threads:on --hints:off -r tests/verify/symex_equal.nim
   "
 rc=$?
 
 if [ "$rc" -eq 137 ] || [ "$rc" -eq 124 ]; then
-  echo ">>> HUNG: symex_recode.nim killed after ${timeout_secs}s -- treat as" \
-       "a solver/walker non-termination issue, not a slow proof." >&2
+  echo ">>> HUNG: one of tests/verify/symex_{recode,mask,reduce,equal}.nim" \
+       "killed after ${timeout_secs}s -- treat as a solver/walker" \
+       "non-termination issue, not a slow proof." >&2
   exit 137
 fi
 exit "$rc"
