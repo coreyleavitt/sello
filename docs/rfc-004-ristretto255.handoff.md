@@ -3,11 +3,12 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 5a (torsion escalation RESOLVED
-  2026-08-14: Corey approved; RFC amended to E[4]-only + order-8 negative
-  companion + [2]E/E[4] Context reframe in commit 13cd03c — see the RFC's
-  "Stage-3 amendment (2026-08-14)" section; slice 4 finished and committed
-  7eadac7). If resuming cold:
+- **Resume:** grind loop RUNNING at slice 5b (slice 5a finished and
+  committed; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
+  amended to E[4]-only + order-8 negative companion + [2]E/E[4] Context
+  reframe in commit 13cd03c — see the RFC's "Stage-3 amendment
+  (2026-08-14)" section; slice 4 finished and committed 7eadac7). If
+  resuming cold:
   `/loop implement the next unimplemented RFC slice with /tdd, following the
   standing rules; after each slice report one progress line (e.g. "slice 4/15
   done, 11 remaining"); stop when every slice is implemented`
@@ -63,13 +64,21 @@
       pathology, so internal-retry + coverageGuided=false, documented in the
       test file. Preceded by RFC amendment commit 13cd03c resolving the
       torsion escalation (E/E[8] folklore → [2]E/E[4], dalek issue #312).
-- [ ] 5a static secret role + scalarmult existing registers
+- [x] 5a static secret role + scalarmult existing registers — commit 07154f8
       (RistrettoStaticSecret: secretHooks, canonical-residue invariant,
       staticSecret()/staticPair()/Option-returning 32-byte import with
       both-paths wipe/toRistrettoStaticSecretWide (distinct name, not an
       overload)/wipe/toBytes, constructor-internal wipes, repr-disclosure line;
       ristrettoScalarmultBase (static) + ristrettoScalarmultVartime; boundary
-      scalars 0/1/L−1/L; reject_secretscalar_ristretto_vartime fixture)
+      scalars 0/1/L−1/L incl. s=L via the wide constructor and the unreduced
+      vartime path only; reject_secretscalar_ristretto_vartime fixture,
+      subprocess-verified. ristrettoStaticPair() computes its public element
+      inline (toSecretScalar/geScalarmultBase) rather than calling
+      ristrettoScalarmultBase, since Nim requires the callee declared
+      earlier in the module — the x25519.x25519StaticPair/ladder precedent.
+      scripts/test.sh green: 11 unit files + 5 property files, zero
+      failures, including the new agreement property and both new suites
+      in test_ristretto.nim.)
 - [ ] 5b ephemeral secret role (RistrettoEphemeralSecret: move-only, fresh-only,
       no toBytes, ElGamal-shape/CPace-boundary doc note, borrow-only
       ristrettoScalarmultBase overload + copy fixture — sink-consume overload
