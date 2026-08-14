@@ -28,7 +28,7 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 5a scope** (this file, so far -- superseding slice 4's own
+## **Slice 5b scope** (this file, so far -- superseding slice 5a's own
 ## summary, which this paragraph always restates as current state):
 ## everything slice 4 landed (`RistrettoPoint`/`RistrettoEncoded` and their
 ## basic borrows, the `ristrettoUnchecked` construction door, quotient
@@ -42,12 +42,15 @@
 ## scalarmults: `ristrettoScalarmultBase` (CT fixed-base, over
 ## `scalar.geScalarmultBase`) and `ristrettoScalarmultVartime` (vartime
 ## variable-base, over `scalar.scalarmultVartime`, type-gated away from
-## secret material -- accepts only a bare `array[32, byte]`). NOT yet
-## present: the single-use ephemeral secret role, the CT variable-base
-## scalarmult (`scalar.geScalarmultCT` / `ristrettoScalarmult`), the
-## one-way map, or a facade export -- later slices. `RistrettoPoint` has
-## deliberately no `wipe` overload even once those land: see its own doc
-## comment below.
+## secret material -- accepts only a bare `array[32, byte]`), PLUS the
+## single-use ephemeral secret role (`RistrettoEphemeralSecret`, the
+## `x25519.X25519EphemeralSecret` shape -- move-only, fresh-only, no
+## `toBytes`) and its own borrow-only `ristrettoScalarmultBase` overload.
+## NOT yet present: the CT variable-base scalarmult (`scalar.geScalarmultCT`
+## / `ristrettoScalarmult`, including `RistrettoEphemeralSecret`'s own
+## CONSUMING overload, which needs it), the one-way map, or a facade
+## export -- later slices. `RistrettoPoint` has deliberately no `wipe`
+## overload even once those land: see its own doc comment below.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -751,5 +754,142 @@ func ristrettoScalarmultVartime*(s: array[32, byte]; p: RistrettoPoint): Ristret
   var r: GeP3
   scalarmultVartime(r, s, p.p)
   ristrettoUnchecked(r)
+
+# ---------------------------------------------------------------------------
+# RistrettoEphemeralSecret -- the single-use secret-scalar role (RFC-004 slice 5b)
+# ---------------------------------------------------------------------------
+
+type
+  RistrettoEphemeralSecret* = object
+    ## A SINGLE-USE ristretto255 secret scalar -- the ElGamal/ECIES-style
+    ## hybrid-encryption role, round-3 proof-spiked rather than inherited
+    ## from `x25519.X25519EphemeralSecret` by analogy alone: ephemeral k,
+    ## `C1 = ristrettoScalarmultBase(k)` (the non-consuming borrow below)
+    ## sent alongside the ciphertext, then `S = k*P` against the
+    ## recipient's public element (the ONE consuming variable-base call --
+    ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)`, arriving
+    ## in slice 7a over `scalar.geScalarmultCT`), k dead thereafter. This
+    ## lands on the borrow-then-consume shape exactly, and needs no scalar
+    ## arithmetic of its own -- the Non-goals boundary (Schnorr responses,
+    ## OPRF client unblinding, both needing mod-L scalar inversion this
+    ## library does not ship) does not defang it.
+    ##
+    ## **The honest boundary, not a defect:** a CPace-style PAKE's
+    ## per-session scalar is "ephemeral" in protocol terms but needs TWO
+    ## variable-base multiplications with the SAME scalar (once against the
+    ## mapped generator, once against the peer's share) -- a move-only,
+    ## single-use type CANNOT express that by design, since the first
+    ## consuming call moves the scalar away before a second could run. That
+    ## caller wants `RistrettoStaticSecret` plus an explicit `wipe`
+    ## instead: a reusable secret held for exactly the two calls it needs,
+    ## then wiped early. Do not reach for this type for a PAKE-shaped
+    ## protocol; reach for it for a genuine one-shot DH share.
+    ##
+    ## Mechanics mirror `x25519.X25519EphemeralSecret` exactly -- see that
+    ## type's doc comment for the full empirical Nim-ownership writeup this
+    ## one cross-references rather than re-derives (the `move()` requirement
+    ## after any earlier touch of the same variable, and its honest,
+    ## inherent `move()`-override residual gap): `secretHooksMoveOnly`
+    ## below (`=copy {.error.}`), constructed ONLY via
+    ## `ristrettoEphemeralSecret()` / `ristrettoEphemeralPair()` (fresh from
+    ## `std/sysrand`, wide-reduced mod L via `scalar.scReduce` -- no
+    ## from-bytes route of any kind: freshness by construction), and NO
+    ## `toBytes` (unpersistable by design -- a value meant to be used once
+    ## and discarded). This slice ships only the non-consuming
+    ## `ristrettoScalarmultBase` borrow below; the consuming
+    ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` overload
+    ## and its reuse fixture arrive in slice 7a alongside
+    ## `scalar.geScalarmultCT`.
+    ##
+    ## **Invariant: always a canonical residue mod L**, the same load-
+    ## bearing double duty `RistrettoStaticSecret`'s own doc comment states
+    ## (the `recodeScalarRadix16` bit-255-clear precondition held by
+    ## construction; matches the dalek convention that a scalar IS a
+    ## canonical residue) -- established here by wide-reducing every fresh
+    ## value mod L, the same as the static role's fresh constructors.
+    ##
+    ## One-field object, not `distinct array[32, byte]`, for the same
+    ## empirically-established reason as `RistrettoStaticSecret`/
+    ## `signing.Seed`/`x25519.X25519StaticSecret` (see `signing.Seed`'s doc
+    ## comment): a bare `distinct array` local's `=destroy` silently never
+    ## fires under ORC on Nim 2.2.10.
+    ##
+    ## **Repr-disclosure line** (same as `RistrettoStaticSecret`'s): no `$`
+    ## is defined for this type -- `echo secret` fails to compile -- but
+    ## Nim's `repr`/reflective dumps print any object's raw fields
+    ## regardless of that. Out of scope to prevent, in scope to disclose.
+    bytes: array[32, byte]
+
+## Type hooks must be declared immediately after the type they attach to --
+## see `signing.nim`'s module doc comment for why. Move-only, the
+## `Keypair`/`x25519.X25519EphemeralSecret` pattern: a second live copy of a
+## single-use secret is a compile error, not a hygiene footnote. Legitimate
+## transfers move (slice 7a's `sink` parameter).
+secretHooksMoveOnly(RistrettoEphemeralSecret, bytes)
+
+proc ristrettoEphemeralSecret*(): RistrettoEphemeralSecret {.raises: [OSError].} =
+  ## Fresh secret via `std/sysrand`: 64 random bytes, wide-reduced mod L via
+  ## `scalar.scReduce` (uniform sampling mod L -- the
+  ## `ristrettoStaticSecret()`/`x25519.x25519EphemeralSecret()` in-place-
+  ## fill/`OSError`-on-failure discipline, adapted to this role's single-use
+  ## shape). Deliberately no `toBytes(bytes)` counterpart: this is the ONLY
+  ## way to get one (see the type's doc comment -- freshness-by-construction
+  ## is the whole point). Constructor-internal secret temporaries (the
+  ## sysrand buffer, the reduction scratch) are wiped before return. Prefer
+  ## `ristrettoEphemeralPair()` when you also need the derived public
+  ## element -- deriving it inside the constructor keeps the caller's
+  ## secret binding referenced exactly once, avoiding the `move()`
+  ## ceremony `x25519.x25519EphemeralPair()`'s own doc comment documents in
+  ## full.
+  var raw: array[64, byte]
+  if not urandom(raw):
+    raise newException(OSError, "sello.ristrettoEphemeralSecret: sysrand.urandom failed")
+  var reduced: array[32, byte]
+  scReduce(reduced, raw)
+  result = RistrettoEphemeralSecret(bytes: reduced)
+  ct.wipe(raw)
+  ct.wipe(reduced)
+
+proc ristrettoEphemeralPair*(): tuple[secret: RistrettoEphemeralSecret, public: RistrettoPoint] {.raises: [OSError].} =
+  ## Fresh ephemeral secret plus its `ristrettoScalarmultBase` image, in one
+  ## call -- the primary way to get an ephemeral secret (mirrors
+  ## `x25519.x25519EphemeralPair()`'s ergonomic and `ristrettoStaticPair()`'s
+  ## exact construction shape above). Computes the public element via the
+  ## same `toSecretScalar`/`geScalarmultBase` sequence
+  ## `ristrettoScalarmultBase` below uses, rather than calling that overload
+  ## directly, for the same reason `ristrettoStaticPair()` does above: Nim
+  ## requires a callee be declared earlier in the module, and
+  ## `ristrettoScalarmultBase(RistrettoEphemeralSecret)` is declared below
+  ## this proc. Constructor-internal secret temporaries are wiped before
+  ## return, same as `ristrettoEphemeralSecret()` above.
+  var raw: array[64, byte]
+  if not urandom(raw):
+    raise newException(OSError, "sello.ristrettoEphemeralPair: sysrand.urandom failed")
+  var reduced: array[32, byte]
+  scReduce(reduced, raw)
+  result.secret = RistrettoEphemeralSecret(bytes: reduced)
+  var sc = toSecretScalar(reduced)
+  result.public = ristrettoUnchecked(geScalarmultBase(sc))
+  ct.wipe(raw)
+  ct.wipe(reduced)
+  ct.wipe(sc)
+
+func ristrettoScalarmultBase*(secret: RistrettoEphemeralSecret): RistrettoPoint =
+  ## CT fixed-base scalar multiplication over the ephemeral secret role --
+  ## a BORROW, deliberately non-consuming: a plain by-value
+  ## `RistrettoEphemeralSecret` parameter (not `sink`) is a borrow when this
+  ## is not the argument's last use, exactly the
+  ## `x25519.x25519Base(secret: X25519EphemeralSecret)` precedent (see that
+  ## proc's doc comment for the full empirical writeup). Only slice 7a's
+  ## consuming `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)`
+  ## overload takes ownership of this role's secret. Same
+  ## `RistrettoEphemeralSecret`-to-`scalar.SecretScalar` bridge as the
+  ## static-role overload above -- see its doc comment for the
+  ## wipe-of-this-proc's-own-copy rationale, identical here.
+  var sc = toSecretScalar(secret.bytes)
+  try:
+    result = ristrettoUnchecked(geScalarmultBase(sc))
+  finally:
+    ct.wipe(sc)
 
 {.pop.}

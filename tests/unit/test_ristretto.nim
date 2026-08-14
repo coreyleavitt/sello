@@ -562,3 +562,49 @@ suite "RistrettoStaticSecret -- ristrettoScalarmultVartime type boundary (compil
     check exitCode != 0
     check "type mismatch" in output
 
+# ---------------------------------------------------------------------------
+# RFC-004 slice 5b -- RistrettoEphemeralSecret (move-only, fresh-only)
+# ---------------------------------------------------------------------------
+
+suite "RistrettoEphemeralSecret -- fresh-only constructors and borrow-only base-mult (RFC-004 slice 5b)":
+  test "ristrettoEphemeralPair() generates a secret whose public element matches ristrettoScalarmultBase":
+    let (secret, public) = ristrettoEphemeralPair()
+    check ristrettoScalarmultBase(secret) == public
+
+  test "ristrettoEphemeralSecret() then ristrettoScalarmultBase produces a valid, non-identity point":
+    let secret = ristrettoEphemeralSecret()
+    let public = ristrettoScalarmultBase(secret)
+    check not (public == RistrettoIdentity)
+
+suite "RistrettoEphemeralSecret -- secret hygiene (probe pattern, the X25519EphemeralSecret precedent)":
+  ## Same probe-pattern methodology as `RistrettoStaticSecret`'s hygiene
+  ## suite above and `test_x25519.nim`'s "ephemeral secret hygiene (probe
+  ## pattern)" suite: a raw pointer captured before scope exit, memory
+  ## re-read after. `RistrettoEphemeralSecret` is a one-field object, so a
+  ## pointer to the object aliases its sole `bytes` field. Only the
+  ## unused-at-scope-exit case is exercised this slice -- there is no
+  ## consuming operation yet (`ristrettoScalarmult(sink ...)` arrives in
+  ## slice 7a alongside its own dedicated hygiene coverage).
+  test "=destroy wipes an unused RistrettoEphemeralSecret at scope exit":
+    var probe: ptr array[32, byte]
+    block:
+      var secret = ristrettoEphemeralSecret()
+      probe = cast[ptr array[32, byte]](addr secret)
+      doAssert probe[] != default(array[32, byte]) # sanity: nonzero before scope exit
+    check probe[] == default(array[32, byte])
+
+suite "RistrettoEphemeralSecret -- move-only copy rejection (compile-time, subprocess-verified, RFC-004 slice 5b)":
+  ## Neither `compiles()` nor `nim check` can see this violation -- it is
+  ## raised by the `injectdestructors` pass, which runs later in the
+  ## pipeline than either reaches (`x25519.X25519EphemeralSecret`'s own
+  ## `reject_ephemeral_copy.nim` precedent, reused verbatim here for this
+  ## module's ephemeral role).
+  test "copying a RistrettoEphemeralSecret is a compile error (subprocess compile)":
+    let fixture = currentSourcePath().parentDir / "fixtures" / "reject_ristretto_ephemeral_copy.nim"
+    let repoRoot = currentSourcePath().parentDir.parentDir.parentDir
+    let cmd = "nim c --hints:off --nimcache:" &
+      (repoRoot / "build" / "nimcache_reject_ristretto_ephemeral_copy") & " " & fixture
+    let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
+    check exitCode != 0
+    check "=copy" in output
+
