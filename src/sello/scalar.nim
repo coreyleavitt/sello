@@ -149,10 +149,12 @@ const
 # here: unlike Ed25519D_Raw/Gx_Raw/Gy_Raw above (which encode the curve
 # equation and base point -- genuinely curve-specific), sqrt(-1) is a
 # property of the field GF(p) alone, with no curve knowledge baked in. Its
-# one consumer, the ed25519 point-decode sqrt-ratio retry step, is now
-# `field.feSqrtRatioVartime` (a field.nim primitive so a future Ristretto
-# decode can reuse it without importing this curve-ops module) -- see that
-# function's doc comment for the constant itself.
+# consumer, the ed25519 point-decode sqrt-ratio step, is now
+# `field.feSqrtRatioM1` (RFC-004 slice 1c migrated `ed25519.pointDecode`
+# off the original `field.feSqrtRatioVartime`, since deleted, onto this
+# constant-time primitive -- a field.nim primitive either way, so a
+# Ristretto decode can reuse it without importing this curve-ops module)
+# -- see that function's doc comment for the constant itself.
 
 # ---------------------------------------------------------------------------
 # Conversions, group operations, and fixed-base scalarmult's table build +

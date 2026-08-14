@@ -33,8 +33,6 @@
 ## something this file computes at runtime and might overflow
 ## unpredictably.
 
-import std/options
-
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy.
 {.push raises: [], gcsafe.}
@@ -297,9 +295,8 @@ func feIsNonZeroVartime*(f: Fe): bool {.inline.} =
   ## *Vartime* (RFC-001 finding 8 naming convention, round-3 finding A2):
   ## early-returns on the first nonzero byte, so its running time leaks
   ## which byte (if any) is nonzero. Safe only on PUBLIC data -- every call
-  ## site today is verify-path (`ed25519.pointDecode`'s sign/zero check,
-  ## `feSqrtRatioVartime`'s two retry-branch checks below), never a secret
-  ## scalar. Renamed from the un-suffixed `feIsNonZero` (round-3 audit): the
+  ## site today is verify-path (`ed25519.pointDecode`'s sign/zero check),
+  ## never a secret scalar. Renamed from the un-suffixed `feIsNonZero` (round-3 audit): the
   ## old name was indistinguishable at call sites from a constant-time
   ## primitive, the same naming gap `scalarmultVartime` closed for group
   ## ops (RFC-001 finding 8) -- do not drop the suffix, and do not call this
@@ -655,7 +652,11 @@ func fePow22523*(r: var Fe; a: Fe) {.inline.} =
   feMul(r, t0, a)
 
 # ---------------------------------------------------------------------------
-# Sqrt-ratio (RFC-003 slice 1 item 3, extracted from ed25519.pointDecode)
+# sqrt(-1) constant (RFC-003 slice 1 item 3, extracted from
+# ed25519.pointDecode). The vartime sqrt-ratio primitive that used to live
+# in this section (`feSqrtRatioVartime`) was deleted by RFC-004 slice 1c
+# once `ed25519.pointDecode` migrated onto `feSqrtRatioM1` below (RFC-004
+# slice 1a) -- one audited sqrt-ratio implementation instead of two.
 # ---------------------------------------------------------------------------
 
 const
@@ -678,61 +679,6 @@ const
     ## legitimate field-level consumers. The raw limb array stays private;
     ## this constant, built once via the one audited `feFromLimbs` door, is
     ## the sole exported door onto it.
-
-func feSqrtRatioVartime*(u, v: Fe): Option[Fe] =
-  ## Given field elements `u`, `v` (`v` assumed nonzero by every current
-  ## call site -- ed25519's `v = d*y^2 + 1` is never zero for `d` a
-  ## non-square), returns `some(x)` with `x^2 * v == u` (mod p) if `u/v`
-  ## is a square in GF(p), or `none` if it is not.
-  ##
-  ## Ports the RFC 8032 §5.1.3 point-decode recovery step (candidate root
-  ## via `x = (u*v^7)^((p-5)/8) * u * v^3`, exploiting p = 5 mod 8; retry
-  ## with `x * sqrt(-1)` if the first candidate's square lands on `-u/v`
-  ## instead of `u/v`; reject if neither works) byte-for-byte out of what
-  ## used to be inlined in `ed25519.pointDecode` -- extracted, not
-  ## rewritten, so RFC 8032 + Wycheproof vector coverage carries over
-  ## unchanged (RFC-003 slice 1 item 3's zero-tolerance requirement).
-  ##
-  ## *Vartime* (RFC-001 finding 8 naming convention: self-flag at the
-  ## definition, not just in a doc comment, so no call site can mistake
-  ## this for constant-time): the retry-on-failure branch below is
-  ## data-dependent on `u`/`v`. This is only ever safe because sqrt-ratio
-  ## runs on PUBLIC data -- a point being decoded off the wire, verify-path
-  ## only, never a secret scalar -- at every call site in this codebase,
-  ## today and for any future Ristretto decode built on this primitive
-  ## (the extraction's whole purpose, per this module's own doc comment on
-  ## being a "clean extension point").
-  var v3: Fe
-  feSq(v3, v)
-  feMul(v3, v3, v)          # v^3
-  var uv3, uv7: Fe
-  feMul(uv3, v3, u)         # u*v^3
-  feMul(uv7, uv3, v3)       # u*v^6
-  feMul(uv7, uv7, v)        # u*v^7
-
-  var x: Fe
-  fePow22523(x, uv7)        # (u*v^7)^((p-5)/8)
-  feMul(x, x, v3)           # * v^3
-  feMul(x, x, u)            # * u
-
-  # Check: v*x^2 == u or v*x^2 == -u
-  var vxx: Fe
-  feSq(vxx, x)
-  feMul(vxx, vxx, v)
-  feSub(vxx, vxx, u)
-
-  if feIsNonZeroVartime(vxx):
-    # v*x^2 != u; retry with x*sqrt(-1), which squares to -x^2.
-    # Valid iff v*x^2 == -u; anything else means u/v is not a square.
-    let S = feFromLimbs(SqrtM1Raw)
-    feMul(x, x, S)
-    feSq(vxx, x)
-    feMul(vxx, vxx, v)
-    feSub(vxx, vxx, u)
-    if feIsNonZeroVartime(vxx):
-      return none[Fe]()
-
-  return some(x)
 
 func feCMove*(r: var Fe; a: Fe; b: bool) {.noinline.} =
   ## Constant-time conditional move: `r := a` iff `b`. Arithmetic masking,
@@ -825,26 +771,31 @@ func feBytesCanonicalCT*(bytes: array[32, byte]): bool {.inline.} =
 
 func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] =
   ## RFC 9496 §4.2 `SQRT_RATIO_M1`, constant-time. NOT a branch-to-cmov
-  ## transliteration of `feSqrtRatioVartime`'s two-case check above: the
-  ## spec primitive is a THREE-check dance -- `correct_sign_sqrt`
-  ## (`v*r^2 == u`), `flipped_sign_sqrt` (`v*r^2 == -u`), and
-  ## `flipped_sign_sqrt_i` (`v*r^2 == -u*SQRT_M1`) -- with
-  ## `was_square = correct_sign_sqrt or flipped_sign_sqrt`, and the
+  ## transliteration of the two-case check the deleted vartime predecessor
+  ## (`field.feSqrtRatioVartime`, RFC-003 slice 1 item 3, removed by
+  ## RFC-004 slice 1c once `ed25519.pointDecode` migrated to this
+  ## primitive) used: the spec primitive is a THREE-check dance --
+  ## `correct_sign_sqrt` (`v*r^2 == u`), `flipped_sign_sqrt`
+  ## (`v*r^2 == -u`), and `flipped_sign_sqrt_i` (`v*r^2 == -u*SQRT_M1`) --
+  ## with `was_square = correct_sign_sqrt or flipped_sign_sqrt`, and the
   ## candidate root corrected by a `SQRT_M1` multiply whenever EITHER
   ## flipped check fires. The third check exists because the FALSE-branch
-  ## root is load-bearing (unlike `feSqrtRatioVartime`, which only ever
-  ## needs to reject on that branch): the spec requires the false branch to
-  ## return `sqrt(SQRT_M1*u/v)` specifically, a value a future Ristretto MAP
-  ## consumes -- an implementation carrying only the old two checks would
-  ## pass every RFC 8032/Wycheproof vector (`pointDecode` never reads the
-  ## root on reject) and diverge only on that third, currently-untested
-  ## path.
+  ## root is load-bearing (unlike the deleted vartime version, which only
+  ## ever needed to reject on that branch): the spec requires the false
+  ## branch to return `sqrt(SQRT_M1*u/v)` specifically, a value the
+  ## Ristretto MAP (a later slice) consumes -- an implementation carrying
+  ## only the old two checks would pass every RFC 8032/Wycheproof vector
+  ## (`pointDecode` never reads the root on reject) and diverge only on
+  ## that third path, which is why this primitive's own tests exercise the
+  ## false-branch defining equation directly (RFC 9496 Appendix A.4 KATs
+  ## plus a dedicated non-square defining-equation check) rather than
+  ## relying on `pointDecode`'s vector coverage to reach it.
   ##
-  ## Returns a tuple, not `Option[Fe]` like its vartime predecessor,
-  ## DELIBERATELY: `Option` would discard the failure-branch payload, which
-  ## here is meaningful and consumed downstream (see above) -- so the
-  ## divergence from this module's own `Option`-returning register
-  ## (`feSqrtRatioVartime`) is designed, not an oversight.
+  ## Returns a tuple, not `Option[Fe]` like the deleted vartime
+  ## predecessor, DELIBERATELY: `Option` would discard the failure-branch
+  ## payload, which here is meaningful and consumed downstream (see
+  ## above) -- so the divergence from this module's own `Option`-returning
+  ## register is designed, not an oversight.
   ##
   ## Constant-time throughout: the candidate root goes through the existing
   ## `fePow22523` chain (already a fixed instruction sequence, no data

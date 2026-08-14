@@ -1,8 +1,10 @@
 id: E03
 target: src/sello/ed25519.nim
-desc: pointDecode: sign-bit reconciliation comparison flip, 'if feIsNegative(x) != sign' -> 'if feIsNegative(x) == sign' -- negates x on the branch where the candidate root's sign ALREADY matches the wire sign bit, and leaves it un-negated when it doesn't, decoding every valid point to its negation.
+desc: pointDecode: sign-bit reconciliation condition inverted, 'if sign: feNeg(x, x)' -> 'if not sign: feNeg(x, x)' -- negates x on the branch where the wire sign bit is CLEAR (root already matches, no negation needed) and leaves it un-negated when the sign bit is SET (a negation was needed), decoding every valid nonzero-x point to its negation. Re-cut (RFC-004 slice 1c: since feSqrtRatioM1's root is already guaranteed nonnegative, the old compare-then-maybe-negate 'feIsNegative(x) != sign' collapsed to a plain 'if sign' conditional negate -- the compare this mutant used to flip no longer exists to flip, so the same defect class (wrong-branch negation) is re-cut onto the new condition instead.
 ====OLD====
-  if feIsNegative(x) != sign:
+  if sign:
+    feNeg(x, x)
 ====NEW====
-  if feIsNegative(x) == sign:
+  if not sign:
+    feNeg(x, x)
 ====END====

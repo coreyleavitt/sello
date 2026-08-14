@@ -17,12 +17,20 @@
       root test, feEqualCT/feIsZeroCT, feBytesCanonicalCT — the CT canonicity
       check; the vartime feBytesCanonical is the named trap — feAbs, FeSqrtM1
       export, RFC 9496 **A.4** KATs — standalone, verify path untouched)
-- [ ] 1b IN PROGRESS (subagent running, gates not yet confirmed) — symex_equal.nim (the shared or-accumulate lemma for
-      feEqualCT/feIsZeroCT/feBytesCanonicalCT, wired into bmc.sh — its own
-      slice per the symex_mask.nim discovery-risk precedent)
-- [ ] 1c verify-path migration (pointDecode rewrite incl. the x=0-with-sign-bit
-      reject in the composition recipe, feSqrtRatioVartime deleted, F21/F22
-      retired-and-replaced, E01–E03 re-anchored/re-cut)
+- [x] 1b symex_equal.nim — commit 4d7e223 (full 32-byte chain proved sxUnsat in
+      ONE query; a FOURTH empirical walker limitation found and documented:
+      literal-seeded accumulator chains crash the walker — seed from the first
+      pair's own xor instead)
+- [x] 1c verify-path migration — pointDecode rewritten on feSqrtRatioM1 (wasSquare
+      accept gate, x=0-with-sign-bit reject, plain conditional negate since the
+      root is already nonnegative), feSqrtRatioVartime deleted, the slice-1a
+      vartime-agreement test and the feSqrtRatioVartime unit suite removed
+      (A.4 KATs + defining-equation tests carry the coverage now). F21/F22
+      retired (their target deleted) and replaced by F23/F24 against
+      feSqrtRatioM1's own defect class (correction-select flip; feAbs
+      normalization invert); E01/E03 re-anchored/re-cut onto the reshaped
+      lines, E02 survived verbatim. scripts/test.sh green (Wycheproof zero
+      change), scripts/mutation.sh 50/50 killed, 0 survivors.
 - [ ] 2 decode + equality (types, ristrettoUnchecked door + debug curve-identity
       assert, quotient `==`, A.1/A.2 vectors with independent geScalarmultBase
       oracle, unit-test-files.sh registration of test_ristretto.nim, module doc

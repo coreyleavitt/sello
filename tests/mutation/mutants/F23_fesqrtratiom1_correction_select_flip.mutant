@@ -1,0 +1,8 @@
+id: F23
+target: src/sello/field.nim
+desc: feSqrtRatioM1: correction-select condition inverted, 'feCMove(r, rPrime, flippedSignSqrt or flippedSignSqrtI)' -> 'feCMove(r, rPrime, not (flippedSignSqrt or flippedSignSqrtI))' -- selects the SQRT_M1-corrected candidate exactly when the ORIGINAL candidate already checked out (correctSignSqrt), and keeps the uncorrected candidate exactly when a correction was actually needed. Replaces the retired F21 (its OLD target, field.feSqrtRatioVartime, was deleted by RFC-004 slice 1c) against the CT primitive's own defect class: which candidate feCMove selects on wasSquare.
+====OLD====
+  feCMove(r, rPrime, flippedSignSqrt or flippedSignSqrtI)
+====NEW====
+  feCMove(r, rPrime, not (flippedSignSqrt or flippedSignSqrtI))
+====END====

@@ -1,8 +1,8 @@
 id: E01
 target: src/sello/ed25519.nim
-desc: pointDecode: RFC 8032 §5.1.3 step 4 reject condition inverted, 'sign and not feIsNonZero(x)' -> 'sign and feIsNonZero(x)' (the 'not' dropped), so the invalid x=0-with-sign-bit-set encoding is silently accepted while ordinary nonzero-x points with the sign bit set are wrongly rejected.
+desc: pointDecode: RFC 8032 §5.1.3 step 4 reject condition inverted, 'sign and not feIsNonZeroVartime(root)' -> 'sign and feIsNonZeroVartime(root)' (the 'not' dropped), so the invalid root=0-with-sign-bit-set encoding is silently accepted while ordinary nonzero-root points with the sign bit set are wrongly rejected. Re-anchored on 'root' (RFC-004 slice 1c renamed the local from 'x' to 'root' between the wasSquare accept gate and the sign-bit reject check, since it now holds feSqrtRatioM1's tuple field directly) -- same reject condition, same defect class.
 ====OLD====
-  if sign and not feIsNonZeroVartime(x):
+  if sign and not feIsNonZeroVartime(root):
 ====NEW====
-  if sign and feIsNonZeroVartime(x):
+  if sign and feIsNonZeroVartime(root):
 ====END====

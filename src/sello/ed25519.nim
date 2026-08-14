@@ -57,20 +57,37 @@ func pointDecode*(bytes: array[32, byte]): Option[GeP3] =
   feMul(dy2, dy2, y)
   feAdd(v, dy2, I)
 
-  # x = sqrt(u/v), retrying with sqrt(-1) if the first candidate root
-  # doesn't check out (RFC 8032 §5.1.3 step 3) -- extracted to
-  # field.feSqrtRatioVartime (RFC-003 slice 1 item 3), so this call is the
-  # entire dance, not just the candidate-root formula.
-  let xOpt = feSqrtRatioVartime(u, v)
-  if xOpt.isNone:
+  # x = sqrt(u/v) via field.feSqrtRatioM1 (RFC-004 slice 1c), RFC 9496
+  # §4.2's SQRT_RATIO_M1 -- the constant-time primitive built for Ristretto
+  # decode, reused here instead of maintaining a second, independent
+  # sqrt-ratio implementation (the old field.feSqrtRatioVartime, now
+  # deleted) in the same file. feSqrtRatioM1 is constant-time internally
+  # (masked selects, a fixed-length fePow22523 chain, no data-dependent
+  # branch), but this composition -- and pointDecode as a whole -- carries
+  # no CT requirement of its own (verify-path only, per this module's own
+  # doc comment): the accept/reject verdicts below are ordinary vartime
+  # branches, exactly as they were against the old primitive.
+  #
+  # RFC 8032 §5.1.3's dance composes over the primitive in three steps:
+  # `wasSquare` is the accept gate (step 3: reject if u/v is not a
+  # square); step 4 rejects x = 0 with the sign bit set; the sign bit then
+  # picks which square root to keep.
+  let (wasSquare, root) = feSqrtRatioM1(u, v)
+  if not wasSquare:
     return none[GeP3]()
-  var x = xOpt.get
 
   # RFC 8032 §5.1.3 step 4: x = 0 with sign bit set is invalid.
-  if sign and not feIsNonZeroVartime(x):
+  if sign and not feIsNonZeroVartime(root):
     return none[GeP3]()
 
-  if feIsNegative(x) != sign:
+  # `root` is already SQRT_RATIO_M1's nonnegative representative (feAbs'd
+  # internally, per its own doc comment) -- so matching it to the wire's
+  # sign bit is a plain conditional negate, not a compare-then-maybe-negate:
+  # unlike the old feSqrtRatioVartime candidate (whichever sign its vartime
+  # retry logic happened to land on), there is no "does the current sign
+  # already match" comparison left to make.
+  var x = root
+  if sign:
     feNeg(x, x)
 
   var encoded: GeP3

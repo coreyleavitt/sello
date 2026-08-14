@@ -1,0 +1,8 @@
+id: F24
+target: src/sello/field.nim
+desc: feSqrtRatioM1: final normalization inverted, 'feAbs(r)' -> 'feNeg(r, r)' -- instead of normalizing the result to its nonnegative representative (CT_ABS, RFC 9496 §4.2), unconditionally negates it, flipping the sign of every nonzero root the primitive returns. Replaces the retired F22 (its OLD target, field.feSqrtRatioVartime, was deleted by RFC-004 slice 1c) against the CT primitive's own defect class: the final feAbs normalization.
+====OLD====
+  feAbs(r)  # choose the nonnegative square root
+====NEW====
+  feNeg(r, r)  # choose the nonnegative square root
+====END====

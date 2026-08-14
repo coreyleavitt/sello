@@ -1,4 +1,4 @@
-import std/[unittest, options]
+import std/unittest
 import sello/field
 
 # RFC 8032 §7.1: test vector 1
@@ -262,10 +262,9 @@ suite "feSqrtRatioM1 (RFC-004 slice 1a: RFC 9496 SQRT_RATIO_M1, constant-time)":
 
   test "false-branch root's defining equation: root^2 == SQRT_M1*u/v for known non-square u/v":
     # p = 2^255-19 == 5 (mod 8), and 2 is a quadratic non-residue for every
-    # such prime -- the same fact `feSqrtRatioVartime`'s own "returns none"
-    # test above relies on. u = 2*x^2 for arbitrary nonzero x is therefore
-    # also a non-residue (nonsquare * square = nonsquare), with v = 1, so
-    # this exercises the general false-branch case (not merely v = 0/u = 0
+    # such prime. u = 2*x^2 for arbitrary nonzero x is therefore also a
+    # non-residue (nonsquare * square = nonsquare), with v = 1, so this
+    # exercises the general false-branch case (not merely v = 0/u = 0
     # degeneracies, nor the single already-KAT-pinned u=2,v=1 case above).
     var x: Fe
     x.limbs = [11'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -283,51 +282,6 @@ suite "feSqrtRatioM1 (RFC-004 slice 1a: RFC 9496 SQRT_RATIO_M1, constant-time)":
     feSq(rootSq, root)
     feMul(expected, FeSqrtM1, u)
     check feToBytes(rootSq) == feToBytes(expected)
-
-  test "agreement with feSqrtRatioVartime on random and boundary inputs":
-    # feSqrtRatioVartime(u, v) returns `Option[Fe]`: `some(x)` for SOME root
-    # x with v*x^2 == u (not necessarily the nonnegative one -- it never
-    # normalizes sign), or `none` when u/v is not a square. Map that onto
-    # feSqrtRatioM1's tuple honestly: `wasSquare` must agree with
-    # `.isSome`, and on the square branch the two roots must be equal UP TO
-    # SIGN (feSqrtRatioM1's is always the nonnegative one via feAbs;
-    # feSqrtRatioVartime's is whichever candidate its retry logic landed
-    # on) -- so compare after normalizing the vartime root nonnegative too.
-    # On the non-square branch feSqrtRatioVartime provides no root at all,
-    # so only the boolean is compared there.
-    var four, nine, two, seven, seven3v, pMinus1: Fe
-    four.limbs = [4'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    nine.limbs = [9'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    two.limbs = [2'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    seven.limbs = [7'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    seven3v.limbs = [3'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    let pMinus1Bytes = [
-      0xEC'u8, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-      0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x7F
-    ]
-    pMinus1 = feFromBytes(pMinus1Bytes)  # p - 1, i.e. -1 mod p
-
-    let basepointYFe = feFromBytes(basepointY)  # a genuinely "random-looking" element
-
-    let pairs = [
-      (four, FeOne),        # square (4/1 = 4 = 2^2)
-      (two, FeOne),          # non-square
-      (nine, FeOne),          # square (9 = 3^2)
-      (seven, seven3v),       # ratio of two small values, sign unknown up front
-      (pMinus1, FeOne),       # boundary: -1 mod p (p == 1 mod 4, so -1 IS a square)
-      (basepointYFe, FeOne),  # multi-limb "random" element
-    ]
-
-    for (u, v) in pairs:
-      let vartimeOpt = feSqrtRatioVartime(u, v)
-      let (wasSquare, root) = feSqrtRatioM1(u, v)
-      check wasSquare == vartimeOpt.isSome
-      if wasSquare:
-        var vartimeRootAbs = vartimeOpt.get
-        feAbs(vartimeRootAbs)
-        check feToBytes(root) == feToBytes(vartimeRootAbs)
 
 suite "feFromLimbs (RFC-003 slice 1 item 2)":
   test "feFromLimbs(limbs) is byte-identical to hand-assigning .limbs":
@@ -350,39 +304,3 @@ suite "feFromLimbs (RFC-003 slice 1 item 2)":
     feSq(r1, handAssigned)
     feSq(r2, viaConstructor)
     check feToBytes(r1) == feToBytes(r2)
-
-suite "feSqrtRatioVartime (RFC-003 slice 1 item 3, extracted from ed25519.pointDecode)":
-  test "returns a root x with x^2 * v == u when u/v is a square":
-    # Construct u = v * x0^2 for arbitrary nonzero v, x0, so u/v is square
-    # by construction; feSqrtRatioVartime need not recover x0 itself
-    # (ed25519's field has two square roots, x0 and -x0) -- only that the
-    # returned root actually squares (times v) back to u.
-    var v: Fe
-    v.limbs = [7'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    var x0: Fe
-    x0.limbs = [11'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    var x0sq, u: Fe
-    feSq(x0sq, x0)
-    feMul(u, v, x0sq)
-
-    let xOpt = feSqrtRatioVartime(u, v)
-    check xOpt.isSome
-    var vxx: Fe
-    feSq(vxx, xOpt.get)
-    feMul(vxx, vxx, v)
-    check feToBytes(vxx) == feToBytes(u)
-
-  test "returns none when u/v is not a square":
-    # p = 2^255 - 19 == 5 (mod 8), and 2 is a quadratic non-residue for
-    # every prime p == 5 (mod 8) -- so u=2, v=1 is a clean,
-    # curve-constant-free non-square case (independent of Ed25519D_Raw,
-    # unlike ed25519.pointDecode's own non-residue backstop test, which
-    # goes through the full y-coordinate recovery formula).
-    var u: Fe
-    u.limbs = [2'i32, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-    check feSqrtRatioVartime(u, FeOne).isNone
-
-  test "u = 0 returns some(0), the trivial square root":
-    check feSqrtRatioVartime(FeZero, FeOne).isSome
-    let x = feSqrtRatioVartime(FeZero, FeOne).get
-    check feToBytes(x) == feToBytes(FeZero)
