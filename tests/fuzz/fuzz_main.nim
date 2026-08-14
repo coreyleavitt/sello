@@ -1,7 +1,8 @@
 ## Coverage-guided fuzz campaign entry point (RFC-001 review finding 12;
 ## reworked to an EXTERNAL SanitizerCoverage target by RFC-002 slice 3):
 ## sello's audited attacker-facing surface (`pointDecode`, `verify`,
-## `x25519`'s peer public u-coordinate), driven by COREY'S proptest
+## `x25519`'s peer public u-coordinate, and -- RFC-004 slice 8a --
+## `ristretto.ristrettoDecode`), driven by COREY'S proptest
 ## library's `externalTarget`/`fuzz` against the separately-compiled,
 ## SanitizerCoverage-instrumented `build/fuzz_external_target` binary
 ## (see `fuzz_external_target.nim`'s module doc for the oracle logic and
@@ -25,10 +26,11 @@
 ## submodule import per that module's own doc comment) replays correctly
 ## through `captureIR` and is admitted as a real seed, per `datasource.
 ## nim`'s documented "replay clamps the recorded value" contract. Each of
-## the three campaigns below is seeded with a handful of known-valid
+## the four campaigns below is seeded with a handful of known-valid
 ## concrete inputs (RFC 8032 §7.1 TEST 1/2/3 for `pointDecode`/`verify`,
-## RFC 7748 §4.1/§5.2 for `x25519`'s peer u-coordinate -- see `fuzz_common.
-## nim`'s `pointDecodeSeeds`/`verifySeeds`/`x25519Seeds`) so mutation
+## RFC 7748 §4.1/§5.2 for `x25519`'s peer u-coordinate, RFC 9496 Appendix
+## A.1 for `ristrettoDecode` -- see `fuzz_common.nim`'s `pointDecodeSeeds`/
+## `verifySeeds`/`x25519Seeds`/`ristrettoDecodeSeeds`) so mutation
 ## explores the ACCEPT boundary from real accepted structure outward,
 ## instead of only ever approaching it from the reject side (the prior
 ## framing's actual gap: self-seeding from one random input starts, on
@@ -51,8 +53,8 @@ proc secondsFromEnv(name: string; default: int): int =
 when isMainModule:
   let perTarget = secondsFromEnv("SELLO_FUZZ_SECONDS", 60)
   let targetBin = getEnv("SELLO_FUZZ_TARGET_BIN", "build" / "fuzz_external_target")
-  echo "sello fuzz harness (RFC-001 finding 12 / RFC-002 slice 3) -- ", perTarget,
-       "s budget per target, ", perTarget * 3, "s total, external target: ", targetBin
+  echo "sello fuzz harness (RFC-001 finding 12 / RFC-002 slice 3 / RFC-004 slice 8a) -- ",
+       perTarget, "s budget per target, ", perTarget * 4, "s total, external target: ", targetBin
 
   runExternalTarget("ed25519.pointDecode", bytes32(), encodePointDecode,
                      targetBin, perTarget, 0xC0FFEE'u64, pointDecodeSeeds())
@@ -60,5 +62,7 @@ when isMainModule:
                      targetBin, perTarget, 0xBADF00D'u64, verifySeeds())
   runExternalTarget("x25519 (attacker peer u-coordinate)", bytes32(), encodeX25519,
                      targetBin, perTarget, 0xDEADBEEF'u64, x25519Seeds())
+  runExternalTarget("ristretto.ristrettoDecode", bytes32(), encodeRistrettoDecode,
+                     targetBin, perTarget, 0xF00DBABE'u64, ristrettoDecodeSeeds())
 
   echo "fuzz campaign complete -- no crashes found on any target, coverage gate passed"

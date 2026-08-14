@@ -4,8 +4,9 @@
 # tests/fuzz/fuzz_main.nim / fuzz_external_target.nim. See those files'
 # module doc comments for the full scope statement: attacker-controlled-
 # input surface ONLY (ed25519.pointDecode, ed25519.verify, x25519's peer
-# public u-coordinate) -- never the secret-scalar signing path, which is
-# dudect's job (scripts/ct.sh), not a mutation fuzzer's.
+# public u-coordinate, and -- RFC-004 slice 8a -- ristretto.ristrettoDecode)
+# -- never the secret-scalar signing path, which is dudect's job
+# (scripts/ct.sh), not a mutation fuzzer's.
 #
 # RFC-002 slice 3: the harness used to drive proptest's in-process
 # `fuzzWith` against `{.cover.}`-instrumented wrapper procs -- a 2-edge
@@ -46,8 +47,8 @@
 # to black-box random.
 #
 # Usage:
-#   scripts/fuzz.sh                    # default: 60s/target x 3 = ~3 min total
-#   scripts/fuzz.sh 15                 # 15s/target x 3 = ~45s total (smoke-sized)
+#   scripts/fuzz.sh                    # default: 60s/target x 4 = ~4 min total
+#   scripts/fuzz.sh 15                 # 15s/target x 4 = ~1 min total (smoke-sized)
 #   SELLO_FUZZ_SECONDS=15 scripts/fuzz.sh   # same, via env (arg wins if both given)
 #
 # Needs only the base Nim image + the optional proptest milpa dep --

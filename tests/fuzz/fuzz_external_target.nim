@@ -1,10 +1,13 @@
 ## External SanitizerCoverage fuzz target (RFC-002 slice 3 item 1).
 ##
-## A small stdin-driven binary dispatching sello's three attacker-input
-## oracles -- `ed25519.pointDecode`, `ed25519.verify`, and `x25519` over
-## the peer's public u-coordinate -- the same scope `fuzz_common.nim`'s
-## now-retired in-process `{.cover.}` wrappers covered. This file is
-## compiled TWICE with two different purposes:
+## A small stdin-driven binary dispatching sello's four attacker-input
+## oracles -- `ed25519.pointDecode`, `ed25519.verify`, `x25519` over the
+## peer's public u-coordinate, and (RFC-004 slice 8a) `ristretto.
+## ristrettoDecode` -- the first three being the scope `fuzz_common.nim`'s
+## now-retired in-process `{.cover.}` wrappers covered; `ristrettoDecode`
+## joins because it is squarely the same class of surface: attacker-
+## controlled wire bytes sello has to parse before anyone proved they were
+## well-formed. This file is compiled TWICE with two different purposes:
 ##
 ##   1. By `scripts/fuzz.sh`, with SanitizerCoverage instrumentation
 ##      (`-fsanitize-coverage=trace-pc -fno-pie`) and linked against the
@@ -24,11 +27,13 @@
 ## produces truncated inputs constantly and that must never be a
 ## finding.
 ##
-##   mode 0 (pointDecode): payload[0..31]            -- the encoded point
-##   mode 1 (verify):      payload[0..63]  = sig
-##                          payload[64..95] = pk
-##                          payload[96..^1] = msg (may be empty)
-##   mode 2 (x25519):      payload[0..31]            -- peer u-coordinate
+##   mode 0 (pointDecode):     payload[0..31]        -- the encoded point
+##   mode 1 (verify):          payload[0..63]  = sig
+##                              payload[64..95] = pk
+##                              payload[96..^1] = msg (may be empty)
+##   mode 2 (x25519):          payload[0..31]        -- peer u-coordinate
+##   mode 3 (ristrettoDecode): payload[0..31]        -- the encoded point
+##                              (RFC-004 slice 8a)
 ##
 ## Oracle (both directions, RFC-002 slice 3 item 2; identity check added
 ## RFC-003 slice 2 item 1):
@@ -53,6 +58,15 @@
 ##     reads or a stray global mutated by a "pure" verify path.
 ##   - x25519 returning `some` implies the shared secret is not all-zero
 ##     (pre-existing check, kept from fuzz_common.nim's old wrapper).
+##   - ristrettoDecode (RFC-004 slice 8a), mirroring pointDecode's own
+##     identity-oracle shape: determinism (two calls on the identical
+##     input agree, both on Some/None and on the decoded value's
+##     re-encode), and accept implies IDENTITY re-encode --
+##     ristrettoDecode(e).isSome => ristrettoEncode(ristrettoDecode(e).get)
+##     == e. This IS ristretto255's canonical-encoding contract (RFC 9496
+##     §4.3.1/§4.3.2: every element has exactly one valid encoding) rather
+##     than an incidental property, and it is cheap: one encode call and a
+##     byte-compare, the same cost shape as pointDecode's own check above.
 ##
 ## A `doAssert` failure raises `AssertionDefect`, which (unhandled) aborts
 ## the process (SIGABRT) -- proptest's `signalOracle` maps any terminating
@@ -65,11 +79,13 @@ import sello/ed25519
 import sello/scalar
 import sello/field
 import sello/x25519
+import sello/ristretto
 
 const
   ModePointDecode = 0'u8
   ModeVerify = 1'u8
   ModeX25519 = 2'u8
+  ModeRistrettoDecode = 3'u8
 
 let localSecretForFuzzing = toX25519StaticSecret([
   1'u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
@@ -140,6 +156,30 @@ proc handleX25519(payload: openArray[byte]) =
     for b in s1: acc = acc or b
     doAssert acc != 0'u8, "x25519 returned Some(...) with an all-zero shared secret"
 
+proc handleRistrettoDecode(payload: openArray[byte]) =
+  ## RFC-004 slice 8a: the ristretto255 decode oracle, mirroring
+  ## `handlePointDecode`'s shape exactly -- determinism plus the
+  ## accept-implies-identity-re-encode invariant, which for
+  ## `ristrettoDecode`/`ristrettoEncode` IS the canonical-encoding
+  ## contract RFC 9496 guarantees (§4.3.1/§4.3.2), not merely a
+  ## convenient self-consistency check.
+  if payload.len < 32: return
+  var b: array[32, byte]
+  for i in 0 ..< 32: b[i] = payload[i]
+  let e = toRistrettoEncoded(b)
+
+  let r1 = ristrettoDecode(e)
+  let r2 = ristrettoDecode(e)
+  doAssert r1.isSome == r2.isSome, "ristrettoDecode nondeterministic (Some/None disagreement)"
+
+  if r1.isSome:
+    let e1 = ristrettoEncode(r1.get)
+    let e2 = ristrettoEncode(r2.get)
+    doAssert e1 == e2, "ristrettoDecode nondeterministic (re-encode mismatch)"
+    doAssert e1 == e,
+      "ristrettoDecode accepted a canonical input but re-encoded to a different value " &
+      "(identity oracle failure -- accept must imply ristrettoEncode(ristrettoDecode(e)) == e)"
+
 proc readAllStdinBytes(): seq[byte] =
   let s = stdin.readAll()
   result = newSeq[byte](s.len)
@@ -155,5 +195,6 @@ when isMainModule:
   of ModePointDecode: handlePointDecode(payload)
   of ModeVerify: handleVerify(payload)
   of ModeX25519: handleX25519(payload)
+  of ModeRistrettoDecode: handleRistrettoDecode(payload)
   else: discard  # unrecognized mode byte: well-formed reject, not a finding
   quit(0)
