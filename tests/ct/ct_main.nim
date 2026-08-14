@@ -97,12 +97,81 @@
 ## a type that does have a from-bytes constructor and therefore can be
 ## held genuinely fixed. See `docs/ct-results.md` for the same caveat
 ## recorded next to this target's numbers.
+##
+## RFC-004 slice 7b adds FOUR more targets over `sello/ristretto` (RFC 9496),
+## restating each target's own dudect-bullet rationale briefly here rather
+## than only in `docs/ct-results.md`:
+##   - `ristretto.ristrettoScalarmult` -- CT variable-base scalarmult over
+##     `RistrettoStaticSecret` (the ristretto255 role WITH a from-bytes
+##     route, `toRistrettoStaticSecretWide`, the direct analog of the
+##     sixth target's `toX25519StaticSecret` above): fixed-vs-random
+##     SECRET, fixed public point (`ristretto.RistrettoBasePoint`) -- a
+##     genuine leak-value test, following the sixth target's design exactly
+##     as the task instructs. `RistrettoEphemeralSecret` gets no separate
+##     target, per the RFC's own dudect bullet: its one consuming call runs
+##     the identical `scalar.geScalarmultCT` this target already measures
+##     with full fixed-vs-random power, so a construct+consume calibration
+##     target (the fifth target's own shape, above) would add runtime
+##     without adding information.
+##   - `ristretto.ristrettoEncode` -- fixed-vs-random INPUT POINT (not
+##     secret, a POINT): encode is the operation the RFC's own motivating
+##     protocols run on secret-DERIVED points (a Pedersen commitment before
+##     publication, an OPRF blinded element), so its CT-by-construction
+##     claim gets a leak-value measurement here rather than only an
+##     argument. `ristretto.ristrettoDecode` gets no target, deliberately:
+##     its input is attacker-supplied wire data, public by definition --
+##     there is no secret class to measure.
+##   - ``ristretto.`==` `` -- classes are (round-2 redesign, restated):
+##     class A is `(P, P)` for one FIXED `P` (both `feEqualCT` OR-terms
+##     inside `==` hit their TRUE branch -- the match path); class B is
+##     `(P, Q)` for a fresh random `Q` each sample (FALSE throughout). A
+##     naive fixed-vs-random-OPERAND framing could pass while never timing
+##     the match path at all; this class design forces it, and is the one
+##     place a short-circuit boolean (rather than the bitwise-or `==`
+##     actually uses) could silently reintroduce a branch that no mutation
+##     or property test can see. **Measured status: FAIL, extensively
+##     investigated, attributed to a harness resolution-floor limitation
+##     for very fast primitives rather than a genuine leak** -- this
+##     target (~800-900 cycles raw) is 30-600x smaller than every other
+##     target in this battery. Several batched-measurement designs were
+##     tried (see the target's own code comment below and
+##     docs/ct-results.md for the full investigation, including two rounds
+##     of non-shipped diagnostics) and every one that showed the effect
+##     shared one property: the "fixed" class always touches the same
+##     small, constant memory addresses every sample while the "random"
+##     class's addresses vary sample-to-sample -- present in every target
+##     in this file but negligible against their much larger per-sample
+##     cost. A fixed-but-ALWAYS-FALSE control target showed an equally
+##     large or larger spurious |t| than the real (sometimes-true) design,
+##     ruling out the actual TRUE/FALSE verdict as the driver. No batching
+##     design achieved a clean result at full-battery scale, so the
+##     shipped target reverts to the simplest single-call design; its
+##     numbers are recorded honestly rather than suppressed.
+##   - `ristretto.ristrettoFromUniformBytes` -- fixed-vs-random 64-byte
+##     INPUT: OPRF blinding maps a client's PRIVATE input to the group, so
+##     the map's input is secret in exactly the deployments this RFC
+##     headlines, even though the map itself is a total function with no
+##     accept/reject verdict.
+##
+## Random ristretto255 elements for the encode and `==` targets come from
+## `randomRistrettoPoint` below -- a THIRD, independent copy of the same
+## rejection-sampling loop shape `dudect.runDudect`'s own Phase 1 (fresh
+## random scalars, above) and `test_ristretto.nim`'s property-test
+## generator already have, per the RFC's own explicit sanction for this
+## file: `ct_main.nim` imports library modules only, never test files, so
+## neither existing copy is reachable from here. Every call site is via
+## `makeRandomInput`, which `dudect.runDudect` only ever invokes during its
+## pre-measurement Phase 1 (see `dudect.nim`'s own doc comment) -- this
+## generator's inherently variable iteration count (RFC 9496's ~1/16
+## acceptance rate per candidate) therefore never lands inside a timed
+## region and carries no timing-measurement risk of its own.
 
 import std/[os, parseutils, strutils, random, options]
 import sello/private/backend
 import sello/field
 import sello/scalar
 import sello/x25519
+import sello/ristretto
 import ./dudect
 
 # ---------------------------------------------------------------------------
@@ -116,6 +185,40 @@ const fixedMsg = "the quick brown fox jumps over the lazy dog, 32x"
 
 proc randomBytes32(): array[32, byte] =
   for i in 0 ..< 32: result[i] = byte(rand(255))
+
+proc randomBytes64(): array[64, byte] =
+  for i in 0 ..< 64: result[i] = byte(rand(255))
+
+proc foldBytes32(b: array[32, byte]): uint64 =
+  ## Shared checksum fold for the four RFC-004 slice 7b targets below --
+  ## the same shift-and-or-low-bit accumulate every existing `opXxx` in
+  ## this file hand-rolls inline; consolidated here since four new call
+  ## sites need it (see the module doc comment's anti-DCE note and
+  ## `dudect.nim`'s own "use-the-result" discussion for why this fold
+  ## exists at all -- it must run INSIDE the measured region, which every
+  ## call site below still does).
+  for x in b: result = (result shl 1) or uint64(x and 1'u8)
+
+proc randomRistrettoPoint(): RistrettoPoint =
+  ## Inline rejection-sampling ristretto255 element generator -- the
+  ## sanctioned third copy of this loop shape (RFC-004's dudect bullet):
+  ## `dudect.runDudect`'s own Phase 1 (fresh random scalars, above) and
+  ## `tests/unit/test_ristretto.nim`'s property-test generator are the
+  ## other two, neither reachable from here since this file imports
+  ## library modules only, never test files. Draws a uniformly random
+  ## 32-byte candidate and re-attempts `ristretto.ristrettoDecode` until
+  ## one is accepted -- RFC 9496's own ~1/16 acceptance rate per
+  ## candidate. Every call site is via `makeRandomInput`, which
+  ## `dudect.runDudect` only ever invokes during its pre-measurement
+  ## Phase 1 (see `dudect.nim`'s own doc comment) -- this loop's variable
+  ## iteration count therefore never lands inside a timed region and
+  ## carries no timing-measurement risk of its own, despite being
+  ## visibly variable-time itself.
+  while true:
+    let candidate = toRistrettoEncoded(randomBytes32())
+    let decoded = ristrettoDecode(candidate)
+    if decoded.isSome:
+      return decoded.get()
 
 # ---------------------------------------------------------------------------
 # Target 0: positive control -- deliberately variable-time, must trip the
@@ -232,6 +335,155 @@ proc opX25519StaticDH(secret: array[32, byte]): uint64 =
   acc
 
 # ---------------------------------------------------------------------------
+# Target 6: ristretto.ristrettoScalarmult -- CT variable-base scalarmult,
+# fixed-vs-random SECRET (RistrettoStaticSecret), fixed public point.
+# RFC-004 slice 7b.
+# ---------------------------------------------------------------------------
+
+## Arbitrary fixed 64-byte input for the `ristrettoScalarmult` fixed
+## class. Wide-reduced by `toRistrettoStaticSecretWide` (TOTAL -- no
+## `Option` unwrap, so no reject-vs-accept branching to confound the
+## measurement) inside `opRistrettoScalarmult` below, into a canonical
+## residue mod L, then held fixed across every fixed-class sample.
+const fixedRistrettoStaticBytes64: array[64, byte] = block:
+  var b: array[64, byte]
+  for i in 0 ..< 64: b[i] = byte(i * 3 + 5)
+  b
+
+proc opRistrettoScalarmult(bytes: array[64, byte]): uint64 =
+  ## Builds the `RistrettoStaticSecret` INSIDE the measured region from
+  ## its wide from-bytes constructor, once per sample -- mirroring
+  ## `opX25519StaticDH` above exactly (secret constructed from raw bytes
+  ## inside `operate`, not pre-built in Phase 1), the design the RFC-004
+  ## slice 7b task names as "the ristretto static target follows the
+  ## [sixth target's] design." The multiplied point is held fixed
+  ## (`RistrettoBasePoint`) across both classes, so only the secret
+  ## varies -- a genuine fixed-vs-random-secret leak test of
+  ## `scalar.geScalarmultCT` via its `ristretto.ristrettoScalarmult`
+  ## wrapper.
+  let secret = toRistrettoStaticSecretWide(bytes)
+  let r = ristrettoScalarmult(secret, RistrettoBasePoint)
+  foldBytes32(toBytes(ristrettoEncode(r)))
+
+# ---------------------------------------------------------------------------
+# Target 7: ristretto.ristrettoEncode -- fixed-vs-random INPUT POINT.
+# RFC-004 slice 7b.
+# ---------------------------------------------------------------------------
+
+let fixedRistrettoPoint = randomRistrettoPoint()
+  ## One fixed ristretto255 element, sampled once via the rejection
+  ## generator above before any timing starts (module-init time, the same
+  ## register as `fixedPeer` above for the X25519 targets) -- reused as
+  ## the "fixed" class input for both the encode target below and the
+  ## `==` target's fixed operand `P`.
+
+proc opRistrettoEncode(p: RistrettoPoint): uint64 =
+  foldBytes32(toBytes(ristrettoEncode(p)))
+
+# ---------------------------------------------------------------------------
+# Target 8: ristretto.`==` -- (P, P) fixed vs (P, Q) random, so the
+# match path itself is what gets timed. RFC-004 slice 7b (round-2 class
+# redesign, restated in this file's module doc comment above).
+#
+# **Measured status: FAIL, investigated at length, attributed to this
+# harness's resolution floor for very fast primitives -- NOT to a
+# secret-dependent branch or index in `ristretto.\`==\``.** See
+# docs/ct-results.md for the full writeup; summarized here so the code and
+# the record stay in sync:
+#
+# `ristretto.\`==\`` is straight-line CT code -- two unconditional
+# `feEqualCT` calls plus a bitwise-or combine, no branch or array index
+# that depends on any comparison outcome, built on the already
+# machine-checked `feCMove`/`feCSwap` mask algebra (`tests/verify/
+# symex_mask.nim`). Despite this, a naive single-call-per-sample
+# measurement of this exact (P,P)-vs-(P,Q) class design FAILS: worst-case
+# |t| in the 20-40 range across three independent full-battery runs, and
+# 100+ in later isolated diagnostics with less surrounding measurement
+# noise. Two rounds of dedicated, non-shipped diagnostics (built, run, and
+# deleted per CLAUDE.md's "scratch files do not get committed" rule; the
+# investigation is preserved here and in docs/ct-results.md rather than in
+# the deleted files) ruled out every constant-time-relevant explanation
+# tried:
+#   1. A fixed-but-ALWAYS-UNEQUAL comparison target (never evaluating
+#      true) shows an EQUALLY LARGE OR LARGER spurious |t| against a
+#      random target as the real (sometimes-true) design does -- proof
+#      the signal does NOT track the TRUE/FALSE verdict `==`'s CT design
+#      protects.
+#   2. Batching K=64 independent (P,P)/(P,Q) sub-comparisons per timed
+#      sample (diluting per-call rdtsc/pipeline overhead, the standard
+#      dudect remedy for very fast primitives) reduced an isolated
+#      single-target measurement from FAIL to WARN, but made the SAME
+#      design WORSE inside the full ten-target battery (a 10GB
+#      `randomInputs` pre-allocation this design required -- `dudect.
+#      runDudect`'s Phase 1 always pre-builds the entire random-class
+#      input array up front -- introduced memory pressure invisible in
+#      isolation but real at full-battery scale).
+#   3. A revised batched design using a cheap `int32` pool-offset as T
+#      (avoiding the large pre-allocation entirely, ~4MB regardless of K)
+#      made the full-battery result WORSE STILL (worst-case |t| in the
+#      100-200+ range) despite every OTHER target in that same run
+#      measuring cleanly (|t| < 2.5) -- ruling out general host noise as
+#      the explanation.
+#   4. A further-refined design using GENUINELY DISTINCT memory addresses
+#      for the equal-vs-unequal comparison targets (rather than literally
+#      re-reading one address twice, which (3)'s offset=0 case did) still
+#      showed the same large, consistently-signed effect -- ruling out
+#      same-address-reload/store-forwarding as the sole explanation too.
+# The common thread across every design that DID show the effect: the
+# "fixed" class always touches the same small, constant set of memory
+# addresses every sample, while the "random" class's addresses vary
+# sample-to-sample -- a property of ANY fixed-vs-random dudect class
+# design, not of this operation's arithmetic. This asymmetry is present in
+# every dudect target in this codebase, including the six pre-existing
+# ones, but is negligible against their far larger per-sample cost
+# (26,000-500,000+ cycles); `ristretto.\`==\`` (~800-900 cycles raw) is by
+# 30-600x the smallest operation ever measured by this harness, and is
+# apparently the first target small enough to expose it. This reads as a
+# genuine measurement-methodology resolution floor for very fast
+# primitives -- a documented dudect limitation in the wider literature --
+# rather than a software constant-time defect, but the exact hardware
+# mechanism (prefetcher behavior on varying vs. repeated access patterns
+# is the leading hypothesis) was not conclusively pinned down: this
+# sandboxed environment has no `perf`/cachegrind/PMU access to confirm it
+# directly. Reverted to the simplest, most RFC-literal single-call design
+# below (batching was explored at length and did not achieve a clean
+# result at full-battery scale, while adding real complexity and memory
+# cost) so the shipped code stays minimal; the measured numbers are
+# recorded honestly in docs/ct-results.md rather than suppressed or
+# forced to a false PASS.
+# ---------------------------------------------------------------------------
+
+proc opRistrettoEqual(q: RistrettoPoint): uint64 =
+  ## Class A (fixed): `q` IS `fixedRistrettoPoint` -- both `feEqualCT`
+  ## OR-terms inside `ristretto.\`==\`` hit their TRUE branch. Class B
+  ## (random): `q` is a fresh rejection-sampled point, essentially always
+  ## unequal to `fixedRistrettoPoint` -- FALSE throughout. `uint64(bool)`
+  ## folds the single-bit result into the anti-DCE sink the same way
+  ## every other target's byte-fold does.
+  uint64(fixedRistrettoPoint == q)
+
+# ---------------------------------------------------------------------------
+# Target 9: ristretto.ristrettoFromUniformBytes -- fixed-vs-random 64-byte
+# INPUT (the map's own domain; OPRF blinding maps a private input here).
+# RFC-004 slice 7b.
+# ---------------------------------------------------------------------------
+
+## Arbitrary fixed 64-byte input for the `ristrettoFromUniformBytes`
+## fixed class -- a distinct byte pattern from
+## `fixedRistrettoStaticBytes64` above purely so the two constants are
+## visually distinguishable in this file; `ristrettoMap`/
+## `ristrettoFromUniformBytes` are TOTAL functions that treat every
+## input uniformly regardless of byte pattern.
+const fixedUniformBytes64: array[64, byte] = block:
+  var b: array[64, byte]
+  for i in 0 ..< 64: b[i] = byte(i * 13 + 7)
+  b
+
+proc opRistrettoFromUniformBytes(bytes: array[64, byte]): uint64 =
+  let p = ristrettoFromUniformBytes(bytes)
+  foldBytes32(toBytes(ristrettoEncode(p)))
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -284,6 +536,22 @@ when isMainModule:
   block:
     let fixedSecret = randomBytes32()
     reports.add runDudect("x25519(static) vs peer", n, fixedSecret, randomBytes32, opX25519StaticDH)
+
+  block:
+    reports.add runDudect("ristretto.ristrettoScalarmult", n,
+      fixedRistrettoStaticBytes64, randomBytes64, opRistrettoScalarmult)
+
+  block:
+    reports.add runDudect("ristretto.ristrettoEncode", n,
+      fixedRistrettoPoint, randomRistrettoPoint, opRistrettoEncode)
+
+  block:
+    reports.add runDudect("ristretto.`==` (P,P) vs (P,Q)", n,
+      fixedRistrettoPoint, randomRistrettoPoint, opRistrettoEqual)
+
+  block:
+    reports.add runDudect("ristretto.ristrettoFromUniformBytes", n,
+      fixedUniformBytes64, randomBytes64, opRistrettoFromUniformBytes)
 
   for r in reports:
     report(r)

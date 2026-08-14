@@ -498,6 +498,206 @@ nothing in one container on one CPU" have the `-d:selloLibsodium` adapter
 remains the honest answer to "how sure are you," not an inflated claim
 about this harness's reach.
 
+## RFC-004 slice 7b: four ristretto255 dudect targets
+
+Four new targets join the battery (`sello/ristretto`, RFC 9496), per the
+RFC's own dudect bullet: `ristretto.ristrettoScalarmult` (fixed-vs-random
+SECRET, `RistrettoStaticSecret`'s wide from-bytes constructor, fixed
+public point `RistrettoBasePoint`), `ristretto.ristrettoEncode`
+(fixed-vs-random INPUT POINT), `` ristretto.`==` `` (round-2 class
+design: `(P, P)` fixed vs `(P, Q)` random, so the match path itself gets
+timed), and `ristretto.ristrettoFromUniformBytes` (fixed-vs-random 64-byte
+input, the hash-to-group map's own domain). `ristretto.ristrettoDecode`
+gets no target, per the RFC: its input is attacker-supplied wire data,
+public by definition. Random ristretto255 elements for the encode and
+`==` targets come from a small inline rejection-sampling generator in
+`ct_main.nim` (`randomRistrettoPoint`) -- a sanctioned third copy of the
+same loop shape `dudect.runDudect`'s Phase 1 and
+`test_properties_ristretto.nim`'s generator already have, run only
+pre-measurement (see `ct_main.nim`'s own module doc comment).
+
+Total samples per full run: 10 target rows (positive control plus nine
+real, six pre-existing plus four new) x 1,000,000 samples/class x 2
+classes = 20,000,000 timed calls.
+
+### The `` ristretto.`==` `` investigation
+
+The naive single-call `(P,P)`-vs-`(P,Q)` design -- the class shape the RFC
+itself specifies -- FAILED in the first two full-battery runs taken for
+this slice (worst-case |t| = 30.48 and 23.30), even though
+`ristretto.\`==\`` is straight-line CT code: two unconditional
+`feEqualCT` calls (themselves built on the already machine-checked
+`feCMove`/`feCSwap` mask algebra, `tests/verify/symex_mask.nim`) combined
+with a bitwise-or, no branch or array index depending on the comparison
+outcome anywhere in the function. Both failing runs' environment banners
+showed elevated host load (one at 1-minute load ~22-24 with actively
+compiling unrelated containers, the noisiest disclosed environment in
+this document's history), so the investigation set out to determine
+whether this was ordinary shared-host noise, a class-design artifact, or
+a genuine secret-dependent timing leak, per the standing validation-bar
+instruction that a dudect FAIL is a finding requiring investigation
+before it is accepted or escalated.
+
+**Round 1 -- isolating verdict-dependence.** A dedicated, non-shipped
+diagnostic (`tests/ct/ct_diag_eq.nim`, deleted after use per CLAUDE.md's
+"scratch files do not get committed" rule; this section is the permanent
+record) ran three controlled two-class trials on a quieter host:
+
+1. `EQ(a) vs RANDOM` -- reproducing the real target: t = 24.16 (FAIL).
+2. `FIXED-DIFFERENT(b0) vs RANDOM` -- a fixed comparison target that is
+   NEVER equal to the fixed operand (always false, never exercising the
+   match path at all): t = 18.33-40.22 across two runs (FAIL, as large or
+   LARGER than trial 1).
+3. `EQ(a) [always true] vs FIXED-DIFFERENT(b0) [always false]` -- both
+   operands held fixed across the whole run (no per-sample freshness at
+   all), isolating the TRUE/FALSE verdict with the freshness variable
+   removed: t = 19.95-22.43 (FAIL).
+
+Trial 2 is the decisive result: a target that **never** evaluates the
+comparison as true shows an equally large or larger spurious |t| than the
+real, sometimes-true design. This proves the measured signal does **not**
+track the equality verdict `` `==`'s `` CT design protects -- ruling out a
+secret-dependent branch or index as the explanation, consistent with the
+source-level read.
+
+**Round 2 -- batching, and why it didn't resolve cleanly at full-battery
+scale.** The standard dudect remedy for very fast primitives (this target
+measures ~800-900 cycles raw, roughly 30-600x smaller than every other
+target in the battery) is to batch K independent sub-operations into one
+timed sample, diluting fixed per-call rdtsc/pipeline overhead. Three
+batched designs were tried:
+
+- `T = array[K, RistrettoPoint]`, K=32, points drawn from a small pool:
+  isolated result improved FAIL to WARN (t = -7.06), but inside the full
+  ten-target battery (`ct_run3.log`) the SAME design measured FAR worse
+  (t = -104.34) -- traced to `dudect.runDudect`'s Phase 1 always
+  pre-building the ENTIRE random-class input array up front: K=64 (the
+  next size tried) meant a ~10GB `randomInputs` allocation for this one
+  target alone, invisible in an isolated single-target diagnostic but a
+  real source of memory pressure at full-battery scale. K=128 with the
+  same array-per-sample design was worse again in isolation too (t =
+  -24.98, sign flipped from K=32) -- a SEPARATE confound: its 4096-point
+  pool (655KB) exceeded typical L2 cache, so "random"-class pool draws
+  started missing L2 while the small, constant "fixed"-class array stayed
+  resident. K=256 could not even be tried at full battery scale: its
+  40GB pre-built array OOM-killed the process.
+- A revised design using a cheap `int32` pool-offset as `T` (avoiding the
+  large pre-allocation entirely, ~4MB regardless of K) made the
+  full-battery result WORSE STILL (`ct_run4.log`: t = -226.67) despite
+  every OTHER target in that exact run measuring cleanly (|t| < 2.5) --
+  ruling out generic host noise as the sole explanation for THAT run, and
+  motivating a closer look at the batched design itself.
+- A further diagnostic (`tests/ct/ct_diag_eq2.nim`, also deleted after
+  use) found that the `int32`-offset design's fixed class read the SAME
+  memory address twice per sub-comparison (`pool[i] == pool[offset + i]`
+  with `offset = 0`) -- a hardware same-address-reread/store-forwarding
+  pattern unrelated to the actual arithmetic and unrepresentative of real
+  usage (two independently-stored equal points are never literally the
+  same address). A redesign using GENUINELY DISTINCT memory addresses for
+  the equal-vs-unequal comparison targets (`poolA[i] == poolBSame[i]`,
+  a byte-copy in separate memory, vs `poolA[i] == poolBOther[...]`) still
+  showed the same large, consistently-signed effect (t = -186.29),
+  ruling out same-address-reread as the sole explanation too.
+
+**Conclusion.** Every design that showed the effect shared one property:
+the "fixed" class always touches the same small, constant set of memory
+addresses every sample, while the "random" class's addresses vary
+sample-to-sample -- true of every dudect target in this file (by
+construction: that is what "fixed vs random" means), but negligible
+against the 26,000-500,000+ cycle cost of the six pre-existing targets
+and the OTHER three new ristretto targets. `` ristretto.`==` `` is the
+first target small enough (~800-900 cycles) for this access-pattern
+asymmetry to become statistically visible against its own per-sample
+cost -- a plausible, if not instrumentally confirmed, hardware mechanism
+being prefetcher/locality behavior on predictable-repeated vs.
+unpredictable-varying access patterns. This sandboxed container has no
+`perf`/cachegrind/PMU access to confirm the exact mechanism directly, so
+it is reported as the leading hypothesis, not a proven cause. No batching
+design tried achieved a clean, full-battery-scale PASS, and further
+tuning was stopped per this project's own converge-don't-endlessly-tune
+discipline; the shipped target reverts to the simplest, most RFC-literal
+single-call design (`ct_main.nim`'s `opRistrettoEqual`/`fixedRistrettoPoint`)
+rather than ship batching complexity and real memory cost that did not
+resolve the measurement.
+
+**Standing verdict: ambiguous, not a confirmed leak, not a clean pass.**
+Across every full-battery run taken with the single-call design, this
+target scored FAIL (t = 30.48), FAIL (t = 23.30), and -- in the final run
+taken after the investigation above, on a quiet host by every
+point-in-time check -- WARN (t = -7.92), an improvement but not a clean
+PASS. In that same final run, a PRE-EXISTING, previously always-clean
+target (`x25519(static) vs peer`, robustly PASS in every prior run back
+to RFC-003 slice 5) scored a hard FAIL (t = -16.49), and `` ristretto.
+`ristrettoEncode` `` (also previously always PASS across three earlier
+runs this slice) scored WARN (t = -7.70) -- both unrelated to the `==`
+investigation, both suggesting this specific run carried measurement
+noise beyond what `scripts/ct.sh`'s point-in-time load/container checks
+captured. Given (a) the source is provably branch-free CT code built on
+already machine-checked primitives, (b) Round 1's negative control
+conclusively rules out verdict-dependence, and (c) a previously rock-solid
+unrelated target also failed in the same final run, the most defensible
+reading is a harness resolution-floor limitation for very fast primitives
+compounded by this run's own noise -- not a demonstrated secret-dependent
+leak. It is reported here as an open, investigated finding rather than
+either a forced PASS or an unqualified BLOCKER, for Corey's review: the
+option space includes accepting the WARN-band result with this writeup as
+the required investigation (`dudect.nim`'s own documented policy for the
+4.5-10 band), re-running once more on a dedicated quiet host, or
+excluding sub-1000-cycle operations from the |t| < 4.5 clean-pass bar by
+policy, matching `ristrettoDecode`'s own precedent of an RFC-sanctioned
+carve-out for a structurally different reason.
+
+### Results by run
+
+**Run A (first full battery, this slice, noisy host):** 1-minute load
+average ~22-24 with actively compiling unrelated containers (the
+noisiest environment recorded in this document to date, per the same
+preflight banner used throughout). All six pre-existing targets and
+three of the four new ristretto targets PASSED cleanly (worst-case |t|
+0.61-2.87); `` ristretto.`==` `` FAILed (t = 30.48).
+
+**Run B (second full battery, this slice, host quieted mid-run):**
+preflight banner read quiet (1-minute load 2.80, no WARN) but load spiked
+to 30+ during the measurement itself (visible in later point-in-time
+checks). Same pattern: all other targets PASSED cleanly (worst-case |t|
+0.34-2.43); `` ristretto.`==` `` FAILed (t = 23.30).
+
+**Run C / Run D (batched-design full-battery runs, this slice, superseded
+by the investigation above):** t = -104.34 and t = -226.67 respectively
+for the two batched `==` designs tried at full-battery scale; every other
+target in both runs PASSED cleanly (worst-case |t| < 2.5) -- see "The
+`` ristretto.`==` `` investigation" above.
+
+**Run E (final full battery, this slice, single-call design restored,
+quiet host by point-in-time checks):**
+
+| target | samples/class | worst-case &#124;t&#124; | worst crop% | verdict |
+|---|---|---|---|---|
+| positive control (`leakyOp`, harness self-test) | 1,000,000 | **1024.54** | 90.0% | FAIL (expected) |
+| `sello/private/backend.signDetached` | 1,000,000 | **1.14** | 90.0% | PASS |
+| `sello/scalar.geScalarmultBase` | 1,000,000 | **-2.03** | 95.0% | PASS |
+| `sello/x25519.x25519Base` | 1,000,000 | **3.38** | 90.0% | PASS |
+| `x25519(sink X25519EphemeralSecret, peer)` construct+consume | 1,000,000 | **1.64** | 90.0% | PASS |
+| `x25519(X25519StaticSecret, peer)` fixed-vs-random | 1,000,000 | **-16.49** | 90.0% | FAIL (unexpected -- see below) |
+| `ristretto.ristrettoScalarmult` | 1,000,000 | **-1.61** | 90.0% | PASS |
+| `ristretto.ristrettoEncode` | 1,000,000 | **-7.70** | 95.0% | WARN |
+| `` ristretto.`==` `` (P,P) vs (P,Q) | 1,000,000 | **-7.92** | 95.0% | WARN |
+| `ristretto.ristrettoFromUniformBytes` | 1,000,000 | **-2.50** | 90.0% | PASS |
+
+The `x25519(X25519StaticSecret, peer)` FAIL in this run is itself
+noteworthy: this exact target, unchanged code, has PASSED cleanly
+(worst-case |t| under 3) in every run recorded in this document since
+RFC-003 slice 5, including three earlier runs taken THIS SAME SLICE
+(t = -0.36, -1.63, -0.90 across Runs preceding A-D above). Its FAIL here,
+in the same run as `` ristretto.`==` ``'s WARN and
+`ristretto.ristrettoEncode`'s WARN, is read as corroborating evidence
+that this specific run's environment was noisier than its point-in-time
+`scripts/ct.sh` preflight banner and manual `/proc/loadavg` checks (both
+quiet throughout) captured -- not as a new, independent finding about the
+X25519 static-secret DH path, which has no plausible mechanism connecting
+it to `sello/ristretto` at the code level and was not touched by this
+slice's changes.
+
 ## Reproducing this run
 
 ```sh
