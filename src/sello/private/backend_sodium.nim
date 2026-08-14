@@ -32,6 +32,22 @@
 ##                                  const unsigned char *pk);
 ## ```
 ##
+## RFC-004 slice 8c adds a further binding group, ristretto255 (RFC 9496),
+## for the same reason `sodiumVerifyDetached`/`sodiumScalarmult` exist:
+## differential-test oracles only, never `signing.nim`'s dispatch or any
+## other production call path (`sello/ristretto.nim` never dispatches to
+## this backend -- see that module's own doc comment and this RFC's
+## Non-goals section, "Ristretto in the libsodium backend dispatch").
+## `crypto_core_ristretto255_is_valid_point`/`_from_hash` and
+## `crypto_scalarmult_ristretto255`/`_base` entered libsodium at release
+## 1.0.18; `sodiumLibraryVersion` (below) exposes the runtime version
+## query so the differential test suite can assert that bound itself
+## before trusting any of the four ristretto255 oracle wrappers
+## (`sodiumRistrettoIsValidPoint`/`sodiumRistrettoFromHash`/
+## `sodiumRistrettoScalarmult`/`sodiumRistrettoScalarmultBase`) -- see
+## `tests/unit/test_libsodium_interop.nim` for where that assertion
+## actually runs and the empirical (major, minor) derivation backing it.
+##
 ## `crypto_sign_seed_keypair` backs `derivePublic`; `signDetached` below
 ## does NOT call it (see the RFC-001 ledger finding 13 note on
 ## `signDetached` itself) -- both match `backend.nim`'s seed-level contract
@@ -109,6 +125,24 @@ proc c_crypto_sign_verify_detached(sig: ptr UncheckedArray[byte];
 
 proc c_crypto_scalarmult(q, n, p: ptr UncheckedArray[byte]): cint
   {.importc: "crypto_scalarmult", header: "<sodium.h>".}
+
+proc c_crypto_core_ristretto255_is_valid_point(p: ptr UncheckedArray[byte]): cint
+  {.importc: "crypto_core_ristretto255_is_valid_point", header: "<sodium.h>".}
+
+proc c_crypto_core_ristretto255_from_hash(p, r: ptr UncheckedArray[byte]): cint
+  {.importc: "crypto_core_ristretto255_from_hash", header: "<sodium.h>".}
+
+proc c_crypto_scalarmult_ristretto255(q, n, p: ptr UncheckedArray[byte]): cint
+  {.importc: "crypto_scalarmult_ristretto255", header: "<sodium.h>".}
+
+proc c_crypto_scalarmult_ristretto255_base(q, n: ptr UncheckedArray[byte]): cint
+  {.importc: "crypto_scalarmult_ristretto255_base", header: "<sodium.h>".}
+
+proc c_sodium_library_version_major(): cint
+  {.importc: "sodium_library_version_major", header: "<sodium.h>".}
+
+proc c_sodium_library_version_minor(): cint
+  {.importc: "sodium_library_version_minor", header: "<sodium.h>".}
 
 var sodiumInitState: Atomic[int]
   ## 0 = not started, 1 = in progress, 2 = done. See module doc comment.
@@ -248,6 +282,97 @@ proc sodiumScalarmult*(priv: array[32, byte]; pub: array[32, byte]): Option[arra
     cast[ptr UncheckedArray[byte]](addr q[0]),
     cast[ptr UncheckedArray[byte]](unsafeAddr priv[0]),
     cast[ptr UncheckedArray[byte]](unsafeAddr pub[0]))
+  if rc != 0: none(array[32, byte])
+  else: some(q)
+
+proc sodiumLibraryVersion*(): tuple[major, minor: int] =
+  ## Exposed for the ristretto255 differential suite's up-front version
+  ## gate (RFC-004 slice 8c, round-3 B1 register): the runtime-queried ABI
+  ## pair (`sodium_library_version_major`/`_minor`, NOT the compile-time
+  ## `SODIUM_LIBRARY_VERSION_MAJOR`/`_MINOR` header macros this file could
+  ## otherwise read at compile time -- this checks what actually got
+  ## dynamically linked at runtime, not what the build host's headers
+  ## declared). The `>= 1.0.18` comparison itself (the release that
+  ## introduced `crypto_core_ristretto255_*`/`crypto_scalarmult_ristretto255`)
+  ## lives in the test suite that consumes this, alongside the empirical
+  ## derivation of which (major, minor) pair that release corresponds to
+  ## -- this proc is a thin FFI query only, matching the module's existing
+  ## `sodiumVerifyDetached`/`sodiumScalarmult` register (oracle-only,
+  ## business logic left to the caller).
+  ensureSodiumInit()
+  (int(c_sodium_library_version_major()), int(c_sodium_library_version_minor()))
+
+proc sodiumRistrettoIsValidPoint*(p: array[32, byte]): bool =
+  ## `crypto_core_ristretto255_is_valid_point` -- the decode-verdict oracle
+  ## for the A.1 (accept)/A.2 (reject) differential suite and the random
+  ## 32-byte-candidate sweep. Returns `true` iff libsodium's own ristretto255
+  ## decoder accepts `p`; never touches `p`'s bytes beyond that.
+  ensureSodiumInit()
+  let rc = c_crypto_core_ristretto255_is_valid_point(
+    cast[ptr UncheckedArray[byte]](unsafeAddr p[0]))
+  rc == 1
+
+proc sodiumRistrettoFromHash*(r: array[64, byte]): array[32, byte] =
+  ## `crypto_core_ristretto255_from_hash` -- the one-way hash-to-group map
+  ## oracle (RFC 9496 SS4.3.4's `MAP`-plus-add element derivation function,
+  ## the same operation `sello/ristretto.ristrettoFromUniformBytes` performs
+  ## in pure Nim) for the A.3 differential suite and the random 64-byte-input
+  ## sweep. Total on its input domain -- see `ristrettoFromUniformBytes`'s
+  ## own doc comment for why sello's side needs no `Option` here either; the
+  ## `doAssert` below is a self-checking-FFI-boundary confirmation
+  ## (RFC-001 ledger finding 20's register) that libsodium's own
+  ## documented-infallible contract holds in this build, not a defensive
+  ## error path this function's signature otherwise implies.
+  ensureSodiumInit()
+  var p: array[32, byte]
+  let rc = c_crypto_core_ristretto255_from_hash(
+    cast[ptr UncheckedArray[byte]](addr p[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr r[0]))
+  doAssert rc == 0, "crypto_core_ristretto255_from_hash failed with rc=" & $rc
+  p
+
+proc sodiumRistrettoScalarmult*(n: array[32, byte]; p: array[32, byte]): Option[array[32, byte]] =
+  ## `crypto_scalarmult_ristretto255` -- the variable-base scalarmult value
+  ## oracle for the differential suite's scalarmult-agreement checks
+  ## (`sello/ristretto.ristrettoScalarmult`/`ristrettoScalarmultVartime`).
+  ##
+  ## Same `none`-on-failure register as `sodiumScalarmult` above, but a
+  ## DIFFERENT failure condition: libsodium documents this call as failing
+  ## (`rc != 0`) whenever the literal 256-bit multiple `n*p` is the identity
+  ## element -- including simply because `n` is the all-zero scalar --
+  ## deliberately, so a caller cannot mistake a degenerate all-zero DH output
+  ## for a real shared secret (see the header's own "do not use the result
+  ## of this function directly for key exchange" note). This is NOT a
+  ## disagreement with sello's math: `sello/ristretto`'s scalarmult family
+  ## returns `RistrettoIdentity` as an ordinary, valid result (the group
+  ## element type carries no accept/reject verdict of its own -- see that
+  ## module's doc comment), it just never refuses to report it. Verified
+  ## empirically against this exact build (not assumed): `n = 0` and
+  ## `n` = the literal group order `L` (whose 256-bit product with any
+  ## order-`L` point is the identity) both return `rc = -1`, while
+  ## `n = L + 1` (a nonzero-mod-`L` scalar) returns `rc = 0` with `n*p == p`.
+  ## The differential suite's agreement predicate is therefore
+  ## `(sodium succeeded and bytes match) or (sodium failed and sello's own
+  ## result is RistrettoIdentity)`, not raw byte equality alone.
+  ensureSodiumInit()
+  var q: array[32, byte]
+  let rc = c_crypto_scalarmult_ristretto255(
+    cast[ptr UncheckedArray[byte]](addr q[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr n[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr p[0]))
+  if rc != 0: none(array[32, byte])
+  else: some(q)
+
+proc sodiumRistrettoScalarmultBase*(n: array[32, byte]): Option[array[32, byte]] =
+  ## `crypto_scalarmult_ristretto255_base` -- the fixed-base counterpart of
+  ## `sodiumRistrettoScalarmult` above (oracle for
+  ## `sello/ristretto.ristrettoScalarmultBase`), sharing the exact same
+  ## identity-result failure register -- see that proc's doc comment.
+  ensureSodiumInit()
+  var q: array[32, byte]
+  let rc = c_crypto_scalarmult_ristretto255_base(
+    cast[ptr UncheckedArray[byte]](addr q[0]),
+    cast[ptr UncheckedArray[byte]](unsafeAddr n[0]))
   if rc != 0: none(array[32, byte])
   else: some(q)
 
