@@ -3,7 +3,12 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 8b (slice 8a implemented and
+- **Resume:** grind loop RUNNING at slice 8c (slice 8b implemented and
+  committed dc42755 — 20-mutant ristretto batch, catalog 50 -> 70, 70/70
+  killed, 0 survivors; scripts/test.sh green; see the slice-8b ledger entry
+  below for the full breakdown, incl. the S07 re-anchoring side-quest).
+  Next: 8c libsodium differential KATs (test-libsodium.sh, needs the
+  sello-dev image). Slice 8a implemented and
   committed 4026895 — ristrettoDecode joins fuzz_external_target.nim as
   mode byte 3, dispatch arm mirrors pointDecode's determinism +
   accept-implies-identity-re-encode oracle shape; fuzz_common.nim/
@@ -211,8 +216,37 @@
       accepted (0 dropped), 0 crashes; the pre-existing three targets
       unaffected (291-560 edges each, 0 crashes). scripts/test.sh green:
       11 unit files + 5 property files, zero failures.)
-- [ ] 8b mutation (new-mutant batch incl. geScalarmultCT, feSqrtRatioM1-check,
-      feEqualCT/feAbs mutants; 0 survivors)
+- [x] 8b mutation — commit dc42755 (20-mutant batch, catalog 50 -> 70, all
+      RFC-named targets covered: geScalarmultCT (S21 doubling-count
+      off-by-one, S22 table-build select flip, S23 accumulator-seed error
+      -- the same defect class 7a's own side-quest caught in
+      scalarmultVartime, reproduced deliberately here, S24 digit-sign
+      flip), feSqrtRatioM1's three checks flipped individually (F28/F29/F30,
+      distinct from F23/F24's correction-select/final-abs targets),
+      feEqualCT's or-to-and accumulate (F26) plus feBytesCanonicalCT's own
+      copy of the same defect (F27, in-scope judgment call: same shape,
+      distinct function, decode's canonicity gate), feAbs's CT_ABS
+      condition flip (F25), ristrettoDecode's five RFC 9496 SS4.3.1
+      reject-condition flips (R01-R05), ristrettoEncode's rotation and
+      negation condition flips (R06/R07), RistrettoPoint `==`'s top-level
+      bitwise or-to-and combine flip (R08, doubling as the anchor on the
+      bitwise-combine shape the RFC names), and ristrettoMap's two
+      was_square select flips (R09/R10, s and c). Side-quest finding: S07
+      (scalarmultVartime's pre-existing loop-bound mutant) was silently
+      broken by slice 7a's unrelated addition of geScalarmultCT -- that
+      function's own 'for i in countdown(63, 0):' loop (4-space indent)
+      collided with S07's 2-space-indent OLD block under plain substring
+      matching (run_mutation.py's Mutant.apply uses str.count, not
+      line-anchored matching), so any run touching S07 would have aborted
+      with a hard ">1 occurrences" RuntimeError before this slice.
+      Re-anchored to a two-line OLD block scoped to scalarmultVartime's own
+      loop body (the round-3 batch A re-anchoring precedent); same target,
+      same defect class, no other existing mutant found affected by the
+      same collision class in a full-catalog re-verification pass.
+      scripts/mutation.sh: 70/70 killed (all KILLED (test), 0
+      compile-error, 0 timeout), 0 survivors, 566s wall clock.
+      scripts/test.sh green: 11 unit files + 5 property files, 303 [OK]
+      checks.
 - [ ] 8c libsodium differential KATs (A.1/A.2/A.3 + random sweep through both
       backends, verdict-and-value agreement, libsodium ≥ 1.0.18 version assert,
       via test-libsodium.sh)
