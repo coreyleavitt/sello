@@ -3,7 +3,13 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 7b (slice 7a finished and
+- **Resume:** grind loop PAUSED after slice 7b (implementation committed
+  6b1cd47 — four dudect targets added; ristrettoScalarmult and
+  ristrettoFromUniformBytes clean; `` `==` ``/ristrettoEncode standing
+  verdict OPEN, see "Open forks" below — do NOT auto-advance to 8a until
+  Corey has picked an option there, since 8a's fuzz/mutation work does not
+  depend on this fork but the RFC's own close-out gate (8d, "final
+  full-matrix run") does; slice 7a finished and
   committed 5a00b26; slice 6 finished and
   committed 97fd40e; slice 5b finished and
   committed 3b8a778; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
@@ -145,10 +151,32 @@
       share that blind spot. scripts/test.sh green: 11 unit files + 5
       property files, zero failures, 303 [OK] checks, Wycheproof
       unchanged.)
-- [ ] 7b timing battery (FOUR dudect targets: ristrettoScalarmult,
-      ristrettoEncode, `==` with (P,P)-vs-(P,Q) classes,
-      ristrettoFromUniformBytes; inline rejection-sampling point generator in
-      ct_main; quiet-host ct.sh run)
+- [~] 7b timing battery — commit 6b1cd47 (FOUR dudect targets added to
+      ct_main.nim: ristrettoScalarmult, ristrettoEncode, `==` with
+      (P,P)-vs-(P,Q) classes, ristrettoFromUniformBytes; inline
+      rejection-sampling point generator. ristrettoScalarmult and
+      ristrettoFromUniformBytes PASS cleanly and consistently across every
+      run taken. ristrettoEncode and `==` do NOT have a clean standing
+      verdict: `==`'s naive single-call design (the RFC's own specified
+      class shape) FAILed in two full-battery runs; extensive investigation
+      (three rounds of batched-measurement redesigns plus two non-shipped
+      diagnostics, full writeup in docs/ct-results.md) proved the signal is
+      NOT verdict-dependent (a fixed-but-always-unequal control target
+      showed an equally large spurious |t|) and traced it to the harness's
+      own fixed-vs-random class construction becoming visible against this
+      operation's unusually small per-call cost (~800-900 cycles, 30-600x
+      smaller than every other target) — not a secret-dependent branch or
+      index in the implementation, which is provably straight-line CT code.
+      No batched design achieved a clean full-battery pass, so the shipped
+      code reverts to the simple single-call design. A final confirmation
+      run showed `==` land in WARN (not FAIL) and ristrettoEncode ALSO show
+      WARN for the first time, alongside an unrelated PRE-EXISTING target
+      (x25519 static DH, previously always clean) failing in that same
+      run — read as evidence of run-level noise beyond what the preflight
+      banner captured, not a new independent finding, but this means the
+      standing verdict for two of the four new targets is genuinely
+      ambiguous across runs rather than a confirmed clean pass. NOT marked
+      done: see "Open forks" below for the decision this needs from Corey.
 - [ ] 8a fuzzing (mode byte/dispatch arm/strategy-encoder/A.1 seeds/
       "three oracles" doc-comment updates; smoke campaign)
 - [ ] 8b mutation (new-mutant batch incl. geScalarmultCT, feSqrtRatioM1-check,
@@ -167,7 +195,37 @@
       CLAUDE.md, version 0.4.0, final full-matrix run)
 
 ## Open forks (awaiting Corey)
-- None. The slice-4 torsion wrong-spec escalation was RESOLVED 2026-08-14:
+- **Slice 7b `` ristretto.`==` ``/`ristrettoEncode` dudect standing
+  verdict — OPEN, awaiting Corey's decision (2026-08-14).** Full
+  investigation in `docs/ct-results.md` ("RFC-004 slice 7b: four
+  ristretto255 dudect targets"). Summary: `` ristretto.`==` ``'s naive
+  single-call RFC-specified class design FAILed twice; a rigorous,
+  multi-round investigation (three batched-measurement redesigns, two
+  non-shipped diagnostics) proved the signal does NOT track the
+  comparison's actual TRUE/FALSE verdict (a fixed-but-always-unequal
+  control target showed an equally large spurious |t|), pointing instead
+  at a harness resolution-floor artifact for very fast primitives
+  (~800-900 cycles, 30-600x smaller than every other dudect target in this
+  codebase) rather than a genuine secret-dependent leak — the source is
+  provably straight-line CT code built on already machine-checked
+  primitives. No batched redesign achieved a clean pass at full-battery
+  scale, so the shipped code reverted to the simple design. A final
+  confirmation run landed `` `==` `` in WARN (not FAIL) but also showed
+  `ristrettoEncode` WARN for the first time and an UNRELATED, previously
+  always-clean pre-existing target (`x25519(static) vs peer`) FAIL in that
+  same run — evidence of broader run-level noise, but it means neither
+  target has a clean, reproducible PASS on file yet. This is NOT treated
+  as a confirmed leak (do not block the RFC on that basis) and NOT treated
+  as resolved (do not mark 7b done) — options for Corey: (a) accept the
+  WARN-band result with this writeup as the investigation
+  `dudect.nim`'s own documented policy requires and proceed to slice 8a;
+  (b) commission one more full-battery run on a dedicated, verified-quiet
+  host (no shared containers) as a tiebreaker; (c) adopt a policy carve-out
+  excluding sub-1000-cycle operations from the |t| < 4.5 clean-pass bar,
+  mirroring `ristrettoDecode`'s existing RFC-sanctioned carve-out (a
+  different rationale — public input — but the same "not every operation
+  fits this instrument" register). Implementation commit: 6b1cd47.
+- The slice-4 torsion wrong-spec escalation was RESOLVED 2026-08-14:
   Corey approved the recommended amendment (E[4]-only invariance + order-8
   negative companion + [2]E/E[4] Context reframe), applied in RFC commit
   13cd03c and implemented/committed in slice-4 commit 7eadac7 — see the RFC's
