@@ -3,7 +3,8 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 7a (slice 6 finished and
+- **Resume:** grind loop RUNNING at slice 7b (slice 7a finished and
+  committed 5a00b26; slice 6 finished and
   committed 97fd40e; slice 5b finished and
   committed 3b8a778; torsion escalation RESOLVED 2026-08-14: Corey approved; RFC
   amended to E[4]-only + order-8 negative companion + [2]E/E[4] Context
@@ -111,12 +112,39 @@
       (re-decode cleanly); determinism + valid-output properties over
       random 64-byte inputs via proptest. scripts/test.sh green: 11 unit
       files + 5 property files, zero failures.)
-- [ ] 7a CT variable-base scalarmult (scalar.geScalarmultCT, UNIFORM 256-doubling
-      interleaved ladder, table build via geAdd→geP1P1ToP3→geP3ToCached, wipe
-      list incl. the two per-iteration temporaries, written loop-composition
-      argument in the module doc, optional geP3Identity consolidation;
-      ristrettoScalarmult plain-static + sink-ephemeral wrappers;
-      reject_ristretto_ephemeral_reuse fixture; three-way agreement)
+- [x] 7a CT variable-base scalarmult — commit 5a00b26 (scalar.geScalarmultCT:
+      UNIFORM 256-doubling interleaved ladder, identity start, no
+      initial-load special case; runtime 8-entry GeCached table
+      (1P..8P) via geAdd→geP1P1ToP3→geP3ToCached — scalarmultVartime's
+      own table-build pattern, public, not CT; per-digit lookup via
+      unchanged cmovCached; wipe list — sBytes, digits, acc, and the two
+      per-iteration temporaries u/step, declared once outside the loop
+      and wiped once after (geScalarmultBase's own pattern) — debug-only
+      bit-255 assert; written loop-composition argument in the module doc
+      (shape/selection/recoding, the symex_reduce decline precedent);
+      geP3Identity helper added and used to consolidate the THREE inline
+      identity constructions (scalarmultVartime, geScalarmultBase, and
+      this function). ristrettoScalarmult: plain borrow overload
+      (RistrettoStaticSecret) + sink-consuming overload
+      (RistrettoEphemeralSecret, the ElGamal/ECIES borrow-then-consume
+      shape); reject_ristretto_ephemeral_reuse fixture,
+      subprocess-nim-c-verified. Three-way agreement (CT variable-base vs
+      vartime, and at the base point vs CT fixed-base) as deterministic
+      AND property tests, plus boundary scalars (0, 1, L-1, L) on the
+      variable-base path, plus direct scalar.nim-level coverage of
+      geScalarmultCT against scalarmultVartime over several arbitrary
+      points. Side-quest finding: cross-checking geScalarmultCT against
+      scalarmultVartime at s=0 via pointEncode caught a pre-existing bug
+      in scalarmultVartime — for an all-zero scalar the digit loop never
+      assigned its `var r: GeP3` output param, so callers got Nim's
+      implicit all-zero object instead of the identity; masked in prior
+      coverage because RistrettoPoint's quotient `==` degenerately treats
+      the all-zero representation as equal to the identity. Fixed by
+      seeding the accumulator with the identity up front; regression-
+      pinned via pointEncode comparison (test_scalar.nim), which does not
+      share that blind spot. scripts/test.sh green: 11 unit files + 5
+      property files, zero failures, 303 [OK] checks, Wycheproof
+      unchanged.)
 - [ ] 7b timing battery (FOUR dudect targets: ristrettoScalarmult,
       ristrettoEncode, `==` with (P,P)-vs-(P,Q) classes,
       ristrettoFromUniformBytes; inline rejection-sampling point generator in
