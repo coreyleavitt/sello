@@ -1,0 +1,8 @@
+id: F27
+target: src/sello/field.nim
+desc: feBytesCanonicalCT: same or-to-and accumulate corruption as F26's feEqualCT mutant, in the CT canonicity check ristrettoDecode's accept gate depends on, 'diff = diff or (roundTrip[i] xor bytes[i])' -> 'diff = diff and (roundTrip[i] xor bytes[i])' -- most non-canonical (>= p) encodings would spuriously round-trip as canonical. RFC-004 slice 8b.
+====OLD====
+    diff = diff or (roundTrip[i] xor bytes[i])
+====NEW====
+    diff = diff and (roundTrip[i] xor bytes[i])
+====END====

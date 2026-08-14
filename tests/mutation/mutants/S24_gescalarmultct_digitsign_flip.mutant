@@ -1,0 +1,8 @@
+id: S24
+target: src/sello/scalar.nim
+desc: geScalarmultCT: per-iteration table lookup negates the signed radix-16 digit before selection, 'cmovCached(u, table, digits[i])' -> 'cmovCached(u, table, -digits[i])' -- computes [-s]p (the group inverse of the intended multiple) for every nonzero scalar. Targets geScalarmultCT's own call site specifically (distinct from S08/S09, which mutate cmovCached's shared internals and are already exercised by both geScalarmultBase and geScalarmultCT). RFC-004 slice 8b's "digit-sign flip" target.
+====OLD====
+      cmovCached(u, table, digits[i])
+====NEW====
+      cmovCached(u, table, -digits[i])
+====END====

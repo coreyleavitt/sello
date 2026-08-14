@@ -1,0 +1,8 @@
+id: R10
+target: src/sello/ristretto.nim
+desc: ristrettoMap: the c CT_SELECT condition inverted, 'feCMove(c, r, not wasSquare)' -> 'feCMove(c, r, wasSquare)' -- selects r exactly when was_square holds (the case RFC 9496 §4.3.4 says c should stay -1), corrupting the numerator N's sign term for every square case. Second instance of RFC-004 slice 8b's "the map's was_square select flip" target, alongside R09.
+====OLD====
+  feCMove(c, r, not wasSquare)
+====NEW====
+  feCMove(c, r, wasSquare)
+====END====

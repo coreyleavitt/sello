@@ -1,0 +1,8 @@
+id: R05
+target: src/sello/ristretto.nim
+desc: ristrettoDecode: y=0 reject term inverted, 'yZero' -> '(not yZero)' in the verdict combine -- rejects every nonzero-y point (essentially everything) and accepts only y=0, the opposite of RFC 9496 §4.3.1's final reject condition. RFC-004 slice 8b.
+====OLD====
+  if (not canonical) or sNegative or (not wasSquare) or tNegative or yZero:
+====NEW====
+  if (not canonical) or sNegative or (not wasSquare) or tNegative or (not yZero):
+====END====

@@ -1,0 +1,10 @@
+id: S21
+target: src/sello/scalar.nim
+desc: geScalarmultCT: per-digit doubling count off-by-one, 'for _ in 0 ..< 4: acc = geP3Double(acc)' -> '0 ..< 3', scaling the accumulator by 8 instead of 16 at each of the 64 digit positions in the uniform interleaved ladder -- computes the wrong multiple for every nonzero scalar. The geScalarmultCT-specific sibling of S14's geScalarmultBase mutant (RFC-004 slice 8b).
+====OLD====
+      for _ in 0 ..< 4:
+        acc = geP3Double(acc)
+====NEW====
+      for _ in 0 ..< 3:
+        acc = geP3Double(acc)
+====END====

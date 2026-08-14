@@ -1,0 +1,8 @@
+id: R09
+target: src/sello/ristretto.nim
+desc: ristrettoMap: the s CT_SELECT condition inverted, 'feCMove(s, negAbsSt, not wasSquare)' -> 'feCMove(s, negAbsSt, wasSquare)' -- takes the negated-absolute-value branch exactly when was_square holds (the case RFC 9496 §4.3.4 says to keep the candidate root unchanged) and vice versa. RFC-004 slice 8b's "the map's was_square select flip" target.
+====OLD====
+  feCMove(s, negAbsSt, not wasSquare)
+====NEW====
+  feCMove(s, negAbsSt, wasSquare)
+====END====

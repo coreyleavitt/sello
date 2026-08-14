@@ -1,0 +1,8 @@
+id: F30
+target: src/sello/field.nim
+desc: feSqrtRatioM1: flipped_sign_sqrt_i's own check target flipped, 'feEqualCT(check, negUSqrtM1)' -> 'feEqualCT(check, u)' -- loses the third check's own defining condition (RFC 9496 §4.2's flipped_sign_sqrt_i, v*r^2 == -u*SQRT_M1) entirely, the branch the false-branch root's own defining-equation test (root^2 == SQRT_M1*u/v on known non-squares) exists to catch. One of the "three checks flipped individually" mutants the RFC's slice 8b calls for, distinct from F23/F24.
+====OLD====
+  let flippedSignSqrtI = feEqualCT(check, negUSqrtM1)
+====NEW====
+  let flippedSignSqrtI = feEqualCT(check, u)
+====END====

@@ -1,0 +1,8 @@
+id: R07
+target: src/sello/ristretto.nim
+desc: ristrettoEncode: final sign-correction select inverted, 'feCMove(y, negY, feIsNegative(xZinv))' -> 'feCMove(y, negY, not feIsNegative(xZinv))' -- negates y exactly when x*z_inv is already nonnegative and leaves it alone exactly when negation is required, producing the wrong-sign encoding for every non-degenerate point. RFC-004 slice 8b's "encode's ... negation condition flip" target.
+====OLD====
+  feCMove(y, negY, feIsNegative(xZinv))
+====NEW====
+  feCMove(y, negY, not feIsNegative(xZinv))
+====END====

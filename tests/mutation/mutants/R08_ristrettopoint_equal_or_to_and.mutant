@@ -1,0 +1,8 @@
+id: R08
+target: src/sello/ristretto.nim
+desc: RistrettoPoint `==`: top-level bitwise combine changed from or to and, 'bool(uint8(eq1) or uint8(eq2))' -> 'bool(uint8(eq1) and uint8(eq2))' -- RFC 9496 §4.3.3's quotient equality requires EITHER cross-product check to hold (x1*y2 == y1*x2 OR y1*y2 == x1*x2); requiring BOTH rejects most genuinely-equal representative pairs of the same element. RFC-004 slice 8b's named "equality's or->and" mutant, also anchoring the bitwise-combine shape the module doc calls out as the one place a short-circuit rewrite would break the OLD-string match.
+====OLD====
+  bool(uint8(eq1) or uint8(eq2))
+====NEW====
+  bool(uint8(eq1) and uint8(eq2))
+====END====

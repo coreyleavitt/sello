@@ -1,0 +1,8 @@
+id: F26
+target: src/sello/field.nim
+desc: feEqualCT: bitwise or-accumulate changed to and-accumulate, 'diff = diff or (ab[i] xor bb[i])' -> 'diff = diff and (ab[i] xor bb[i])' -- a single differing byte no longer forces diff nonzero once any earlier byte pair's xor happened to and to zero with the running value, so most unequal field elements would spuriously compare equal. RFC-004 slice 8b.
+====OLD====
+    diff = diff or (ab[i] xor bb[i])
+====NEW====
+    diff = diff and (ab[i] xor bb[i])
+====END====

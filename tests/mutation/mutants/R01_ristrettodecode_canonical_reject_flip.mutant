@@ -1,0 +1,8 @@
+id: R01
+target: src/sello/ristretto.nim
+desc: ristrettoDecode: canonicity reject term inverted, 'if (not canonical) or ...' -> 'if canonical or ...' -- rejects every canonical encoding and accepts non-canonical (>= p) ones instead, the opposite of RFC 9496 §4.3.1 step 1. RFC-004 slice 8b.
+====OLD====
+  if (not canonical) or sNegative or (not wasSquare) or tNegative or yZero:
+====NEW====
+  if canonical or sNegative or (not wasSquare) or tNegative or yZero:
+====END====

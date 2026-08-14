@@ -1,0 +1,12 @@
+id: S23
+target: src/sello/scalar.nim
+desc: geScalarmultCT: accumulator declared without its identity seed, 'var acc: GeP3 = geP3Identity()' -> 'var acc: GeP3' -- leaves acc as Nim's implicit all-zero GeP3 (x=0, y=0, z=0, t=0) instead of the group identity (0,1,1,0) before the ladder's first iteration. The same defect class RFC-004 slice 7a's own side-quest caught in scalarmultVartime's s=0 path (a pre-existing bug fixed in that slice), reproduced here on the CT variable-base ladder for every call. RFC-004 slice 8b.
+====OLD====
+  var acc: GeP3 = geP3Identity()
+  var u: GeCached
+  var step: GeP1P1
+====NEW====
+  var acc: GeP3
+  var u: GeCached
+  var step: GeP1P1
+====END====

@@ -1,0 +1,8 @@
+id: F25
+target: src/sello/field.nim
+desc: feAbs: CT_ABS select condition inverted, 'feCMove(r, negR, feIsNegative(r))' -> 'feCMove(r, negR, not feIsNegative(r))' -- selects the negated value exactly when r is already nonnegative and leaves r unchanged (still negative) exactly when negation is actually required, defeating the nonnegative-normalization CT_ABS exists to guarantee (RFC 9496 §4.2, consumed by feSqrtRatioM1/ristrettoEncode/the map). RFC-004 slice 8b.
+====OLD====
+  feCMove(r, negR, feIsNegative(r))
+====NEW====
+  feCMove(r, negR, not feIsNegative(r))
+====END====

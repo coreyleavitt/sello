@@ -1,0 +1,8 @@
+id: R03
+target: src/sello/ristretto.nim
+desc: ristrettoDecode: was_square reject term inverted, '(not wasSquare)' -> 'wasSquare' in the verdict combine -- rejects every square case (the intended accept path) and accepts every non-square case instead. RFC-004 slice 8b.
+====OLD====
+  if (not canonical) or sNegative or (not wasSquare) or tNegative or yZero:
+====NEW====
+  if (not canonical) or sNegative or wasSquare or tNegative or yZero:
+====END====

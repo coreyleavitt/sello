@@ -1,0 +1,8 @@
+id: F29
+target: src/sello/field.nim
+desc: feSqrtRatioM1: flipped_sign_sqrt's own check target flipped, 'feEqualCT(check, negU)' -> 'feEqualCT(check, u)' -- duplicates correct_sign_sqrt's comparison exactly, losing the SQRT_M1-correction branch's own trigger condition (RFC 9496 §4.2's second of three checks). One of the "three checks flipped individually" mutants the RFC's slice 8b calls for, distinct from F23/F24.
+====OLD====
+  let flippedSignSqrt = feEqualCT(check, negU)
+====NEW====
+  let flippedSignSqrt = feEqualCT(check, u)
+====END====

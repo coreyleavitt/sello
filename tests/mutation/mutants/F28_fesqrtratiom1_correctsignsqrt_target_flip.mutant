@@ -1,0 +1,8 @@
+id: F28
+target: src/sello/field.nim
+desc: feSqrtRatioM1: correct_sign_sqrt's own check target flipped, 'feEqualCT(check, u)' -> 'feEqualCT(check, negU)' -- duplicates flipped_sign_sqrt's comparison exactly, losing the primitive's ability to recognize the directly-correct candidate root (RFC 9496 §4.2's first of three checks). One of the "three checks flipped individually" mutants the RFC's slice 8b calls for, distinct from F23 (the correction-select combine) and F24 (the final feAbs normalization).
+====OLD====
+  let correctSignSqrt = feEqualCT(check, u)
+====NEW====
+  let correctSignSqrt = feEqualCT(check, negU)
+====END====

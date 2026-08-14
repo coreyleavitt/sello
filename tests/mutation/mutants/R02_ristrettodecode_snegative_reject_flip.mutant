@@ -1,0 +1,8 @@
+id: R02
+target: src/sello/ristretto.nim
+desc: ristrettoDecode: negative-s reject term inverted, 'sNegative' -> '(not sNegative)' in the verdict combine -- rejects nonnegative s and accepts negative s instead, the opposite of RFC 9496 §4.3.1 step 2. RFC-004 slice 8b.
+====OLD====
+  if (not canonical) or sNegative or (not wasSquare) or tNegative or yZero:
+====NEW====
+  if (not canonical) or (not sNegative) or (not wasSquare) or tNegative or yZero:
+====END====
