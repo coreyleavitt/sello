@@ -28,7 +28,7 @@
 ## "verify-only, no CT requirement" (this codebase's `ed25519.verify`
 ## posture) does not apply here the way it does there.
 ##
-## **Slice 5b scope** (this file, so far -- superseding slice 5a's own
+## **Slice 6 scope** (this file, so far -- superseding slice 5b's own
 ## summary, which this paragraph always restates as current state):
 ## everything slice 4 landed (`RistrettoPoint`/`RistrettoEncoded` and their
 ## basic borrows, the `ristrettoUnchecked` construction door, quotient
@@ -45,12 +45,17 @@
 ## secret material -- accepts only a bare `array[32, byte]`), PLUS the
 ## single-use ephemeral secret role (`RistrettoEphemeralSecret`, the
 ## `x25519.X25519EphemeralSecret` shape -- move-only, fresh-only, no
-## `toBytes`) and its own borrow-only `ristrettoScalarmultBase` overload.
+## `toBytes`) and its own borrow-only `ristrettoScalarmultBase` overload,
+## PLUS the one-way hash-to-group map (RFC 9496 SS4.3.4):
+## `ristrettoFromUniformBytes`, its private `ristrettoMap` helper, and the
+## three remaining SS4.1 implementation constants (`OneMinusDSq`,
+## `DMinusOneSq`, `SqrtAdMinusOne` -- `InvSqrtAMinusD` already landed with
+## encode in slice 3).
 ## NOT yet present: the CT variable-base scalarmult (`scalar.geScalarmultCT`
 ## / `ristrettoScalarmult`, including `RistrettoEphemeralSecret`'s own
-## CONSUMING overload, which needs it), the one-way map, or a facade
-## export -- later slices. `RistrettoPoint` has deliberately no `wipe`
-## overload even once those land: see its own doc comment below.
+## CONSUMING overload, which needs it), or a facade export -- later slices.
+## `RistrettoPoint` has deliberately no `wipe` overload even once those
+## land: see its own doc comment below.
 ##
 ## **Hash-the-encoding, not the point:** there is deliberately no
 ## `hash(RistrettoPoint)`. A hash must agree with `==`, and hashing any
@@ -891,5 +896,178 @@ func ristrettoScalarmultBase*(secret: RistrettoEphemeralSecret): RistrettoPoint 
     result = ristrettoUnchecked(geScalarmultBase(sc))
   finally:
     ct.wipe(sc)
+
+# ---------------------------------------------------------------------------
+# Hash-to-group -- RFC 9496 SS4.3.4 (RFC-004 slice 6)
+# ---------------------------------------------------------------------------
+
+const OneMinusDSq* = feFromBytes([
+  0x76'u8, 0xc1, 0x5f, 0x94, 0xc1, 0x09, 0x7c, 0xe2,
+  0x0f, 0x35, 0x5e, 0xcd, 0x38, 0xa1, 0x81, 0x2c,
+  0xe4, 0xdf, 0x70, 0xbe, 0xdd, 0xab, 0x94, 0x99,
+  0xd7, 0xe0, 0xb3, 0xb2, 0xa8, 0x72, 0x90, 0x02,
+])
+  ## RFC 9496 SS4.1: `ONE_MINUS_D_SQ = 1 - d^2`, one of the two MAP-only
+  ## denominator/numerator constants (the other is `DMinusOneSq` below).
+  ## Same compile-time-`feFromBytes`-from-spec-bytes mechanism as
+  ## `InvSqrtAMinusD` (see that constant's own doc comment for the full
+  ## rationale) -- the little-endian encoding of the decimal value RFC 9496
+  ## SS4.1 publishes for `ONE_MINUS_D_SQ`
+  ## (1159843021668779879193775521855586647937357759715417654439879720876
+  ## 111806838), the one transcribed artifact. Cross-checked against its
+  ## defining equation in `tests/unit/test_ristretto.nim`:
+  ## `OneMinusDSq == 1 - d^2` where `d = feFromLimbs(scalar.Ed25519D_Raw)`.
+  ## Exported (module-level, `InvSqrtAMinusD`'s own precedent) so that
+  ## cross-check can run from the test file -- like that constant, NOT
+  ## re-exported from the `sello` facade (see slice 8d's enumerated facade
+  ## list): the map is this constant's only real consumer, same as
+  ## `DMinusOneSq`/`SqrtAdMinusOne` below.
+
+const DMinusOneSq* = feFromBytes([
+  0x20'u8, 0x4d, 0xed, 0x44, 0xaa, 0x5a, 0xad, 0x31,
+  0x99, 0x19, 0x1e, 0xb0, 0x2c, 0x4a, 0x9e, 0xd2,
+  0xeb, 0x4e, 0x9b, 0x52, 0x2f, 0xd3, 0xdc, 0x4c,
+  0x41, 0x22, 0x6c, 0xf6, 0x7a, 0xb3, 0x68, 0x59,
+])
+  ## RFC 9496 SS4.1: `D_MINUS_ONE_SQ = (d - 1)^2`. Same mechanism, same
+  ## register as `OneMinusDSq` above -- the little-endian encoding of
+  ## (4044083434630853685810104246932319082624839914623870835224013322086
+  ## 5137265952). Cross-checked in-test against `DMinusOneSq == (d - 1)^2`.
+
+const SqrtAdMinusOne* = feFromBytes([
+  0x1b'u8, 0x2e, 0x7b, 0x49, 0xa0, 0xf6, 0x97, 0x7e,
+  0xbd, 0x54, 0x78, 0x1b, 0x0c, 0x8e, 0x9d, 0xaf,
+  0xfd, 0xd1, 0xf5, 0x31, 0xc9, 0xfc, 0x3c, 0x0f,
+  0xac, 0x48, 0x83, 0x2b, 0xbf, 0x31, 0x69, 0x37,
+])
+  ## RFC 9496 SS4.1: `SQRT_AD_MINUS_ONE = sqrt(a*d - 1)` where `a = -1` --
+  ## the map's final numerator-rotation multiplier (`w1 = N *
+  ## SQRT_AD_MINUS_ONE`). Same mechanism, same register as the two constants
+  ## above -- the little-endian encoding of
+  ## (2506306895338462347411141415870215270124453150249265646007921048261
+  ## 0430750235). Cross-checked in-test against
+  ## `SqrtAdMinusOne^2 == a*d - 1` where `a = -1`.
+
+func ristrettoMap(bytes: array[32, byte]): GeP3 =
+  ## RFC 9496 SS4.3.4's `MAP` function (Elligator 2 for ristretto255): takes
+  ## one 32-byte half of `ristrettoFromUniformBytes`'s input and returns an
+  ## extended-coordinate point that is ALWAYS well-formed and on-curve --
+  ## `MAP` is a total function on the field, so there is no accept/reject
+  ## verdict here at all (unlike `ristrettoDecode`), and consequently no CT
+  ## carve-out to state: every step below is unconditional straight-line
+  ## field arithmetic plus `feCMove` selects, start to finish.
+  ##
+  ## Private (module-internal, per the task's scope): `MAP` has no meaning
+  ## as a standalone group element derivation -- only
+  ## `ristrettoFromUniformBytes` (SS4.3.4 step 3, `P1 + P2`) produces an
+  ## actual `RistrettoPoint`, so this helper is not itself wrapped through
+  ## `ristrettoUnchecked` (the caller does that).
+  ##
+  ## `t = feFromBytes(bytes)`: the spec's step 1 ("mask the most significant
+  ## bit ... reduce r modulo p") is exactly what `feFromBytes` already does
+  ## unconditionally on every input -- it drops the top bit of byte 31
+  ## before decoding into limbs (the same fact `x25519.nim`'s own u-coordinate
+  ## decode comment records), and every subsequent `fe*` operation treats its
+  ## operands as residues mod p regardless of literal integer magnitude, so
+  ## no separate reduction step is needed. Unlike `ristrettoDecode`'s
+  ## canonicity check, non-canonical (>= p) 32-byte inputs are EXPLICITLY
+  ## accepted here (RFC 9496's own note on this step) -- consistent with
+  ## `ristrettoFromUniformBytes` being total.
+  let t = feFromBytes(bytes)
+
+  var tSq, r: Fe
+  feSq(tSq, t)
+  feMul(r, FeSqrtM1, tSq)                       # r = SQRT_M1 * t^2
+
+  let d = feFromLimbs(Ed25519D_Raw)
+
+  var rPlus1, u: Fe
+  feAdd(rPlus1, r, FeOne)
+  feMul(u, rPlus1, OneMinusDSq)                 # u = (r + 1) * ONE_MINUS_D_SQ
+
+  var negOne, rD, negOneMinusRD, rPlusD, v: Fe
+  feNeg(negOne, FeOne)
+  feMul(rD, r, d)
+  feSub(negOneMinusRD, negOne, rD)              # -1 - r*D
+  feAdd(rPlusD, r, d)                           # r + D
+  feMul(v, negOneMinusRD, rPlusD)               # v = (-1 - r*D) * (r + D)
+
+  let (wasSquare, sCandidate) = feSqrtRatioM1(u, v)
+
+  var st, absSt, negAbsSt: Fe
+  feMul(st, sCandidate, t)
+  absSt = st
+  feAbs(absSt)                                  # CT_ABS(s*t)
+  feNeg(negAbsSt, absSt)                        # s_prime = -CT_ABS(s*t)
+
+  var s = sCandidate
+  feCMove(s, negAbsSt, not wasSquare)
+    # s = CT_SELECT(s IF was_square ELSE s_prime)
+
+  var c = negOne
+  feCMove(c, r, not wasSquare)
+    # c = CT_SELECT(-1 IF was_square ELSE r)
+
+  var rMinus1, cRMinus1, cTerm, n: Fe
+  feSub(rMinus1, r, FeOne)
+  feMul(cRMinus1, c, rMinus1)
+  feMul(cTerm, cRMinus1, DMinusOneSq)
+  feSub(n, cTerm, v)                            # N = c*(r-1)*D_MINUS_ONE_SQ - v
+
+  var twoS, w0, w1, sSq, w2, w3: Fe
+  feAdd(twoS, s, s)
+  feMul(w0, twoS, v)                            # w0 = 2*s*v
+  feMul(w1, n, SqrtAdMinusOne)                  # w1 = N * SQRT_AD_MINUS_ONE
+  feSq(sSq, s)
+  feSub(w2, FeOne, sSq)                         # w2 = 1 - s^2
+  feAdd(w3, FeOne, sSq)                         # w3 = 1 + s^2
+
+  var x, y, z, tOut: Fe
+  feMul(x, w0, w3)
+  feMul(y, w2, w1)
+  feMul(z, w1, w3)
+  feMul(tOut, w0, w2)
+  result = GeP3(x: x, y: y, z: z, t: tOut)
+
+func ristrettoFromUniformBytes*(b: array[64, byte]): RistrettoPoint =
+  ## RFC 9496 SS4.3.4 Element Derivation: splits `b` into two 32-byte
+  ## halves, `MAP`s each independently, and adds the results
+  ## (`ristrettoUnchecked` wraps each `MAP` output before this module's own
+  ## `+` operator, which needs `RistrettoPoint`s, not raw `GeP3`s).
+  ##
+  ## A TOTAL function: `MAP` never rejects (see its own doc comment), so
+  ## every one of the 2^512 possible 64-byte inputs -- including the two
+  ## deterministic edge cases `tests/unit/test_ristretto.nim` pins by name,
+  ## all-zero and all-0xFF -- yields a valid `RistrettoPoint`. No `Option`,
+  ## unlike `ristrettoDecode`: hashing is the caller's job (RFC 9496 leaves
+  ## the hash-to-64-bytes step out of scope, and this module stays
+  ## nimcrypto-free by design -- see the module doc comment), but whatever
+  ## 64 bytes arrive here always produce SOME group element.
+  ##
+  ## **The `array[64, byte]` parameter IS the length check**, at compile
+  ## time, with no runtime failure path to design around -- deliberately no
+  ## `openArray[byte]` overload (that would trade a compile-time guarantee
+  ## for a runtime one on an otherwise-total function). A nimcrypto SHA-512
+  ## digest already has exactly this type (see `challenge.nim`'s own
+  ## `sha512.finish(var array[64, byte])` usage), but this module is
+  ## deliberately nimcrypto-free, so the EXPECTED caller arrives from some
+  ## other hash/XOF whose output is a `seq[byte]` or `string` -- for that
+  ## caller, the one checked-copy idiom to reach for is:
+  ##
+  ## .. code-block:: nim
+  ##   var buf: array[64, byte]
+  ##   doAssert digest.len == 64
+  ##   for i in 0 ..< 64: buf[i] = digest[i]
+  ##   let element = ristrettoFromUniformBytes(buf)
+  ##
+  ## (the `doAssert` is the "checked" half -- it fails loudly on a
+  ## mis-sized digest rather than silently truncating or index-erroring).
+  var half1, half2: array[32, byte]
+  for i in 0 ..< 32:
+    half1[i] = b[i]
+    half2[i] = b[32 + i]
+  let p1 = ristrettoUnchecked(ristrettoMap(half1))
+  let p2 = ristrettoUnchecked(ristrettoMap(half2))
+  p1 + p2
 
 {.pop.}

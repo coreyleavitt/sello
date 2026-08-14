@@ -608,3 +608,112 @@ suite "RistrettoEphemeralSecret -- move-only copy rejection (compile-time, subpr
     check exitCode != 0
     check "=copy" in output
 
+# ---------------------------------------------------------------------------
+# RFC-004 slice 6 -- hash-to-group (ristrettoFromUniformBytes / the MAP
+# function) and the three remaining SS4.1 implementation constants
+# ---------------------------------------------------------------------------
+
+proc hexToArray64(s: string): array[64, byte] =
+  doAssert s.len == 128
+  for i in 0 ..< 64:
+    result[i] = byte(parseHexInt(s[2 * i .. 2 * i + 1]))
+
+# RFC 9496 Appendix A.3 -- direct element-derivation-function input/output
+# pairs, transcribed from the published RFC (fetched directly, not from
+# memory -- see the task's own admonition re: summarizer-mangled hex).
+const A3DirectInputs: array[7, string] = [
+  "5d1be09e3d0c82fc538112490e35701979d99e06ca3e2b5b54bffe8b4dc772c14d98b696a1bbfb5ca32c436cc61c16563790306c79eaca7705668b47dffe5bb6",
+  "f116b34b8f17ceb56e8732a60d913dd10cce47a6d53bee9204be8b44f6678b270102a56902e2488c46120e9276cfe54638286b9e4b3cdb470b542d46c2068d38",
+  "8422e1bbdaab52938b81fd602effb6f89110e1e57208ad12d9ad767e2e25510c27140775f9337088b982d83d7fcf0b2fa1edffe51952cbe7365e95c86eaf325c",
+  "ac22415129b61427bf464e17baee8db65940c233b98afce8d17c57beeb7876c2150d15af1cb1fb824bbd14955f2b57d08d388aab431a391cfc33d5bafb5dbbaf",
+  "165d697a1ef3d5cf3c38565beefcf88c0f282b8e7dbd28544c483432f1cec7675debea8ebb4e5fe7d6f6e5db15f15587ac4d4d4a1de7191e0c1ca6664abcc413",
+  "a836e6c9a9ca9f1e8d486273ad56a78c70cf18f0ce10abb1c7172ddd605d7fd2979854f47ae1ccf204a33102095b4200e5befc0465accc263175485f0e17ea5c",
+  "2cdc11eaeb95daf01189417cdddbf95952993aa9cb9c640eb5058d09702c74622c9965a697a3b345ec24ee56335b556e677b30e6f90ac77d781064f866a3c982",
+]
+
+const A3DirectOutputs: array[7, string] = [
+  "3066f82a1a747d45120d1740f14358531a8f04bbffe6a819f86dfe50f44a0a46",
+  "f26e5b6f7d362d2d2a94c5d0e7602cb4773c95a2e5c31a64f133189fa76ed61b",
+  "006ccd2a9e6867e6a2c5cea83d3302cc9de128dd2a9a57dd8ee7b9d7ffe02826",
+  "f8f0c87cf237953c5890aec3998169005dae3eca1fbb04548c635953c817f92a",
+  "ae81e7dedf20a497e10c304a765c1767a42d6e06029758d2d7e8ef7cc4c41179",
+  "e2705652ff9f5e44d3e841bf1c251cf7dddb77d140870d1ab2ed64f1a9ce8628",
+  "80bd07262511cdde4863f8a7434cef696750681cb9510eea557088f76d9e5065",
+]
+
+# RFC 9496 Appendix A.3 -- the closing four-inputs-one-output convergence
+# set (exercises the map's many-to-one property directly -- round 3's own
+# undercount fix, see the RFC's Validation battery).
+const A3ConvergenceInputs: array[4, string] = [
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff1200000000000000000000000000000000000000000000000000000000000000",
+  "edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "0000000000000000000000000000000000000000000000000000000000000080ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
+  "00000000000000000000000000000000000000000000000000000000000000001200000000000000000000000000000000000000000000000000000000000080",
+]
+
+const A3ConvergenceOutput = "304282791023b73128d277bdcb5c7746ef2eac08dde9f2983379cb8e5ef0517f"
+
+suite "ristrettoFromUniformBytes -- RFC 9496 Appendix A.3 direct pairs (RFC-004 slice 6)":
+  test "each direct input maps to its labeled output":
+    for i in 0 ..< A3DirectInputs.len:
+      let point = ristrettoFromUniformBytes(hexToArray64(A3DirectInputs[i]))
+      check toBytes(ristrettoEncode(point)) == hexToArray32(A3DirectOutputs[i])
+
+suite "ristrettoFromUniformBytes -- RFC 9496 Appendix A.3 convergence set (RFC-004 slice 6)":
+  test "all four convergence-set inputs map to the same labeled output":
+    let expected = hexToArray32(A3ConvergenceOutput)
+    for i in 0 ..< A3ConvergenceInputs.len:
+      let point = ristrettoFromUniformBytes(hexToArray64(A3ConvergenceInputs[i]))
+      check toBytes(ristrettoEncode(point)) == expected
+
+  test "the four convergence-set points are pairwise equal via quotient ==, not just equal encodings":
+    var points: array[4, RistrettoPoint]
+    for i in 0 ..< A3ConvergenceInputs.len:
+      points[i] = ristrettoFromUniformBytes(hexToArray64(A3ConvergenceInputs[i]))
+    for i in 1 ..< points.len:
+      check points[i] == points[0]
+
+suite "ristrettoFromUniformBytes -- determinism and deterministic edge inputs (RFC-004 slice 6)":
+  test "same input twice yields equal points (determinism)":
+    let point1 = ristrettoFromUniformBytes(hexToArray64(A3DirectInputs[0]))
+    let point2 = ristrettoFromUniformBytes(hexToArray64(A3DirectInputs[0]))
+    check point1 == point2
+
+  test "all-zero 64-byte input maps to a valid element (re-decodes cleanly)":
+    let point = ristrettoFromUniformBytes(default(array[64, byte]))
+    let decoded = ristrettoDecode(ristrettoEncode(point))
+    check decoded.isSome
+    check decoded.get() == point
+
+  test "all-0xFF 64-byte input maps to a valid element (re-decodes cleanly)":
+    var allFF: array[64, byte]
+    for i in 0 ..< 64: allFF[i] = 0xFF'u8
+    let point = ristrettoFromUniformBytes(allFF)
+    let decoded = ristrettoDecode(ristrettoEncode(point))
+    check decoded.isSome
+    check decoded.get() == point
+
+suite "OneMinusDSq / DMinusOneSq / SqrtAdMinusOne -- defining equations (RFC 9496 SS4.1, RFC-004 slice 6)":
+  test "OneMinusDSq == 1 - d^2":
+    let d = feFromLimbs(Ed25519D_Raw)
+    var dSq, expected: Fe
+    feSq(dSq, d)
+    feSub(expected, FeOne, dSq)
+    check feEqualCT(OneMinusDSq, expected)
+
+  test "DMinusOneSq == (d - 1)^2":
+    let d = feFromLimbs(Ed25519D_Raw)
+    var dMinus1, expected: Fe
+    feSub(dMinus1, d, FeOne)
+    feSq(expected, dMinus1)
+    check feEqualCT(DMinusOneSq, expected)
+
+  test "SqrtAdMinusOne^2 == a*d - 1, where a = -1":
+    let d = feFromLimbs(Ed25519D_Raw)
+    var a, ad, expected, sq: Fe
+    feNeg(a, FeOne)
+    feMul(ad, a, d)
+    feSub(expected, ad, FeOne)
+    feSq(sq, SqrtAdMinusOne)
+    check feEqualCT(sq, expected)
+

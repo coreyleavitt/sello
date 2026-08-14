@@ -13,6 +13,11 @@
 ## exist to test. Available from slice 2 (`ristrettoDecode`) onward -- no
 ## property here or in a later slice needs to wait on the map or scalarmult
 ## for its point source.
+##
+## RFC-004 slice 6 adds `ristrettoFromUniformBytes`'s determinism and
+## valid-output properties (`randomBytes64`, a plain total generator with no
+## internal retry loop -- unlike `randomRistrettoPoints()` above, it needs no
+## special coverage-guided-engine handling).
 
 import std/[unittest, options]
 import proptest
@@ -216,3 +221,32 @@ suite "ristretto property: ristrettoScalarmultBase / ristrettoScalarmultVartime 
     ensure secretOpt.isSome
     let secret = secretOpt.get()
     ensure ristrettoScalarmultBase(secret) == ristrettoScalarmultVartime(toBytes(secret), RistrettoBasePoint)
+
+# ---------------------------------------------------------------------------
+# ristrettoFromUniformBytes -- determinism and valid-output (RFC-004 slice 6,
+# RFC 9496 SS4.3.4). `randomBytes64` is total (a plain `arrays[64, byte]`
+# draw, no `.filter()`), so `propertySettings50`'s coverage-guided default is
+# safe here -- unlike `randomRistrettoPoints()`, this generator has no
+# internal retry loop for the coverage-guided engine to get lost around (see
+# `settingsForPoints`'s doc comment above for that empirically-required
+# exception).
+# ---------------------------------------------------------------------------
+
+proc randomBytes64(): Strategy[array[64, byte]] =
+  arrays[64, byte](randByte())
+
+suite "ristretto property: ristrettoFromUniformBytes":
+  property "determinism: the same 64-byte input maps to equal points":
+    with propertySettings50
+    given bytes in randomBytes64()
+    let p1 = ristrettoFromUniformBytes(bytes)
+    let p2 = ristrettoFromUniformBytes(bytes)
+    ensure p1 == p2
+
+  property "valid output: the result always re-decodes to itself (the map is total)":
+    with propertySettings50
+    given bytes in randomBytes64()
+    let p = ristrettoFromUniformBytes(bytes)
+    let decoded = ristrettoDecode(ristrettoEncode(p))
+    ensure decoded.isSome
+    ensure decoded.get() == p
