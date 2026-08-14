@@ -3,7 +3,18 @@
 - **Stage:** 3 (implementation grind) — RFC APPROVED by Corey 2026-08-13 after
   three architect rounds. Slices implemented by sonnet subagents under the
   rfc-flow grind loop, one per iteration, per-slice commits on `main`.
-- **Resume:** grind loop RUNNING at slice 8a (slice 7b implemented and
+- **Resume:** grind loop RUNNING at slice 8b (slice 8a implemented and
+  committed 4026895 — ristrettoDecode joins fuzz_external_target.nim as
+  mode byte 3, dispatch arm mirrors pointDecode's determinism +
+  accept-implies-identity-re-encode oracle shape; fuzz_common.nim/
+  fuzz_main.nim gain the strategy/encoder pair (bytes32() reused) and
+  ristrettoDecodeSeeds() — all 16 RFC 9496 Appendix A.1 valid encodings
+  plus one Appendix A.2 reject vector per category; doc comments across
+  the fuzz files and scripts/fuzz.sh updated three oracles/targets to
+  four, incl. the per-target budget multiplier. Smoke campaign
+  (scripts/fuzz.sh 20) clean: 354 coverage edges, 716 iterations, all 21
+  corpus seeds accepted (0 dropped), 0 crashes; scripts/test.sh green (11
+  unit files + 5 property files). Slice 7b implemented and
   committed 6b1cd47 — ristrettoScalarmult and ristrettoFromUniformBytes
   clean; `` `==` ``/ristrettoEncode verdict artifact-attributed by
   control-loop recommendation under the standing fork test, deciding
@@ -179,8 +190,27 @@
       not-leak per the control-target + run-level-noise evidence; grind
       proceeds to 8a; the deciding re-run is a GATE AT 8D (see 8d entry) —
       7b stays [~] until that re-run lands.
-- [ ] 8a fuzzing (mode byte/dispatch arm/strategy-encoder/A.1 seeds/
-      "three oracles" doc-comment updates; smoke campaign)
+- [x] 8a fuzzing — commit 4026895 (ristrettoDecode joins
+      fuzz_external_target.nim as mode byte 3; dispatch arm mirrors
+      handlePointDecode's shape exactly: determinism (two calls agree on
+      Some/None and on the decoded value's re-encode) plus accept implies
+      IDENTITY re-encode — ristrettoEncode(ristrettoDecode(e).get) == e,
+      RFC 9496's own canonical-encoding contract, not an incidental
+      self-consistency check. Driver side: encodeRistrettoDecode +
+      bytes32() reused as the strategy (a ristretto255 encoding is a bare
+      32-byte candidate like an Edwards point encoding, no new strategy
+      type needed); ristrettoDecodeSeeds() in fuzz_common.nim seeds all 16
+      RFC 9496 Appendix A.1 valid encodings plus one Appendix A.2 reject
+      vector from each of the five categories (non-canonical, negative
+      field element, non-square x^2, negative x*y, s=-1/y=0), so mutation
+      explores the accept boundary from both sides. Doc comments in both
+      fuzz files and scripts/fuzz.sh updated from "three oracles"/
+      "x 3" to four, incl. the per-target time-budget multiplier. Smoke
+      campaign (scripts/fuzz.sh 20) clean: ristretto.ristrettoDecode hit
+      354 coverage edges over 716 iterations, all 21 corpus seeds
+      accepted (0 dropped), 0 crashes; the pre-existing three targets
+      unaffected (291-560 edges each, 0 crashes). scripts/test.sh green:
+      11 unit files + 5 property files, zero failures.)
 - [ ] 8b mutation (new-mutant batch incl. geScalarmultCT, feSqrtRatioM1-check,
       feEqualCT/feAbs mutants; 0 survivors)
 - [ ] 8c libsodium differential KATs (A.1/A.2/A.3 + random sweep through both
