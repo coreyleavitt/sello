@@ -15,6 +15,7 @@ unit_test_files=(
   tests/unit/test_ed25519.nim
   tests/unit/test_facade.nim
   tests/unit/test_x25519.nim
+  tests/unit/test_ristretto.nim
   tests/unit/test_wycheproof.nim
   tests/unit/test_wycheproof_x25519.nim
   tests/unit/test_libsodium_interop.nim
