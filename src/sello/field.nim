@@ -803,6 +803,13 @@ func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] =
   ## itself branchless), the correction and final sign-normalization go
   ## through `feCMove`/`feAbs` (masked selects, no branch) -- no
   ## secret-dependent branch or array index anywhere in this function.
+  ##
+  ## Both boolean combines below (the `feCMove` mask and `wasSquare`) use
+  ## `bool(uint8(a) or uint8(b))` -- bitwise on `uint8`, never Nim's `or`
+  ## on `bool`, which short-circuits (`if x: true else: y`) and lowers to
+  ## a real conditional branch on secret-derived data (confirmed in -O3
+  ## disassembly). Same idiom, same hazard, as `ristretto.nim`'s `==`
+  ## top-level combine -- see that function's doc comment.
   var v2, v3, v7: Fe
   feSq(v2, v)
   feMul(v3, v2, v)            # v^3
@@ -831,11 +838,11 @@ func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] =
 
   var rPrime: Fe
   feMul(rPrime, FeSqrtM1, r)
-  feCMove(r, rPrime, flippedSignSqrt or flippedSignSqrtI)
+  feCMove(r, rPrime, bool(uint8(flippedSignSqrt) or uint8(flippedSignSqrtI)))
 
   feAbs(r)  # choose the nonnegative square root
 
-  result.wasSquare = correctSignSqrt or flippedSignSqrt
+  result.wasSquare = bool(uint8(correctSignSqrt) or uint8(flippedSignSqrt))
   result.root = r
 
 {.pop.}
