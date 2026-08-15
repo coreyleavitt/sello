@@ -1,0 +1,8 @@
+id: S25
+target: src/sello/scalar.nim
+desc: scIsCanonicalCT: verdict flip, 'borrow == 1' -> 'borrow == 0', inverting the CT canonicity check (finding 2's CT counterpart to scIsCanonical -- accepts every non-canonical scalar and rejects every canonical one).
+====OLD====
+  borrow == 1
+====NEW====
+  borrow == 0
+====END====

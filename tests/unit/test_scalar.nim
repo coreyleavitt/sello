@@ -623,3 +623,50 @@ suite "SecretScalar - scalarmultVartime type boundary (compile-time)":
     let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
     check exitCode != 0
     check "type mismatch" in output
+
+# ---------------------------------------------------------------------------
+# scIsCanonicalCT (finding 2, CT hazard on secret key import): must agree
+# with the pre-existing vartime scIsCanonical on every input -- the whole
+# point is a drop-in CT replacement on the secret-import path
+# (ristretto.toRistrettoStaticSecret), never a different verdict. Boundary
+# set plus a random sweep, both checked against scIsCanonical directly (no
+# independent oracle needed -- scIsCanonical is itself already vector- and
+# property-tested elsewhere in this file/RFC-8032 corpus, so it is a valid
+# reference for a same-verdict comparison).
+# ---------------------------------------------------------------------------
+
+suite "scIsCanonicalCT (finding 2)":
+  test "boundary set: 0, 1, L-1, L, L+1, 2^252, all-0xFF, L+top-byte-bump, L-low-byte-decrement":
+    var zero, one, twoPow252, allFF: array[32, byte]
+    one[0] = 1
+    twoPow252[31] = 0x10  # bit 252 = byte 31, bit index 4 (252 - 31*8 = 4)
+    for i in 0 ..< 32: allFF[i] = 0xFF
+
+    let lMinusOne = decrementLE(L, 1)
+
+    var lPlusOne = L
+    lPlusOne[0] = lPlusOne[0] + 1  # L[0] = 0xED, no carry
+
+    var lTopByteBump = L
+    lTopByteBump[31] = lTopByteBump[31] + 1  # L[31] = 0x10 -> 0x11
+
+    var lLowByteDecrement = L
+    lLowByteDecrement[0] = lLowByteDecrement[0] - 1  # L[0] = 0xED, no borrow
+
+    let boundarySet = [
+      zero, one, lMinusOne, L, lPlusOne, twoPow252, allFF,
+      lTopByteBump, lLowByteDecrement
+    ]
+    var checked = 0
+    for s in boundarySet:
+      check scIsCanonicalCT(s) == scIsCanonical(s)
+      inc checked
+    check checked == 9
+
+  test "random sweep: 500 random 32-byte inputs agree with scIsCanonical":
+    var checked = 0
+    for i in 0'u64 ..< 500:
+      let s = prngScalar32(i)
+      check scIsCanonicalCT(s) == scIsCanonical(s)
+      inc checked
+    check checked == 500

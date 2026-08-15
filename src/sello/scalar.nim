@@ -488,12 +488,18 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
   ## RFC finding R1: every secret local this function touches --
   ## `sBytes` (a fresh copy of the raw secret scalar), `digits` (its
   ## directly-invertible radix-16 decomposition), and the secret-dependent
-  ## point accumulators `acc`/`u`/`step` -- is wiped via `ct.wipe` once no
-  ## longer needed, under the same `try`/`finally` net `private/backend.nim`
-  ## uses (RFC-001 ledger finding 18): the explicit happy-path wipes fire as
-  ## soon as each value is no longer needed, and `finally` re-wipes
-  ## everything regardless of exit path (a defensive, currently-unreachable
-  ## net, since nothing in this body raises). `result = acc` copies `acc`'s
+  ## point accumulators `acc`/`u`/`step` -- is wiped via `ct.wipe` under
+  ## the same `try`/`finally` net `private/backend.nim` uses (RFC-001
+  ## ledger finding 18): `sBytes` is wiped early, the moment `digits`
+  ## supersedes it (a genuine lifetime reduction), and everything --
+  ## `sBytes` included -- is wiped once in `finally`, which runs on every
+  ## exit path (nothing in this body raises, so the non-happy path is a
+  ## defensive, currently-unreachable net). The wipes live in `finally`
+  ## ONLY, not duplicated at the end of `try` -- the stage-4 review
+  ## (finding 6) retired the earlier end-of-try copies as zero-benefit
+  ## redundancy (`finally` runs immediately after; no lifetime was
+  ## shortened), converging on the register `x25519`'s overloads and
+  ## `ristretto.ristrettoEncode` already use. `result = acc` copies `acc`'s
   ## value out before `acc` itself is wiped, so the wipe cannot affect the
   ## returned point.
   # Debug-only precondition check (RFC-002 slice 2 item 3a): plain
@@ -548,11 +554,6 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
       geP1P1ToP3(acc, step)
 
     result = acc
-
-    ct.wipe(digits)
-    ct.wipe(acc)
-    ct.wipe(u)
-    ct.wipe(step)
   finally:
     ct.wipe(sBytes)
     ct.wipe(digits)
@@ -672,8 +673,11 @@ func geScalarmultCT*(s: SecretScalar; p: GeP3): GeP3 =
   ## invertible radix-16 decomposition), the secret-dependent accumulator
   ## `acc`, and the two per-iteration temporaries `u` (the
   ## `cmovCached`-selected `GeCached`) and `step` (the completed-point
-  ## temp) -- is wiped via `ct.wipe` once no longer needed, under the same
-  ## `try`/`finally` net `geScalarmultBase` uses. `u`/`step` are declared
+  ## temp) -- is wiped via `ct.wipe` under the same `try`/`finally` net
+  ## `geScalarmultBase` uses (early `sBytes` wipe + finally-only full
+  ## wipe; see that function's doc comment for the stage-4 finding-6
+  ## rationale retiring the old end-of-try duplicate wipes). `u`/`step`
+  ## are declared
   ## ONCE outside the loop and reused every iteration (`geScalarmultBase`'s
   ## own pattern): only their FINAL leftover values persist on the stack
   ## once the loop ends, so one wipe after the loop covers every
@@ -721,11 +725,6 @@ func geScalarmultCT*(s: SecretScalar; p: GeP3): GeP3 =
       geP1P1ToP3(acc, step)
 
     result = acc
-
-    ct.wipe(digits)
-    ct.wipe(acc)
-    ct.wipe(u)
-    ct.wipe(step)
   finally:
     ct.wipe(sBytes)
     ct.wipe(digits)
@@ -996,10 +995,67 @@ func scReduce*(o: var array[32, byte]; s: array[64, byte]) =
 
 func scIsCanonical*(s: array[32, byte]): bool =
   ## Returns true iff s < L. RFC 8032 §5.1.3 step 12.
+  ##
+  ## Not constant-time; verify-path only, never on secret-derived data --
+  ## this is a vartime, early-exit, MSB-first byte-comparison loop against
+  ## L, and its iteration count leaks (via timing) how many leading bytes
+  ## of the input agree with L. Correct for `ed25519.verify`'s use (the
+  ## signature's `s` scalar is public wire data); wrong for a caller
+  ## importing SECRET scalar bytes (e.g. `ristretto.toRistrettoStaticSecret`)
+  ## -- use `scIsCanonicalCT` below for that.
   for i in countdown(31, 0):
     if s[i] < L[i]: return true
     if s[i] > L[i]: return false
   return false
+
+func scIsCanonicalCT*(s: array[32, byte]): bool =
+  ## Constant-time counterpart to `scIsCanonical` above: identical verdict
+  ## (true iff s < L) for every input, computed with no secret-dependent
+  ## branch and no early exit -- the `field.feBytesCanonicalCT` register
+  ## (that function's doc comment is this one's template) applied to the
+  ## scalar side instead of the field side.
+  ##
+  ## Exists because `ristretto.toRistrettoStaticSecret` (key IMPORT of a
+  ## caller-supplied SECRET scalar, dalek's `from_canonical_bytes`
+  ## register) was calling the vartime `scIsCanonical` above on secret
+  ## data: that loop's iteration count leaks, via timing, how many
+  ## leading bytes of the imported secret match L -- the same hazard
+  ## class `feBytesCanonicalCT` exists to close on the field side, and
+  ## the reason curve25519-dalek's own `Scalar::from_canonical_bytes` is
+  ## CT. `ed25519.nim`'s call to `scIsCanonical` (the signature's `s`
+  ## scalar, public wire data) is correct as-is and stays vartime -- this
+  ## function is for the secret-import path only.
+  ##
+  ## Computed as a full 32-byte little-endian subtract-with-borrow of
+  ## s - L (L's own encoding, like every scalar in this codebase, is
+  ## little-endian, so the chain runs LSB-to-MSB): `s < L` iff the final
+  ## borrow out of the most significant byte is 1, i.e. the subtraction
+  ## would have gone negative. Every byte position is visited
+  ## unconditionally regardless of `s`; the loop body never branches on
+  ## `s`, `L`, or any intermediate -- only the final `bool` conversion
+  ## (an ordinary, non-secret-timed return) reads the accumulated borrow.
+  ##
+  ## **Machine-checked proof: considered and declined (round-2 review
+  ## finding R2-2).** This 32-step subtract-with-borrow chain is the same
+  ## shape as `scReduce`/`scMulAdd`'s carry-propagation macro -- a
+  ## tractable per-step lemma (one byte position's borrow-in/borrow-out
+  ## relation) composed 32 times. `tests/verify/symex_reduce.nim`'s own
+  ## whole-chain composition attempt (`scReduceCarryChainFreeVars`, a
+  ## 24-limb chain of the same general shape) hit a genuine Z3 resource
+  ## wall -- no verdict within ~515-550s across two runs -- and this
+  ## borrow chain's own composition offers no reason to expect a cheaper
+  ## outcome. Rather than chase that wall a third time for a property
+  ## this codebase already covers empirically, a symex proof here was
+  ## considered and declined; the boundary set (0, 1, L-1, L, L+1, 2^252,
+  ## all-0xFF, and two more L near-misses) plus a 500-input random sweep
+  ## against the vartime `scIsCanonical` oracle
+  ## (`tests/unit/test_scalar.nim`'s "scIsCanonicalCT (finding 2)" suite)
+  ## carry the correctness weight in the meantime.
+  var borrow: uint32 = 0
+  for i in 0..<32:
+    let diff = uint32(s[i]) - uint32(L[i]) - borrow
+    borrow = (diff shr 31) and 1'u32
+  borrow == 1
 
 func scMulAdd*(a: array[32, byte]; bSecret, cSecret: SecretScalar): array[32, byte] =
   ## s = (a*b + c) mod L. Ported from ref10 sc_muladd (public domain;
