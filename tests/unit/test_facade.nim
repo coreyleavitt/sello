@@ -263,12 +263,13 @@ suite "facade - ristretto255 public surface (RFC-004 slice 8d)":
     wipe(secret)
     check toBytes(secret) == default(array[32, byte])
 
-  test "RistrettoEphemeralSecret / ristrettoEphemeralPair / consuming ristrettoScalarmult are reachable through the facade":
+  test "RistrettoEphemeralSecret / ristrettoEphemeralPair / consuming ristrettoScalarmult (-> Option[RistrettoShared]) are reachable through the facade":
     var (eph, ephPublic) = ristrettoEphemeralPair()
     check ephPublic == ristrettoScalarmultBase(eph)
     let (peerSecret, peerPublic) = ristrettoStaticPair()
     let shared = ristrettoScalarmult(move(eph), peerPublic)
-    check shared == ristrettoScalarmult(peerSecret, ephPublic)
+    check shared.isSome
+    check toBytes(shared.get()) == toBytes(ristrettoEncode(ristrettoScalarmult(peerSecret, ephPublic)))
 
   test "wipe(sink RistrettoEphemeralSecret) is reachable through the facade":
     ## `wipe` takes `sink`, so `move(eph)` is required inside `test:`'s
@@ -276,6 +277,17 @@ suite "facade - ristretto255 public surface (RFC-004 slice 8d)":
     ## ceremony `wipe(sink X25519EphemeralSecret)`'s own facade test needs.
     var eph = ristrettoEphemeralSecret()
     wipe(move(eph))
+
+  test "RistrettoShared / wipe(RistrettoShared) are reachable through the facade (DH shared-secret hygiene fix)":
+    ## The `wipe(X25519StaticSecret)`/`wipe(X25519Shared)` facade test's
+    ## register: `shared` is NOT moved anywhere, so this genuinely observes
+    ## `wipe`'s own zeroization rather than a moved-from-source artifact.
+    var (eph, _) = ristrettoEphemeralPair()
+    let (_, peerPublic) = ristrettoStaticPair()
+    var shared = ristrettoScalarmult(move(eph), peerPublic).get()
+    doAssert toBytes(shared) != default(array[32, byte]) # sanity: nonzero before wipe
+    wipe(shared)
+    check toBytes(shared) == default(array[32, byte])
 
   test "ristrettoDecode / ristrettoEncode / toRistrettoEncoded / toBytes(RistrettoEncoded) round trip through the facade":
     let encoded = ristrettoEncode(RistrettoBasePoint)
@@ -472,6 +484,12 @@ suite "facade - declared effect contract (janus finding 3)":
       ristrettoScalarmult(s, p)
     proc pinScalarmultVartime(s: array[32, byte]; p: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe.} =
       ristrettoScalarmultVartime(s, p)
+    proc pinScalarmultEphemeral(s: sink RistrettoEphemeralSecret; p: RistrettoPoint): Option[RistrettoShared] {.raises: [], gcsafe.} =
+      ristrettoScalarmult(s, p)
+    proc pinSharedToBytes(sh: RistrettoShared): array[32, byte] {.raises: [], gcsafe.} =
+      toBytes(sh)
+    proc pinWipeShared(sh: var RistrettoShared) {.raises: [], gcsafe.} =
+      wipe(sh)
 
     let (secret, public) = ristrettoStaticPair()
     let encoded = pinEncode(public)
@@ -479,6 +497,14 @@ suite "facade - declared effect contract (janus finding 3)":
     check pinEq(pinDecode(encoded).get(), public)
     check pinScalarmultBase(secret) == public
     check pinEq(pinScalarmult(secret, public), pinScalarmultVartime(toBytes(secret), public))
+
+    var (eph, ephPublic) = ristrettoEphemeralPair()
+    let sharedOpt = pinScalarmultEphemeral(move(eph), public)
+    check sharedOpt.isSome
+    var shared = sharedOpt.get()
+    check pinSharedToBytes(shared) == toBytes(ristrettoEncode(pinScalarmult(secret, ephPublic)))
+    pinWipeShared(shared)
+    check pinSharedToBytes(shared) == default(array[32, byte])
 
   test "sign / keypair(seed) / keypair(seed, expectedPublic) declare exactly the backend's effect set":
     when defined(selloLibsodium):
@@ -539,4 +565,5 @@ suite "facade - declared effect contract (janus finding 3)":
     wipe(pinRistrettoEph())
     let (rss, rsp) = pinRistrettoStaticPair()
     var (res, rep) = pinRistrettoEphPair()
-    check ristrettoScalarmult(move(res), rsp) == ristrettoScalarmult(rss, rep)
+    check toBytes(ristrettoScalarmult(move(res), rsp).get()) ==
+      toBytes(ristrettoEncode(ristrettoScalarmult(rss, rep)))

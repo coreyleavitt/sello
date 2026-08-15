@@ -1,8 +1,8 @@
 id: R07
 target: src/sello/ristretto.nim
-desc: ristrettoEncode: final sign-correction select inverted, 'feCMove(y, negY, feIsNegative(xZinv))' -> 'feCMove(y, negY, not feIsNegative(xZinv))' -- negates y exactly when x*z_inv is already nonnegative and leaves it alone exactly when negation is required, producing the wrong-sign encoding for every non-degenerate point. RFC-004 slice 8b's "encode's ... negation condition flip" target.
+desc: ristrettoEncode: final sign-correction select inverted, 'feCMove(y, negY, feIsNegative(xZinv))' -> 'feCMove(y, negY, not feIsNegative(xZinv))' -- negates y exactly when x*z_inv is already nonnegative and leaves it alone exactly when negation is required, producing the wrong-sign encoding for every non-degenerate point. RFC-004 slice 8b's "encode's ... negation condition flip" target. Re-anchored (round-2 review finding R2-1): ristrettoEncode's body is now wrapped in a try/finally that unconditionally wipes its own named Fe locals before return (the sink-ephemeral ristrettoScalarmult overload routes a secret DH product through it), shifting this line's indentation from 2 spaces to 4 -- the OLD/NEW pair was updated to match the new source text verbatim, the same re-anchoring register as S07/F23's precedent, with no change to the mutant's targeted defect class.
 ====OLD====
-  feCMove(y, negY, feIsNegative(xZinv))
+    feCMove(y, negY, feIsNegative(xZinv))
 ====NEW====
-  feCMove(y, negY, not feIsNegative(xZinv))
+    feCMove(y, negY, not feIsNegative(xZinv))
 ====END====

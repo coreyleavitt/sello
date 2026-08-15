@@ -96,7 +96,22 @@
 ## freely copyable with no `wipe` overload: elements are PUBLIC-register
 ## values in every protocol this serves (a Pedersen commitment, an OPRF
 ## blinded element) -- the secret is the scalar that derived it, and that
-## scalar's role type owns the hygiene. This module ships the GROUP, not
+## scalar's role type owns the hygiene. The ONE exception (DH shared-secret
+## hygiene fix, round-3 finding R3-1): `ristrettoScalarmult(sink
+## RistrettoEphemeralSecret, ...)` -- the ephemeral role's consuming call,
+## RFC 9496's own DH-share step -- returns `Option[RistrettoShared]`, not
+## `RistrettoPoint`: that result IS the shared secret itself (an
+## ECIES/hybrid-encryption KDF input), so it gets the same
+## one-field-object/`secretHooks`/`toBytes`/`wipe` shape as
+## `x25519.X25519Shared` instead of staying an unwiped public-register
+## value, AND (mirroring `x25519`'s own `none`-on-small-order-peer register)
+## `none` when the peer's point is `RistrettoIdentity` or the ephemeral
+## scalar is 0 mod L -- either way an attacker-predictable, k-independent
+## result that must not silently reach a KDF -- see `sello/ristretto`'s
+## module doc comment (`RistrettoPoint`'s own doc comment there has the full
+## rationale, including the static role's deliberately unchanged
+## `RistrettoPoint` return and its own documented DH-caller idiom). This
+## module ships the GROUP, not
 ## a scalar-arithmetic API: a Schnorr response or an OPRF client's
 ## unblind step both need mod-L scalar operations this library
 ## deliberately does not expose at the facade -- see `sello/ristretto`'s
@@ -139,6 +154,7 @@ export signing.public, signing.toSeedBytes
 # both bypass invariants this facade exists to hold.
 export ristretto.RistrettoPoint, ristretto.RistrettoEncoded
 export ristretto.RistrettoStaticSecret, ristretto.RistrettoEphemeralSecret
+export ristretto.RistrettoShared
 export ristretto.RistrettoIdentity, ristretto.RistrettoBasePoint
 export ristretto.ristrettoDecode, ristretto.ristrettoEncode
 export ristretto.`+`, ristretto.`-`, ristretto.`==`
@@ -170,10 +186,12 @@ when defined(selloLibsodium):
 # requirement of its own.
 #
 # Ristretto255's secret role types (`RistrettoStaticSecret`/
-# `RistrettoEphemeralSecret`) follow the same "no `==` on a secret" rule as
-# `X25519StaticSecret`/`X25519EphemeralSecret` above -- neither has one, and
-# `RistrettoEphemeralSecret` has no `toBytes` either, for the identical
-# unpersistable-by-design reason. `RistrettoPoint`, by contrast, DOES have
+# `RistrettoEphemeralSecret`/`RistrettoShared`) follow the same "no `==` on a
+# secret" rule as `X25519StaticSecret`/`X25519EphemeralSecret`/`X25519Shared`
+# above -- none has one, and `RistrettoEphemeralSecret` has no `toBytes`
+# either, for the identical unpersistable-by-design reason (`RistrettoShared`
+# DOES have `toBytes`, the `X25519Shared` precedent: a completed DH output a
+# caller needs to hand to a KDF). `RistrettoPoint`, by contrast, DOES have
 # `==` (exported above) despite holding no secret of its own -- it is a
 # PUBLIC group element (see `ristretto.nim`'s module doc), and its `==` is
 # CT rather than vartime, unlike every other `==` this facade exports:

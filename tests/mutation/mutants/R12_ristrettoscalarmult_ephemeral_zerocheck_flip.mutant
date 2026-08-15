@@ -1,0 +1,14 @@
+id: R12
+target: src/sello/ristretto.nim
+desc: ristrettoScalarmult(sink RistrettoEphemeralSecret, p): RFC 9496 §4.3.2 identity-encoding zero-check inverted, 'if acc == 0' -> 'if acc != 0' -- the round-4 finding R3-1 degenerate-peer rejection (a RistrettoIdentity peer, or k == 0 mod L, both encode to 32 zero bytes) is inverted, so a genuine degenerate DH output is returned as Some(RistrettoShared) instead of rejected, and every real nonzero shared secret is dropped as None. The x25519 sibling zero-check mutants (X01/X02) are this finding's precedent.
+====OLD====
+    var acc: byte = 0
+    for b in encoded: acc = acc or b
+    if acc == 0:
+      result = none(RistrettoShared)
+====NEW====
+    var acc: byte = 0
+    for b in encoded: acc = acc or b
+    if acc != 0:
+      result = none(RistrettoShared)
+====END====

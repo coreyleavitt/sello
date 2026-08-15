@@ -660,7 +660,7 @@ suite "ristrettoScalarmult -- CT variable-base, three-way agreement + boundary s
     let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[3]))).get()
     check ristrettoScalarmult(secret, p) == RistrettoIdentity
 
-suite "RistrettoEphemeralSecret -- consuming ristrettoScalarmult (RFC-004 slice 7a)":
+suite "RistrettoEphemeralSecret -- consuming ristrettoScalarmult (RFC-004 slice 7a, return type changed to Option[RistrettoShared] by the DH shared-secret hygiene fix / round-3 finding R3-1)":
   test "ristrettoScalarmult(move(ephemeral), RistrettoBasePoint) agrees with the pair's own ristrettoScalarmultBase-derived public element (fixed-base vs CT variable-base, same secret, via the pair)":
     ## `RistrettoEphemeralSecret` has no from-bytes route (freshness by
     ## construction, see the type's own doc comment), so there is no way to
@@ -673,16 +673,54 @@ suite "RistrettoEphemeralSecret -- consuming ristrettoScalarmult (RFC-004 slice 
     ## computes the identical `[k]B` via the NEW CT variable-base ladder
     ## instead of the fixed-base one, a genuine cross-check of
     ## `geScalarmultCT` against `geScalarmultBase` for a secret this test
-    ## never sees as raw bytes.
+    ## never sees as raw bytes. `viaCT` is now an `Option[RistrettoShared]`
+    ## (the DH shared-secret hygiene fix, extended to `Option` by round-3
+    ## finding R3-1) -- `RistrettoBasePoint` is not the identity, so this is
+    ## always `some`; the comparison is by `toBytes` against `viaBase`'s own
+    ## encoding, not `RistrettoPoint`'s CT `==`.
     var (secret, viaBase) = ristrettoEphemeralPair()
     let viaCT = ristrettoScalarmult(move(secret), RistrettoBasePoint)
-    check viaCT == viaBase
+    check viaCT.isSome
+    check toBytes(viaCT.get()) == toBytes(ristrettoEncode(viaBase))
 
   test "ristrettoScalarmult(move(ephemeral), p) produces a valid, non-identity point for a non-base p":
     let p = ristrettoDecode(toRistrettoEncoded(hexToArray32(A1Encodings[5]))).get()
     var secret = ristrettoEphemeralSecret()
     let consumed = ristrettoScalarmult(move(secret), p)
-    check not (consumed == RistrettoIdentity)
+    check consumed.isSome
+    check toBytes(consumed.get()) != toBytes(ristrettoEncode(RistrettoIdentity))
+
+suite "RistrettoEphemeralSecret -- consuming ristrettoScalarmult, degenerate-peer rejection (round-3 finding R3-1)":
+  ## Ristretto255 is prime-order (RFC 9496's whole reason to exist over a
+  ## raw cofactor-8 Edwards point): `S = k*p` is the identity iff `p` is the
+  ## identity or `k` reduces to 0 mod L, with no partial/small-subgroup case
+  ## in between -- `geScalarmultCT` has no small-order rejection of its own
+  ## (see `wipe(sink RistrettoEphemeralSecret)`'s doc comment in
+  ## `sello/ristretto`), so an identity peer would otherwise silently hand
+  ## back a k-independent, attacker-predictable "shared secret." Mirrors
+  ## `x25519`'s own `none`-on-small-order-peer test register.
+  test "ristrettoScalarmult(move(ephemeral), RistrettoIdentity) is none":
+    var secret = ristrettoEphemeralSecret()
+    let result = ristrettoScalarmult(move(secret), RistrettoIdentity)
+    check result.isNone
+
+  test "the ephemeral secret is still wiped even on the none path (sink consumption does not depend on which branch the identity check takes)":
+    ## Same probe-pattern methodology as the `RistrettoShared`/
+    ## `RistrettoStaticSecret` hygiene suites elsewhere in this file: a raw
+    ## pointer captured before the consuming call, memory re-read after.
+    ## `secret` is moved into `ristrettoScalarmult` regardless of which
+    ## verdict the identity check inside the proc reaches -- Nim's
+    ## destructor injection for a `sink` parameter does not depend on a
+    ## runtime branch -- so this proves the `none` path gets the exact same
+    ## automatic-wipe guarantee the `some` path already has (and that this
+    ## finding's fix did not accidentally skip the wipe on the new early
+    ## branch it added).
+    var secret = ristrettoEphemeralSecret()
+    let probe = cast[ptr array[32, byte]](addr secret)
+    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before the consuming call
+    let result = ristrettoScalarmult(move(secret), RistrettoIdentity)
+    check result.isNone
+    check probe[] == default(array[32, byte])
 
 suite "RistrettoEphemeralSecret -- consuming scalarmult single-use (compile-time, subprocess-verified, RFC-004 slice 7a)":
   ## Neither `compiles()` nor `nim check` can see this violation -- it is
@@ -698,6 +736,81 @@ suite "RistrettoEphemeralSecret -- consuming scalarmult single-use (compile-time
     let (output, exitCode) = execCmdEx(cmd, workingDir = repoRoot)
     check exitCode != 0
     check "=copy" in output
+
+# ---------------------------------------------------------------------------
+# RistrettoShared -- the completed DH output (DH shared-secret hygiene fix)
+# ---------------------------------------------------------------------------
+
+suite "RistrettoShared -- ECIES-style DH agreement (ephemeral consuming ristrettoScalarmult vs the static-side product)":
+  test "ristrettoScalarmult(move(ephemeral), staticPublic) agrees, via toBytes, with the static side's own ristrettoScalarmult(staticSecret, ephemeralPublic) product":
+    ## The two-party ECIES/hybrid-encryption shape this role serves:
+    ## ephemeral k (sender) and a reusable static secret x (recipient).
+    ## `k*X == x*K` (same product, computed from each side's own secret
+    ## against the other side's public element) is the DH agreement
+    ## property every exchange in this codebase checks this way
+    ## (`x25519`'s facade test, `ristrettoScalarmult`'s own static-role
+    ## three-way-agreement suite above). `viaEphemeral` is an
+    ## `Option[RistrettoShared]` (round-3 finding R3-1; `some` here since
+    ## neither side is the identity), unwrapped via `.get()`; `viaStatic` is
+    ## a `RistrettoPoint` (the static role's deliberately-unchanged return,
+    ## see its own doc comment) -- comparison goes through
+    ## `toBytes`/`ristrettoEncode` on the static side to bring both into the
+    ## same wire representation.
+    var (ephSecret, ephPublic) = ristrettoEphemeralPair()
+    let (staticSecret, staticPublic) = ristrettoStaticPair()
+
+    let viaEphemeral = ristrettoScalarmult(move(ephSecret), staticPublic)
+    let viaStatic = ristrettoScalarmult(staticSecret, ephPublic)
+
+    check viaEphemeral.isSome
+    check toBytes(viaEphemeral.get()) == toBytes(ristrettoEncode(viaStatic))
+
+suite "RistrettoShared -- secret hygiene (=destroy / wipe, the X25519Shared probe-pattern precedent)":
+  ## Same probe-pattern methodology as `RistrettoStaticSecret`'s hygiene
+  ## suite above and `test_x25519.nim`'s X25519Shared coverage: a raw
+  ## pointer captured before the wipe/scope-exit, memory re-read after.
+  ## `RistrettoShared` is a one-field object (same representation as
+  ## `X25519Shared`/`RistrettoStaticSecret`, and for the same reason), so a
+  ## pointer to the object aliases its sole `bytes` field.
+  test "=destroy wipes RistrettoShared's memory at scope exit":
+    var probe: ptr array[32, byte]
+    block:
+      var (ephSecret, _) = ristrettoEphemeralPair()
+      let (_, staticPublic) = ristrettoStaticPair()
+      var shared = ristrettoScalarmult(move(ephSecret), staticPublic).get()
+      probe = cast[ptr array[32, byte]](addr shared)
+      doAssert probe[] != default(array[32, byte]) # sanity: nonzero before scope exit
+    check probe[] == default(array[32, byte])
+
+  test "wipe(var RistrettoShared) zeroes the underlying bytes in place":
+    var (ephSecret, _) = ristrettoEphemeralPair()
+    let (_, staticPublic) = ristrettoStaticPair()
+    var shared = ristrettoScalarmult(move(ephSecret), staticPublic).get()
+    let probe = cast[ptr array[32, byte]](addr shared)
+    doAssert probe[] != default(array[32, byte]) # sanity: nonzero before wipe
+    wipe(shared)
+    check probe[] == default(array[32, byte])
+
+suite "RistrettoShared -- toBytes decodes back to the mathematically-agreeing point (RFC 9496 canonical-encoding cross-check)":
+  test "ristrettoDecode(toRistrettoEncoded(toBytes(ephemeral-side shared))) equals the static side's own RistrettoPoint product":
+    ## Stronger than a bare byte-equality check: `toBytes(shared)` must be
+    ## an actual valid RFC 9496 SS4.3.1 canonical encoding (decode
+    ## succeeds, not just "some 32 bytes"), and the point it decodes to
+    ## must be the same DH product the static side computes independently
+    ## via the still-`RistrettoPoint`-returning overload -- the two
+    ## representations (`RistrettoShared`'s bytes and a `RistrettoPoint`)
+    ## round-trip through RFC 9496's own encode/decode pair to the same
+    ## group element.
+    var (ephSecret, ephPublic) = ristrettoEphemeralPair()
+    let (staticSecret, staticPublic) = ristrettoStaticPair()
+
+    let shared = ristrettoScalarmult(move(ephSecret), staticPublic)
+    check shared.isSome
+    let viaStatic = ristrettoScalarmult(staticSecret, ephPublic)
+
+    let decoded = ristrettoDecode(toRistrettoEncoded(toBytes(shared.get())))
+    check decoded.isSome
+    check decoded.get() == viaStatic
 
 # ---------------------------------------------------------------------------
 # RFC-004 slice 6 -- hash-to-group (ristrettoFromUniformBytes / the MAP

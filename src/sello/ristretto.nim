@@ -55,12 +55,22 @@
 ## hash-to-group map (RFC 9496 SS4.3.4: `ristrettoFromUniformBytes`, its
 ## private `ristrettoMap` helper, and the three remaining SS4.1
 ## implementation constants `OneMinusDSq`/`DMinusOneSq`/`SqrtAdMinusOne` --
-## `InvSqrtAMinusD` landed with encode). Facade-exported (slice 8d) as the
+## `InvSqrtAMinusD` landed with encode), and (DH shared-secret hygiene fix)
+## `RistrettoShared` -- the `x25519.X25519Shared` shape (one-field object,
+## copyable, `secretHooks`-wiped, `toBytes`), wrapped in `Option` (round-3
+## finding R3-1) as the return type of the CONSUMING
+## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` overload above,
+## replacing a bare `RistrettoPoint` that carried the DH output with no
+## wipe path at all AND no degenerate-peer rejection -- see
+## `RistrettoPoint`'s own doc comment below and that overload's doc comment
+## for the full rationale on each half of the fix. Facade-exported (slice
+## 8d, extended by this fix) as the
 ## ENUMERATED symbol list in `src/sello.nim` -- see that module's doc
 ## comment; `ristrettoUnchecked` and `scalar.SecretScalar` are deliberately
-## NOT among them. `RistrettoPoint` has deliberately no `wipe` overload
-## even now that every scalarmult is present: see its own doc comment
-## below.
+## NOT among them. `RistrettoPoint` has deliberately no `wipe` overload for
+## every OTHER scalarmult result (see its own doc comment below for the
+## published-value/blinded-element reasoning, and the DH carve-out this fix
+## adds to it).
 ##
 ## **The scalar-arithmetic boundary (Schnorr / OPRF-client honesty):** this
 ## module ships the GROUP -- decode/encode/equality/the map/group
@@ -142,6 +152,26 @@ type
     ## reflex from the rest of this API -- misapplying it here (a
     ## freely-copyable type with no destructor backstop) would mean
     ## forgetting, or copying, leaves the value never-wiped, full stop.
+    ##
+    ## **The one documented exception, and how it is closed (DH
+    ## shared-secret hygiene fix):** a completed Diffie-Hellman product
+    ## `S = k*P` does NOT fit the "published/blinding-hides-it" reasoning
+    ## above -- `S` IS the shared secret itself (an ECIES/hybrid-encryption
+    ## KDF input), not a point that gets published or that hides a scalar
+    ## behind blinding. Handing that value back as a bare `RistrettoPoint`
+    ## would silently strand it with none of this codebase's other DH
+    ## outputs' hygiene (compare `x25519.X25519Shared`). This is why the
+    ## ONE consuming scalarmult overload whose result is structurally a DH
+    ## share -- `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)`,
+    ## below -- returns `RistrettoShared` (the `X25519Shared` shape:
+    ## `secretHooks`-wiped, `toBytes`), not `RistrettoPoint`. The static-role
+    ## overload, `ristrettoScalarmult(secret: RistrettoStaticSecret, ...)`,
+    ## deliberately still returns a plain `RistrettoPoint`: its own
+    ## documented consumers (an OPRF server's evaluation, a Pedersen
+    ## commitment) publish the result, so the reasoning above applies to it
+    ## unchanged -- see that overload's own doc comment for the caller
+    ## idiom a static-role DH use (e.g. CPace, which routes here rather than
+    ## to the ephemeral role by design) needs instead.
     p: GeP3
 
 func ristrettoUnchecked*(p: GeP3): RistrettoPoint {.inline.} =
@@ -419,66 +449,100 @@ func ristrettoEncode*(pt: RistrettoPoint): RistrettoEncoded =
   ## function lands on the all-zero 32-byte encoding -- RFC 9496 Appendix
   ## A.1's own `i=0` vector, and `tests/unit/test_ristretto.nim` pins this
   ## exact path by name rather than leaving it as incidental i=0 coverage.
-  let x0 = pt.p.x
-  let y0 = pt.p.y
-  let z0 = pt.p.z
-  let t0 = pt.p.t
-
+  ##
+  ## **Wipe discipline (round-2 review finding R2-1):** originally left
+  ## unwiped on the "every point reaching this function is about to be
+  ## published" assumption every call site had -- but
+  ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` now routes
+  ## the raw DH product `S = k*P` through this exact function before its
+  ## own `finally` wipes the `GeP3` it built `S` from (see that proc's
+  ## doc comment), so on that call path this function's coordinate copies
+  ## and every intermediate below ARE the secret DH output, not a
+  ## soon-to-be-published point. Rather than fork a wiped/unwiped
+  ## duplicate or make the wipe conditional on caller intent (which this
+  ## function has no way to observe), every named `Fe` local is `ct.wipe`d
+  ## unconditionally before return (`try`/`finally`, the
+  ## `x25519.ladder`/`x25519` finalize-path precedent, round-3 finding
+  ## A1) -- negligible cost against this function's `feSqrtRatioM1`-
+  ## dominated runtime, and one code path instead of two that could drift.
+  ## `pt` itself (the caller's own value) and the returned
+  ## `RistrettoEncoded` (the intended output) are deliberately not wiped.
+  ## This is a dudect target (`tests/ct/`); the added wipes are uniform,
+  ## secret-independent work on every call, so they do not change the
+  ## fixed-vs-random methodology.
+  # Every named `Fe` local is hoisted here, ahead of the `try`, rather than
+  # declared inline at first use (this file's usual style, still visible in
+  # the git history of this function) -- `finally` cannot see a variable
+  # declared inside the `try` it closes, so the wipe list below needs every
+  # one of these in the enclosing scope.
+  var x0, y0, z0, t0: Fe
   var zPlusY, zMinusY, u1, u2: Fe
-  feAdd(zPlusY, z0, y0)
-  feSub(zMinusY, z0, y0)
-  feMul(u1, zPlusY, zMinusY)          # u1 = (z0 + y0) * (z0 - y0)
-  feMul(u2, x0, y0)                   # u2 = x0 * y0
-
-  var u2Sq, u1u2Sq: Fe
-  feSq(u2Sq, u2)
-  feMul(u1u2Sq, u1, u2Sq)
-  let (_, invsqrt) = feSqrtRatioM1(FeOne, u1u2Sq)
-    # "Ignore was_square since this is always square" (RFC 9496 §4.3.2) --
-    # every valid RistrettoPoint's internal representation makes u1*u2^2 a
-    # square by construction, so the accept flag carries no information
-    # here; only the root is consumed.
-
-  var den1, den2: Fe
-  feMul(den1, invsqrt, u1)            # den1 = invsqrt * u1
-  feMul(den2, invsqrt, u2)            # den2 = invsqrt * u2
-
-  var zInv: Fe
-  feMul(zInv, den1, den2)
-  feMul(zInv, zInv, t0)               # z_inv = den1 * den2 * t0
-
-  var ix0, iy0: Fe
-  feMul(ix0, x0, FeSqrtM1)            # ix0 = x0 * SQRT_M1
-  feMul(iy0, y0, FeSqrtM1)            # iy0 = y0 * SQRT_M1
-
-  var enchantedDenominator: Fe
-  feMul(enchantedDenominator, den1, InvSqrtAMinusD)
-
-  var tZinv: Fe
-  feMul(tZinv, t0, zInv)
-  let rotate = feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
-
-  # Conditionally rotate x and y (CT_SELECT via feCMove -- no branch).
+  var u2Sq, u1u2Sq, invsqrt: Fe
+  var den1, den2, zInv: Fe
+  var ix0, iy0, enchantedDenominator, tZinv: Fe
   var x, y, denInv: Fe
-  x = x0
-  feCMove(x, iy0, rotate)
-  y = y0
-  feCMove(y, ix0, rotate)
-  denInv = den2
-  feCMove(denInv, enchantedDenominator, rotate)
-
   var xZinv, negY: Fe
-  feMul(xZinv, x, zInv)
-  feNeg(negY, y)
-  feCMove(y, negY, feIsNegative(xZinv))
-    # y = CT_SELECT(-y IF IS_NEGATIVE(x * z_inv) ELSE y)
-
   var zMinusFinalY, s: Fe
-  feSub(zMinusFinalY, z0, y)          # z = z0 (unchanged; spec's "z")
-  feMul(s, denInv, zMinusFinalY)      # s = den_inv * (z - y)
-  feAbs(s)                            # s = CT_ABS(...)
+  try:
+    x0 = pt.p.x
+    y0 = pt.p.y
+    z0 = pt.p.z
+    t0 = pt.p.t
 
-  toRistrettoEncoded(feToBytes(s))
+    feAdd(zPlusY, z0, y0)
+    feSub(zMinusY, z0, y0)
+    feMul(u1, zPlusY, zMinusY)          # u1 = (z0 + y0) * (z0 - y0)
+    feMul(u2, x0, y0)                   # u2 = x0 * y0
+
+    feSq(u2Sq, u2)
+    feMul(u1u2Sq, u1, u2Sq)
+    invsqrt = feSqrtRatioM1(FeOne, u1u2Sq).root
+      # "Ignore was_square since this is always square" (RFC 9496 §4.3.2) --
+      # every valid RistrettoPoint's internal representation makes u1*u2^2 a
+      # square by construction, so the accept flag carries no information
+      # here; only the root is consumed.
+
+    feMul(den1, invsqrt, u1)            # den1 = invsqrt * u1
+    feMul(den2, invsqrt, u2)            # den2 = invsqrt * u2
+
+    feMul(zInv, den1, den2)
+    feMul(zInv, zInv, t0)               # z_inv = den1 * den2 * t0
+
+    feMul(ix0, x0, FeSqrtM1)            # ix0 = x0 * SQRT_M1
+    feMul(iy0, y0, FeSqrtM1)            # iy0 = y0 * SQRT_M1
+
+    feMul(enchantedDenominator, den1, InvSqrtAMinusD)
+
+    feMul(tZinv, t0, zInv)
+    let rotate = feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
+
+    # Conditionally rotate x and y (CT_SELECT via feCMove -- no branch).
+    x = x0
+    feCMove(x, iy0, rotate)
+    y = y0
+    feCMove(y, ix0, rotate)
+    denInv = den2
+    feCMove(denInv, enchantedDenominator, rotate)
+
+    feMul(xZinv, x, zInv)
+    feNeg(negY, y)
+    feCMove(y, negY, feIsNegative(xZinv))
+      # y = CT_SELECT(-y IF IS_NEGATIVE(x * z_inv) ELSE y)
+
+    feSub(zMinusFinalY, z0, y)          # z = z0 (unchanged; spec's "z")
+    feMul(s, denInv, zMinusFinalY)      # s = den_inv * (z - y)
+    feAbs(s)                            # s = CT_ABS(...)
+
+    result = toRistrettoEncoded(feToBytes(s))
+  finally:
+    ct.wipe(x0); ct.wipe(y0); ct.wipe(z0); ct.wipe(t0)
+    ct.wipe(zPlusY); ct.wipe(zMinusY); ct.wipe(u1); ct.wipe(u2)
+    ct.wipe(u2Sq); ct.wipe(u1u2Sq); ct.wipe(invsqrt)
+    ct.wipe(den1); ct.wipe(den2); ct.wipe(zInv)
+    ct.wipe(ix0); ct.wipe(iy0); ct.wipe(enchantedDenominator); ct.wipe(tZinv)
+    ct.wipe(x); ct.wipe(y); ct.wipe(denInv)
+    ct.wipe(xZinv); ct.wipe(negY)
+    ct.wipe(zMinusFinalY); ct.wipe(s)
 
 # ---------------------------------------------------------------------------
 # Fixed compile-time constants -- the identity and the canonical generator
@@ -657,14 +721,17 @@ secretHooks(RistrettoStaticSecret, bytes)
 
 func toRistrettoStaticSecret*(bytes: array[32, byte]): Option[RistrettoStaticSecret] =
   ## Key IMPORT (dalek's `from_canonical_bytes` register): REJECTS a
-  ## non-canonical scalar (`>= L`) via `scalar.scIsCanonical` rather than
-  ## silently reducing it -- reduce-vs-reject is a security-semantic
-  ## difference (silent reduction would accept corrupted or
-  ## cross-protocol key material and make `toBytes` round-trip to a
-  ## DIFFERENT value than was imported), so this is a distinct behavior
-  ## from `toRistrettoStaticSecretWide` below, not an overload of it (see
-  ## that constructor's own doc comment for why they must have different
-  ## names). `none` on reject.
+  ## non-canonical scalar (`>= L`) via `scalar.scIsCanonicalCT` (finding 2
+  ## -- this used to call the vartime `scIsCanonical`, whose early-exit
+  ## MSB-first comparison loop leaks, via timing, how many leading bytes
+  ## of the imported SECRET scalar match L; `scIsCanonicalCT`'s own doc
+  ## comment has the full hazard writeup) rather than silently reducing
+  ## it -- reduce-vs-reject is a security-semantic difference (silent
+  ## reduction would accept corrupted or cross-protocol key material and
+  ## make `toBytes` round-trip to a DIFFERENT value than was imported), so
+  ## this is a distinct behavior from `toRistrettoStaticSecretWide` below,
+  ## not an overload of it (see that constructor's own doc comment for why
+  ## they must have different names). `none` on reject.
   ##
   ## Both paths wipe this proc's own local scratch copy of the caller's
   ## input before returning (the `signing.keypair(seed, expectedPublic)`
@@ -675,7 +742,7 @@ func toRistrettoStaticSecret*(bytes: array[32, byte]): Option[RistrettoStaticSec
   ## runs, so the wipe cannot affect the returned value.
   var scratch = bytes
   try:
-    if scIsCanonical(scratch):
+    if scIsCanonicalCT(scratch):
       result = some(RistrettoStaticSecret(bytes: scratch))
     else:
       result = none(RistrettoStaticSecret)
@@ -811,6 +878,29 @@ func ristrettoScalarmult*(secret: RistrettoStaticSecret; p: RistrettoPoint): Ris
   ## the wipe-of-this-proc's-own-copy rationale, identical here (this
   ## proc's own local `sc`; `geScalarmultCT` independently wipes its own
   ## copy of the scalar it receives).
+  ##
+  ## **Returns `RistrettoPoint`, deliberately, not `RistrettoShared`** (DH
+  ## shared-secret hygiene fix, see `RistrettoPoint`'s own doc comment for
+  ## the general rule this is the declared exception to): this role's
+  ## documented consumers -- an OPRF server's evaluation step, a Pedersen
+  ## commitment -- publish the result, so it is PUBLIC-register output like
+  ## every other `RistrettoPoint`. A caller instead using THIS role for a
+  ## DH-shared-secret step (the honest CPace-routes-here-not-to-the-
+  ## ephemeral-role boundary `RistrettoEphemeralSecret`'s own doc comment
+  ## states, since that protocol needs two variable-base mults with the
+  ## same scalar) gets no automatic wipe of the returned point -- there is
+  ## none to give, by design (see `RistrettoPoint`'s doc comment again).
+  ## Two idioms cover that caller: if only the KDF input is needed, encode
+  ## immediately and wipe the resulting bytes via `sello/wipe.wipe`
+  ## (`wipe(ristrettoEncode(ristrettoScalarmult(secret, peer)).toBytes())`
+  ## does not compile as a one-liner since `wipe` takes `var`; bind the
+  ## encoded bytes to a `var` first, use them, then `wipe` that variable);
+  ## if the point itself is needed for further group arithmetic, minimize
+  ## its lifetime instead (compute it immediately before use, do not retain
+  ## it in a longer-lived structure) -- the same "unpublished intermediate
+  ## reveals nothing without the scalar" property the module doc's CT
+  ## posture already relies on for every other derived-but-unpublished
+  ## `RistrettoPoint`.
   var sc = toSecretScalar(secret.bytes)
   try:
     result = ristrettoUnchecked(geScalarmultCT(sc, p.p))
@@ -834,7 +924,11 @@ type
     ## lands on the borrow-then-consume shape exactly, and needs no scalar
     ## arithmetic of its own -- the Non-goals boundary (Schnorr responses,
     ## OPRF client unblinding, both needing mod-L scalar inversion this
-    ## library does not ship) does not defang it.
+    ## library does not ship) does not defang it. `S` itself -- the DH
+    ## shared secret this whole role exists to produce -- comes back as
+    ## `RistrettoShared`, not a bare `RistrettoPoint` (DH shared-secret
+    ## hygiene fix): see the consuming overload's own doc comment and
+    ## `RistrettoPoint`'s doc comment for why.
     ##
     ## **The honest boundary, not a defect:** a CPace-style PAKE's
     ## per-session scalar is "ephemeral" in protocol terms but needs TWO
@@ -949,9 +1043,12 @@ proc wipe*(s: sink RistrettoEphemeralSecret) =
   ## a caller could write `wipe(eph)` and then still reach the consuming
   ## `ristrettoScalarmult(move(eph), p)` -- which would compile and run the
   ## CT ladder on just-zeroed scalar bytes (all-zero reduces to scalar 0,
-  ## a valid if degenerate input -- `geScalarmultCT` has no small-order
-  ## rejection to catch it the way `x25519`'s ladder does), silently
-  ## defeating the single-use guarantee. With `sink`, `wipe(move(eph))`
+  ## a valid if degenerate input -- `geScalarmultCT` itself has no
+  ## small-order rejection the way `x25519`'s ladder does, though the
+  ## consuming `ristrettoScalarmult` overload's identity check would now
+  ## surface exactly this case as `none` at runtime: k = 0 makes S the
+  ## identity). `sink` remains the compile-time belt to that runtime
+  ## suspenders. With `sink`, `wipe(move(eph))`
   ## consumes `eph`; any later reference (including a second `wipe`, or the
   ## consuming scalarmult) is a compile error, not a runtime hazard.
   ct.wipe(s.bytes)
@@ -974,7 +1071,93 @@ func ristrettoScalarmultBase*(secret: RistrettoEphemeralSecret): RistrettoPoint 
   finally:
     ct.wipe(sc)
 
-func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoint): RistrettoPoint =
+# ---------------------------------------------------------------------------
+# RistrettoShared -- the completed DH output (DH shared-secret hygiene fix)
+# ---------------------------------------------------------------------------
+
+type
+  RistrettoShared* = object
+    ## The output of a completed ristretto255 Diffie-Hellman exchange --
+    ## today, that is exactly
+    ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)`'s result,
+    ## below. This IS secret material (feed it to a KDF, never use it
+    ## directly as a key -- the ECIES/hybrid-encryption register
+    ## `RistrettoEphemeralSecret`'s own doc comment names), so it follows
+    ## `x25519.X25519Shared`'s exact shape: one-field object over the
+    ## group element's CANONICAL ENCODING (`array[32, byte]`, not a raw
+    ## `RistrettoPoint`/`GeP3`), copyable, `secretHooks`-wiped.
+    ##
+    ## **Bytes, not a point -- the representation decision this fix had to
+    ## make, recorded here rather than left implicit:** the module's own
+    ## ElGamal/ECIES doc register (`RistrettoEphemeralSecret`'s doc
+    ## comment, the RFC's Types section) names "ElGamal/ECIES-style HYBRID
+    ## encryption" as the fitting consumer for this role -- hybrid
+    ## encryption feeds `KDF(encode(S))` to derive a symmetric key, it does
+    ## not do further GROUP arithmetic on `S` (that would be classic
+    ## ElGamal's `C2 = M + S` shape, which this module's own Non-goals
+    ## section already excludes: encoding a message AS a group element and
+    ## adding to it is scalar/message-encoding machinery this library does
+    ## not ship, distinct from the DH share itself). A caller who genuinely
+    ## needs `S` as a `RistrettoPoint` for further group arithmetic is
+    ## outside what THIS role promises: the static role plus its own
+    ## documented encode-and-wipe/minimize-lifetime idiom
+    ## (`ristrettoScalarmult(secret: RistrettoStaticSecret, ...)`'s doc
+    ## comment) is where that caller belongs, the same honest boundary that
+    ## already routes CPace to the static role instead of this one. Bytes
+    ## also make the wipe unconditional and complete: the alternative (a
+    ## point-holding secret type) would need a NEW wipe primitive over
+    ## `GeP3`/`Fe` that nothing else in this codebase has ever needed --
+    ## `ct.wipe` already works generically over any stack-only `T`, but
+    ## `RistrettoStaticSecret`/`X25519Shared`/every sibling secret role
+    ## here holds `array[32, byte]`, not a curve point, and this type
+    ## follows that same established shape rather than being the first
+    ## exception.
+    ##
+    ## One-field object, not `distinct array[32, byte]`, for the same
+    ## empirically-established ORC/Nim-2.2.10 reason as every other secret
+    ## role type in this file (see `RistrettoStaticSecret`'s doc comment,
+    ## which cross-references `signing.Seed`'s original writeup).
+    ##
+    ## **Why the consuming ephemeral scalarmult below returns
+    ## `Option[RistrettoShared]`, not a bare `RistrettoShared` (round-3
+    ## finding R3-1), while the static role's `ristrettoScalarmult` keeps
+    ## returning a plain, un-`Option`ed `RistrettoPoint`:** a degenerate
+    ## product (`S = identity`) is rejected ONLY on this type's producing
+    ## overload, because only there is `S` structurally the thing an
+    ## ECIES/hybrid-encryption caller is about to feed straight to a KDF as
+    ## a shared secret -- an identity result there is silently
+    ## attacker-predictable, the exact `x25519` SS6.1 zero-output hazard.
+    ## The static role's Pedersen-commitment/OPRF-evaluation consumers may
+    ## LEGITIMATELY compute and then publish an identity element as part of
+    ## a correct protocol run (e.g. committing to value 0 with blinding
+    ## factor 0) -- rejecting it there would reject valid behavior, not
+    ## attacker behavior, so that overload is unchanged. See
+    ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)`'s own doc
+    ## comment below for the full rejection rationale.
+    bytes: array[32, byte]
+
+## Type hooks must be declared immediately after the type they attach to --
+## see `signing.nim`'s module doc comment for why. Copyable (no `=copy`
+## restriction): the `x25519.X25519Shared` precedent -- a completed DH
+## output a caller may need to copy into a KDF call.
+secretHooks(RistrettoShared, bytes)
+
+func toBytes*(sh: RistrettoShared): array[32, byte] {.inline.} =
+  ## The completed DH output's canonical 32-byte encoding. Feed it to a
+  ## KDF -- never use it directly as a key. The returned copy is
+  ## caller-owned and NOT wiped by this call -- wipe it yourself (`wipe`
+  ## below) once you are done with it.
+  sh.bytes
+
+proc wipe*(sh: var RistrettoShared) =
+  ## Explicit early wipe, e.g. right after feeding a DH output to a KDF.
+  ## `=destroy` performs the same wipe automatically at scope exit; this
+  ## exists for callers that want it sooner. Calls `ct.wipe` directly
+  ## (the `x25519.wipe(var X25519Shared)`/round-4 finding R10 register),
+  ## not a named `zeroize<Type>` proc.
+  ct.wipe(sh.bytes)
+
+func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoint): Option[RistrettoShared] =
   ## CT variable-base scalar multiplication that CONSUMES the ephemeral
   ## secret (RFC-004 slice 7a) -- the ONE consuming call in the
   ## ElGamal/ECIES-style flow `RistrettoEphemeralSecret`'s own doc comment
@@ -997,18 +1180,88 @@ func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoi
   ## `injectdestructors` pass, later in the pipeline than `compiles()`/
   ## `nim check` reach.
   ##
-  ## Same `RistrettoEphemeralSecret` -> `scalar.SecretScalar` bridge as the
-  ## static-role `ristrettoScalarmult` overload above -- see its doc
-  ## comment for the wipe-of-this-proc's-own-copy rationale, identical
-  ## here. `secret` itself is a local owned by this proc for the duration
-  ## of the call and is wiped by its own `=destroy` when it goes out of
-  ## scope at return, the same automatic-wipe guarantee every other
+  ## **Returns `Option[RistrettoShared]`, not a bare `RistrettoPoint` or a
+  ## bare `RistrettoShared`** (DH shared-secret hygiene fix, extended by
+  ## round-3 finding R3-1 -- see `RistrettoPoint`'s own doc comment and
+  ## `RistrettoShared`'s for the full rationale on each half): `S = k*P` IS
+  ## the DH shared secret this whole role exists to produce, so unlike
+  ## every other scalarmult result in this module it does not get to stay
+  ## an unwiped, freely-copyable `RistrettoPoint` -- and unlike a bare
+  ## `RistrettoShared`, the result is not always well-defined, either.
+  ##
+  ## **`none` on a degenerate peer (round-3 finding R3-1):** a peer that
+  ## hands over `RistrettoIdentity` makes this proc compute
+  ## `S = k*identity = identity` -- a "shared secret" with no dependency on
+  ## `k` at all, predictable by anyone who has never seen the ephemeral
+  ## secret (the same failure shape `k ~= 0 (mod L)` would produce,
+  ## negligible for a freshly-sampled ephemeral but the identical `S`
+  ## either way). `geScalarmultCT` itself has no small-order rejection of
+  ## its own the way `x25519`'s ladder does over RFC 7748's small-order
+  ## catalog (see `wipe(sink RistrettoEphemeralSecret)`'s doc comment above
+  ## for that same fact stated in the misuse-prevention context it was
+  ## first written for) -- but ristretto255 is PRIME-ORDER (RFC 9496's
+  ## entire reason to exist over a raw cofactor-8 Edwards point), so there
+  ## is no partial/small-subgroup case to further distinguish: `S =
+  ## identity` iff `p = identity` or `k ≡ 0 (mod L)`, full stop, and that is
+  ## exactly the condition checked below. This mirrors `x25519`'s own
+  ## `Option[X25519Shared]` register (`x25519(secret: X25519StaticSecret,
+  ## ...)`'s doc comment has the full `Option`-vs-`bool` partiality
+  ## rationale, round-3 finding A8, not repeated here): the verdict is
+  ## checked on `encoded`, the same canonical-encoding bytes
+  ## `RistrettoShared` itself stores -- the identity's canonical encoding
+  ## is exactly 32 zero bytes (RFC 9496 SS4.3.2; `ristrettoEncode`'s own
+  ## doc comment names this same `i=0` case) -- via the same
+  ## caller-visible or-accumulate style `x25519.ladder`'s own zero-output
+  ## check uses, not a secret-dependent branch anywhere in the arithmetic
+  ## feeding it.
+  ##
+  ## The point is computed via the same `RistrettoEphemeralSecret` ->
+  ## `scalar.SecretScalar` bridge as the static-role `ristrettoScalarmult`
+  ## overload above (see its doc comment for the wipe-of-this-proc's-own-
+  ## scalar-copy rationale, identical here for `sc`), then bound to the
+  ## named local `sPoint` -- round-4 finding R4-1: `ristrettoEncode` takes
+  ## its argument by value, so passing `ristrettoUnchecked(s)` directly as
+  ## an anonymous expression would copy the secret DH product into a
+  ## temporary with no name and therefore no wipe path (`ristrettoEncode`
+  ## deliberately does not wipe its own `pt` parameter -- see that proc's
+  ## doc comment). The round-5 companion finding gave `ristrettoEncode`'s
+  ## RETURN value the same treatment: `reTmp` names the `RistrettoEncoded`
+  ## intermediate (the encoding of a still-secret DH product --
+  ## `ristrettoEncode` deliberately leaves its return value unwiped since
+  ## every other call site publishes it). The intermediate `GeP3` (`s`),
+  ## its `RistrettoPoint` copy (`sPoint`), and the `RistrettoEncoded` copy
+  ## (`reTmp`) -- the actual secret DH product, not merely scratch
+  ## values -- are all `ct.wipe`d before return, alongside `sc` and the
+  ## `encoded` byte scratch (on BOTH branches, `try`/`finally` -- the
+  ## `x25519` precedent:
+  ## the `some` branch's `RistrettoShared` already holds its own copy of
+  ## `encoded` by the time the wipe runs, so the wipe cannot affect the
+  ## returned value). `secret` itself is a local owned by this proc for the
+  ## duration of the call and is wiped by its own `=destroy` when it goes
+  ## out of scope at return, the same automatic-wipe guarantee every other
   ## secret-holding type in this codebase carries.
   var sc = toSecretScalar(secret.bytes)
+  var s: GeP3
+  var sPoint: RistrettoPoint
+  var reTmp: RistrettoEncoded
+  var encoded: array[32, byte]
   try:
-    result = ristrettoUnchecked(geScalarmultCT(sc, p.p))
+    s = geScalarmultCT(sc, p.p)
+    sPoint = ristrettoUnchecked(s)
+    reTmp = ristrettoEncode(sPoint)
+    encoded = toBytes(reTmp)
+    var acc: byte = 0
+    for b in encoded: acc = acc or b
+    if acc == 0:
+      result = none(RistrettoShared)
+    else:
+      result = some(RistrettoShared(bytes: encoded))
   finally:
     ct.wipe(sc)
+    ct.wipe(s)
+    ct.wipe(sPoint)
+    ct.wipe(reTmp)
+    ct.wipe(encoded)
 
 # ---------------------------------------------------------------------------
 # Hash-to-group -- RFC 9496 SS4.3.4 (RFC-004 slice 6)

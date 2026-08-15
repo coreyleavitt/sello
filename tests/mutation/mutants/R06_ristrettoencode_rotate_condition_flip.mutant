@@ -1,8 +1,8 @@
 id: R06
 target: src/sello/ristretto.nim
-desc: ristrettoEncode: sqrt(-1) rotation trigger inverted, 'let rotate = feIsNegative(tZinv)' -> 'let rotate = not feIsNegative(tZinv)' -- rotates x/y/den_inv exactly when RFC 9496 §4.3.2 says not to, and leaves them unrotated exactly when the rotation is required. RFC-004 slice 8b's "encode's rotation ... condition flip" target.
+desc: ristrettoEncode: sqrt(-1) rotation trigger inverted, 'let rotate = feIsNegative(tZinv)' -> 'let rotate = not feIsNegative(tZinv)' -- rotates x/y/den_inv exactly when RFC 9496 §4.3.2 says not to, and leaves them unrotated exactly when the rotation is required. RFC-004 slice 8b's "encode's rotation ... condition flip" target. Re-anchored (round-2 review finding R2-1): ristrettoEncode's body is now wrapped in a try/finally that unconditionally wipes its own named Fe locals before return (the sink-ephemeral ristrettoScalarmult overload routes a secret DH product through it), shifting this line's indentation from 2 spaces to 4 -- the OLD/NEW pair was updated to match the new source text verbatim, the same re-anchoring register as S07/F23's precedent, with no change to the mutant's targeted defect class.
 ====OLD====
-  let rotate = feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
+    let rotate = feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
 ====NEW====
-  let rotate = not feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
+    let rotate = not feIsNegative(tZinv)    # rotate = IS_NEGATIVE(t0 * z_inv)
 ====END====

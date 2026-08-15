@@ -390,6 +390,62 @@ secret-scalar role types mirroring X25519's static/ephemeral split --
 `RistrettoStaticSecret` (reusable, used above) or `RistrettoEphemeralSecret`
 (single-use, move-only, for an ElGamal/ECIES-style one-shot DH share).
 
+**The one-shot DH share's product is `Option[RistrettoShared]`, not a bare
+`RistrettoPoint`.** `ristrettoScalarmult(sink RistrettoEphemeralSecret,
+peer): Option[RistrettoShared]` -- the ephemeral role's consuming call --
+hands back the completed `S = k*P` DH product as `RistrettoShared`: a
+wiped, `x25519.X25519Shared`-shaped holder (`toBytes`, `wipe`, auto-wiping
+`=destroy`), not a freely-copyable `RistrettoPoint`. `S` IS the shared
+secret an ECIES/hybrid-encryption flow feeds to a KDF, unlike every other
+`RistrettoPoint` this library hands back (a Pedersen commitment, an OPRF
+blinded element), which is published and so needs no such hygiene. The
+result is `none` iff `S` is the identity -- `peer` was itself
+`RistrettoIdentity`, or (negligible for a freshly-sampled ephemeral) the
+scalar reduced to 0 mod L -- the same `x25519`-style rejection of a
+predictable, attacker-known "shared secret" (round-3 finding R3-1):
+
+```nim
+import sello
+import std/options
+
+var (ephemeralSecret, c1) = ristrettoEphemeralPair() # c1: send alongside the ciphertext
+let (recipientSecret, recipientPublic) = ristrettoStaticPair()
+
+# Sender: the ephemeral role's consuming call returns Option[RistrettoShared]
+# -- `none` only for a degenerate identity peer, which a real
+# recipientPublic never is. Extract its bytes -- feed them to a KDF to
+# derive the symmetric key, never use them directly as one -- then dispose
+# of both the extracted copy and the RistrettoShared itself.
+let sharedOpt = ristrettoScalarmult(move(ephemeralSecret), recipientPublic)
+doAssert sharedOpt.isSome
+var shared = sharedOpt.get()
+var sharedBytes = toBytes(shared)
+
+# Recipient: the static-role overload recomputes the identical product
+# from their own secret and the sender's c1, but returns a plain
+# RistrettoPoint (see below for why).
+let recipientShared = ristrettoScalarmult(recipientSecret, c1)
+
+# Agreement check via the documented vartime RistrettoEncoded == idiom (see
+# "Two == operators" below), not a raw-array compare -- both sides bring
+# their product to the same canonical wire representation first.
+doAssert ristrettoEncode(recipientShared) == toRistrettoEncoded(sharedBytes) # both sides agree on the DH product
+
+wipe(shared)
+wipe(sharedBytes)
+```
+
+The static-role overload above (`ristrettoScalarmult(secret:
+RistrettoStaticSecret, ...)`) is deliberately UNCHANGED -- it still returns
+a plain `RistrettoPoint`, because its own documented consumers (an OPRF
+server's evaluation, a Pedersen commitment) publish the result. A caller
+using the static role itself for a DH share (e.g. a CPace-style PAKE, which
+needs two variable-base multiplications against the same scalar and so
+cannot use the single-use ephemeral role) gets no automatic wipe of the
+returned point -- there is none to give a freely-copyable type -- and
+should either encode immediately and wipe the resulting bytes, or minimize
+the point's lifetime, per `sello/ristretto`'s module doc comment.
+
 **Two `==` operators, two timing registers -- read this before comparing
 in a timing-sensitive position.** `RistrettoPoint`'s `==` (used above) is
 constant-time; `RistrettoEncoded`'s `==` is the ordinary vartime
