@@ -51,6 +51,18 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
     256-doubling interleaved radix-16 ladder with a runtime 8-entry table,
     the operation that makes the group usable for OPRF evaluation,
     Pedersen commitments, and DH shares over an arbitrary point).
+  - `RistrettoShared` (added by the stage-4 review, mirroring
+    `x25519.X25519Shared`): the consuming ephemeral-secret
+    `ristrettoScalarmult` overload returns `Option[RistrettoShared]` --
+    `none` on an identity-valued product (degenerate peer; x25519's own
+    all-zero-output register) -- because in the ElGamal/ECIES flow that
+    module's own doc comments promise, the product S = k*P IS the shared
+    secret and needs the same wipe path every other completed-DH output
+    in this library has (`secretHooks`-wiped, `toBytes`, `wipe`). The
+    static-role overload deliberately still returns a plain
+    `RistrettoPoint` (its documented consumers -- OPRF server, Pedersen
+    -- publish the result); a static-role DH caller follows the
+    encode-and-wipe idiom documented on that overload instead.
   - **CT posture:** decode/encode/equality/the map are constant-time by
     construction (straight-line field arithmetic plus `feCMove`-based
     selects); the final accept/reject verdict is inherently caller-visible
@@ -66,7 +78,12 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
     replacing the deleted vartime `feSqrtRatioVartime`, which
     `ed25519.pointDecode` now also builds on, one implementation instead
     of two), `feEqualCT`/`feIsZeroCT`/`feBytesCanonicalCT`, `feAbs`, and a
-    re-exported `FeSqrtM1`.
+    re-exported `FeSqrtM1`; plus (stage-4 review) a CT scalar-canonicity
+    check, `scalar.scIsCanonicalCT` (32-byte constant-time
+    subtract-with-borrow against L), which `toRistrettoStaticSecret` now
+    routes secret-key import through -- the vartime early-exit
+    `scIsCanonical` stays on the public verify path only, where its
+    input is attacker-supplied wire data.
   - **Documented boundary (Non-goals):** this ships the group, not a
     scalar-arithmetic API. A Schnorr response needs `scalar.scMulAdd`
     (exists, submodule-only, deliberately not facade-exported); an OPRF
@@ -93,9 +110,12 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
   `[2]E/E[4]` boundary, agreement between the CT and vartime scalarmult
   registers, boundary scalars, hash-to-group determinism); coverage-guided
   fuzzing of `ristrettoDecode` (the attacker-controlled-input surface,
-  joining the existing three targets); a 20-mutant batch (catalog 50 ->
-  70) covering every new reject/select condition plus `geScalarmultCT`'s
-  own defect class; libsodium differential KATs under `-d:selloLibsodium`
+  joining the existing three targets); a 20-mutant batch covering every
+  new reject/select condition plus `geScalarmultCT`'s own defect class,
+  extended by three stage-4 review additions (S25: `scIsCanonicalCT`
+  verdict flip; R11: `geCachedNegate` swap omission; R12: the consuming
+  overload's identity-check flip) for a catalog of 50 -> 73, all
+  killed; libsodium differential KATs under `-d:selloLibsodium`
   (every A.1/A.2/A.3 vector plus random sweeps run through both sello and
   `crypto_core_ristretto255_*`/`crypto_scalarmult_ristretto255`, gated by
   a runtime libsodium >= 1.0.18 version assert); four new dudect timing
@@ -112,8 +132,9 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
   "deferred by design" bullet under "What's not here", which now lists
   decaf448 and the scalar-arithmetic/batch-op/Elligator-inverse
   follow-ons instead.
-- **(carried forward from the unreleased `0.3.1` tag, never previously
-  entered in this file -- see the note under Breaking changes below)**
+- **(carried forward from the `0.3.1` tag, which was never given a
+  changelog entry of its own -- see the note under Breaking changes
+  below)**
   `keypair(seed, expectedPublic): Option[Keypair]` (janus consumer
   finding 2) -- the load-time consistency gate for persisted keys whose
   storage carries both halves (e.g. OpenSSH's/libsodium's
@@ -133,8 +154,26 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
 
 ### Changed
 
+- Stage-4 code review hardening (six rounds to the 0-critical/0-high
+  floor, 2026-08-14; full ledger in
+  `docs/rfc-004-ristretto255.handoff.md`, outcome summary appended to
+  the RFC itself): `feSqrtRatioM1`'s two secret-derived boolean combines
+  made branchless (`uint8` bitwise `or`, not Nim's short-circuit `or` --
+  both sites had survived as real conditional jumps under `-O3`);
+  `ristrettoEncode` now hoists and wipes all of its own named `Fe`
+  locals (its input can be a secret DH product in the ElGamal/ECIES
+  flow, and encode's locals previously assumed to-be-published points);
+  the consuming `ristrettoScalarmult` overload wipes every
+  secret-holding value it creates, including formerly anonymous
+  point/encoding temporaries; `geScalarmultBase`/`geScalarmultCT`
+  converted to finally-only wipes (redundant double-wipe retired). The
+  `RistrettoShared`/`Option` return and `scIsCanonicalCT` described
+  under Added came from the same review.
 - `docs/ct-results.md` and `docs/mutation-results.md` regenerated for the
-  four new dudect targets and the 70-mutant catalog respectively.
+  four new dudect targets and the 73-mutant catalog respectively;
+  `docs/ct-results.md` additionally carries the slice-8d tiebreaker-run
+  record and the standalone x25519-static control-diagnostic appendix
+  resolving the two carve-out targets.
 - `CLAUDE.md`'s architecture list, implementation status, script/test
   inventory, and validation-bar section updated for `ristretto.nim` and
   its test/verification surface.
@@ -156,12 +195,14 @@ hardening changes carried forward from the unreleased 0.3.1 tag (see the
   exported it.
 - **Note on the `0.3.1` tag:** commit `8b9ed64` ("0.3.1: persisted-key
   load gate and compiler-enforced effect contract") bumped
-  `milpa.kdl`/`sello.nimble` to `0.3.1` but that version was never given
-  its own `CHANGELOG.md` entry before RFC-004 work began on top of it.
-  Both of its changes are recorded under Added, above, rather than
-  backfilled as a separate `[0.3.1]` section, since `0.3.1` itself was
-  never a tagged release point distinct from this one in practice --
-  0.4.0 is the first version stamp this changelog documents after 0.3.0.
+  `milpa.kdl`/`sello.nimble` to `0.3.1` and was tagged `v0.3.1`
+  (2026-08-09), but that version was never given its own `CHANGELOG.md`
+  entry before RFC-004 work began on top of it. (An earlier revision of
+  this note claimed 0.3.1 "was never a tagged release point" -- wrong;
+  the tag exists and predates this entry.) Both of its changes are
+  recorded under Added, above, marked "carried forward", rather than
+  backfilled as a separate `[0.3.1]` section -- 0.4.0 is the first
+  version this changelog documents after 0.3.0.
 
 ## [0.3.0] - 2026-08-07
 
