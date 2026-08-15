@@ -1,0 +1,8 @@
+id: R11
+target: src/sello/ristretto.nim
+desc: geCachedNegate: yPlusX/yMinusX swap dropped on the yPlusX component, 'result.yPlusX = q.yMinusX' -> 'result.yPlusX = q.yPlusX' -- negating a point via GeCached requires swapping which sum (y+x vs y-x) each field holds (negating x swaps which is which); this leaves yPlusX unswapped (a no-op on that one component) while yMinusX/t2d/z still change correctly, so every `-` result carries the WRONG x for its correct y -- a genuinely different (wrong) point, not the input's negation. Backs both the binary and unary `-` operators (RFC-004 slice 8b's mutation-catalog gap: geCachedNegate itself had no direct mutant, only callers).
+====OLD====
+  result.yPlusX = q.yMinusX
+====NEW====
+  result.yPlusX = q.yPlusX
+====END====

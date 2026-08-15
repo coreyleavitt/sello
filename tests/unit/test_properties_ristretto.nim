@@ -197,8 +197,18 @@ suite "ristretto property: E[4] torsion invariance":
       ensure toBytes(ristrettoEncode(p + t)) == toBytes(ristrettoEncode(p))
 
 # ---------------------------------------------------------------------------
-# RistrettoStaticSecret -- fixed-base vs vartime scalarmult agreement
-# (RFC-004 slice 5a).
+# Equality-operator consistency with encoding equality (docs/rfc-004-
+# ristretto255.md's Validation battery "Properties" bullet promises this one
+# by name -- "equality-operator consistency with encoding equality" -- but it
+# was never implemented; this closes that gap). `RistrettoPoint`'s `==` is
+# the CT quotient-equality check (RFC 9496 SS4.3.3's cross-product test);
+# `RistrettoEncoded`'s `==` (reached here via `toBytes`) is the ordinary
+# vartime byte-compare on the canonical encoding -- see ristretto.nim's own
+# module doc comment for why the two live in different CT registers. They
+# must still always AGREE on the same verdict: two representations name the
+# same group element (`==` true) iff their canonical encodings are byte-
+# identical (`toBytes(ristrettoEncode(_)) ==` true), since encoding IS
+# choosing the one canonical representative per RFC 9496 SS4.3.2.
 # ---------------------------------------------------------------------------
 
 proc randomCanonicalScalarBytes(): Strategy[array[32, byte]] =
@@ -212,6 +222,36 @@ proc randomCanonicalScalarBytes(): Strategy[array[32, byte]] =
   ## and total, so there is no reason to court that rejection at all).
   arrays[64, byte](randByte()).map(proc(wide: array[64, byte]): array[32, byte] =
     scReduce(result, wide))
+
+suite "ristretto property: equality-operator consistency with encoding equality":
+  property "(p == q) == (toBytes(encode(p)) == toBytes(encode(q))), for independently drawn random points":
+    with pointPropertySettings50
+    given p in randomRistrettoPoints(), q in randomRistrettoPoints()
+    ensure (p == q) == (toBytes(ristrettoEncode(p)) == toBytes(ristrettoEncode(q)))
+
+  property "equal case: p == p (a copy) and (a+b)G == aG + bG (a differently-derived representation of the same element) both agree with encoding equality":
+    with propertySettings50
+    given aBytes in randomCanonicalScalarBytes(), bBytes in randomCanonicalScalarBytes()
+    # p == p via a plain copy -- the trivial equal case.
+    let pA = ristrettoUnchecked(geScalarmultBase(toSecretScalar(aBytes)))
+    let pCopy = pA
+    ensure (pA == pCopy) == (toBytes(ristrettoEncode(pA)) == toBytes(ristrettoEncode(pCopy)))
+    ensure pA == pCopy
+    # p == p via two genuinely different derivations of the SAME element:
+    # (a+b)G computed directly by one scalarmult (`scMulAdd(aBytes, 1, bBytes)`
+    # reduces a+b mod L in one step) vs aG + bG computed as two independent
+    # scalarmults combined by the group operator -- exercising `==`'s
+    # cross-product check against non-degenerate, differently-z-scaled
+    # representations, not just an aliased copy of the same `GeP3`.
+    let pB = ristrettoUnchecked(geScalarmultBase(toSecretScalar(bBytes)))
+    var one: array[32, byte]
+    one[0] = 1
+    let sumBytes = scMulAdd(aBytes, toSecretScalar(one), toSecretScalar(bBytes))
+    let viaScalarmult = ristrettoUnchecked(geScalarmultBase(toSecretScalar(sumBytes)))
+    let viaAddition = pA + pB
+    ensure (viaScalarmult == viaAddition) ==
+      (toBytes(ristrettoEncode(viaScalarmult)) == toBytes(ristrettoEncode(viaAddition)))
+    ensure viaScalarmult == viaAddition
 
 suite "ristretto property: ristrettoScalarmultBase / ristrettoScalarmultVartime agreement":
   property "ristrettoScalarmultBase(secret) == ristrettoScalarmultVartime(secret.toBytes, RistrettoBasePoint)":
