@@ -8,7 +8,11 @@
   committed as `d1133e2`. Version 0.3.0; tags v0.1.0–v0.3.0 exist (v0.3.0 @ `28700a3`
   — the review-remediation and handoff commits sit after it, currently untagged).
 - **Resume:** nothing open in this RFC — working tree clean, safe `/clear` point.
-  Next-step options for Corey: (1) publish logistics (push repo + tags, nimble
+  *(Update 2026-08-14: this is no longer the live next-step doc — option (2) below
+  was taken and ran to completion as RFC-004, incl. its stage-4 review; the v0.3.1
+  tag decision from option (1) was also made (tag exists). The live pointer is
+  `rfc-004-ristretto255.handoff.md`.)*
+  Next-step options for Corey (historical): (1) publish logistics (push repo + tags, nimble
   registry; decide whether the post-v0.3.0 commits warrant a v0.3.1 tag),
   (2) Ristretto255 as RFC-004 (the brief's last undelivered chapter;
   `feSqrtRatioVartime` extension point ready) or batch verification, (3) further
