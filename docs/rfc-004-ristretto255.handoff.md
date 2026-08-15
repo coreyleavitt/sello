@@ -1,6 +1,22 @@
 # RFC-004 Ristretto255 — handoff
 
-- **Stage:** 3 COMPLETE — ready for stage 4 (`/code-review rfc-004`). RFC
+- **Stage:** 4 (code review) — **FLOOR REACHED, round 6 clean
+  (2026-08-14)**. Six rounds total: round-1 full review (five reviewers,
+  five confirmed findings) → fix mandate approved by Corey (fix through
+  Medium, leave Low) → rounds 2-6 fixed-and-re-reviewed until a round
+  surfaced nothing above Low. Every C/H/M finding across all rounds is
+  FIXED (see ledger); all fixes UNCOMMITTED in the working tree,
+  awaiting Corey's commit approval. Remaining Lows: NONE — Corey
+  directed "fix lows" after the floor was reached, so finding 6
+  (double-wipe redundancy: both scalar.nim functions now finally-only)
+  and the frozen-RFC staleness (additive "Stage-4 review outcome"
+  ledger section appended, 13cd03c precedent) were fixed too; round-6's
+  cosmetic line-wrap was already reflowed inline. ZERO open findings at
+  any severity. Final verification state: test.sh green exit 0
+  (11 unit + 5 property files, 0 FAILED), mutation 73/73 killed 0
+  survivors, check-readme 8/8 fences, all 73 mutant anchors verified
+  exactly-once by script after every source edit.
+- **Stage 3 record:** COMPLETE. RFC
   APPROVED by Corey 2026-08-13 after three architect rounds; every slice
   (1a through 8d) implemented, committed, and gated. Slice 8d closed out
   2026-08-14: facade/docs/close-out commit `a93bea2`. The slice-7b dudect
@@ -9,7 +25,14 @@
   below for the full record (`docs/ct-results.md`'s "RFC-004 slice 8d"
   section plus its control-diagnostic appendix are the permanent
   evidentiary record). Version stamped 0.4.0 (`milpa.kdl`/`sello.nimble`).
-- **Resume:** `/code-review rfc-004`.
+- **Resume:** RFC-004 COMPLETE — all four rfc-flow stages done. Stage-4
+  fixes committed 2026-08-14 as five commits on main (approved by
+  Corey: "commit and push"): 88cbe76 (feSqrtRatioM1 branchless
+  combines), c49761d (scIsCanonicalCT + finally-only wipes), 7fa2348
+  (RistrettoShared/Option arc), 36f7e64 (coverage + doc refresh), plus
+  the docs close-out commit carrying this file. Ship gate satisfied
+  (round 6: 0 critical/high; all Lows also fixed on Corey's direction).
+  Nothing open. Next RFC starts with /clear per rfc-flow.
 - **Resume (historical — grind loop context, slices 1a-8c):** grind loop
   ran through slice 8c, then slice 8d was picked up directly (not via the
   grind loop) per the RFC-flow's own stage-3-closeout convention (slice 8c
@@ -588,5 +611,81 @@
   differential carry the adversarial weight, disclosed honestly
 
 ## Review ledger (stage 4)
-Empty — review happens after implementation (stage 4); architect-round findings
-are applied directly to the RFC text in stage 2, not ledgered here.
+Round 1 complete (2026-08-14): five reviewers (crypto correctness,
+security, design & ergonomics, test coverage, Nim semantics) over
+`8b9ed64..a93bea2`; all five significant findings adversarially verified
+CONFIRMED (none refuted). Presented to Corey 2026-08-14; mandate
+approved: fix 1-5, leave 6. Statuses below track the fix loop.
+
+| id | sev | finding | status | proof / reason |
+|----|-----|---------|--------|----------------|
+| 1 | H | `feSqrtRatioM1` combines secret-derived bools with Nim's short-circuit `or` at `field.nim:834` (`flippedSignSqrt or flippedSignSqrtI` into `feCMove`) and `field.nim:838` (`wasSquare`) — a secret-dependent branch inside a function whose doc claims none. Verifier CONFIRMED at machine-code level: under the project's exact release flags (gcc -O3), both sites survive as real conditional jumps in `feSqrtRatioM1`'s disassembly. Reaches measured secret paths (`ristrettoEncode`, `ristrettoFromUniformBytes` via `ristrettoMap`). Magnitude likely below dudect's resolution floor (function dominated by `fePow22523`), but the project bar is branchless-by-construction. Only instance of the class (grep-verified). Fix: the `==` idiom — `bool(uint8(a) or uint8(b))` at both sites. | fixed (uncommitted) | both sites rewritten + doc note; F23 mutant re-anchored (only collision); test.sh green, mutation 70/70 killed |
+| 2 | H | `toRistrettoStaticSecret` (`ristretto.nim:678`) validates imported SECRET key bytes with vartime early-exit `scIsCanonical` (`scalar.nim:997`, MSB-first byte loop, returns at first divergence from L) — leaks prefix-match-length of the secret against L via timing on every import of a persisted key. Same hazard class this RFC fixed on the field side (`feBytesCanonicalCT`, whose doc says "never on secret-derived data"); no CT scalar sibling exists; dalek's `from_canonical_bytes` is CT. Practical per-query yield small (loop exits on byte 31 with p=255/256) but it is the codebase's hard-rule class, and the path has zero dudect coverage. Fix: add CT `scIsCanonicalCT` (or-accumulate/CT-borrow, `feBytesCanonicalCT`'s shape) + route import through it; `ed25519.verify`'s vartime call stays (public data, correct). | fixed (uncommitted) | `scIsCanonicalCT` added (32-byte CT subtract-with-borrow, uint32, no data branch), import rerouted, vartime warning doc added; RED/GREEN verified; boundary+500-random agreement suite in test_scalar.nim; new mutant S25, mutation 71/71 killed; test.sh green; symex coverage DECLINED with recorded rationale (symex_reduce composition resource-wall precedent) |
+| 3 | M | DH-shared-secret hygiene gap: `ristrettoScalarmult` returns bare `RistrettoPoint` — no `=destroy`, no `wipe` path — yet in the module's OWN ElGamal/ECIES flow (the `RistrettoEphemeralSecret` sink-consume doc) that return value S = k·P IS the shared secret, the exact role `X25519Shared` (secretHooks + wipe overload) exists to protect. The "no wipe on RistrettoPoint" rationale (`ristretto.nim:128-144`) covers commitments/blinded elements only and is silent on the DH case; none of the three architect rounds caught it (round-3 finding 7 and finding 8 never cross-referenced). Caller workaround today wipes only a copy, not the original. Fix direction (Corey may prefer either): a wiped `RistrettoShared`-style return for the consuming overload mirroring `X25519Shared`, or an explicit documented post-processing idiom + doc-comment carve-out naming the trap. | fixed (uncommitted) | `RistrettoShared` added (bytes-holding, secretHooks/toBytes/wipe, exact X25519Shared mirror); sink-ephemeral `ristrettoScalarmult` returns it, intermediate GeP3 product now wiped in `finally`; static overload deliberately unchanged (publish-register consumers) with CPace/static-DH encode-and-wipe idiom documented; recorded design rationale: module promises ECIES-style KDF flow, ElGamal point-add is outside Non-goals, point-needing callers route to static role. Facade export + effect pins + 3 new suites (DH agreement, hygiene probe, toBytes roundtrip), RED/GREEN verified; README ECIES example (check-readme.sh 8/8 fences), CLAUDE.md updated; test.sh green; mutation audit: no anchored text touched, no run needed |
+| 4 | M | RFC-promised property never implemented: `docs/rfc-004-ristretto255.md:544` lists "equality-operator consistency with encoding equality" among `test_properties_ristretto.nim`'s required properties; no such test exists (file never touches `RistrettoEncoded`). Only a fixed four-point deterministic analog exists (`test_ristretto.nim:760-765`). Fix: add the property — random p, q: `(p == q) == (encode(p) == encode(q))`. | fixed (uncommitted) | new suite in test_properties_ristretto.nim: random-pair consistency + equal-case via (a+b)G vs aG+bG distinct derivations; RED-verified (inverted assertion produced a genuine counterexample); test.sh green |
+| 5 | M | `geCachedNegate` (`ristretto.nim:531-551`, backs both `-` operators — new RFC-004 arithmetic) has NO mutation-catalog entry; no mutant touches it (grep of all 70). Behavioral inverse tests (`P + (-P) == identity` on non-degenerate points) would likely kill a real defect, so a catalog gap, not an unguarded blind spot — but the validation bar's mutation register names exactly this class of new arithmetic. Fix: one swap-omission mutant (e.g. `result.yPlusX = q.yPlusX`), verified red-then-killed. | fixed (uncommitted) | R11_gecachednegate_yplusx_noop added (unique-match verified against post-fix-3 source); mutation 72/72 killed, 0 survivors; R11 KILLED (test) by test_facade.nim |
+| 6 | L | `geScalarmultCT` double-wipes `digits`/`acc`/`u`/`step` on the normal-return path (end of `try` + unconditionally in `finally`) — harmless redundancy copied verbatim from `geScalarmultBase`'s pre-existing shape; fixing it means touching the established pattern in both functions or accepting the asymmetry. | fixed (uncommitted) | Corey directed "fix lows" post-floor: BOTH functions converted to finally-only wipes (early sBytes wipe kept — genuine lifetime reduction), doc comments reworded to record the retirement; all 73 mutant anchors re-verified exactly-once; test.sh green exit 0, 0 FAILED, 11+5 files |
+| L-rfc | L | The frozen RFC doc's body still describes pre-review designs (vartime scIsCanonical in the import path; bare RistrettoPoint DH return). Convention keeps RFC bodies frozen at approval. | fixed (uncommitted) | additive "Stage-4 review outcome (2026-08-14)" ledger section appended to the RFC (13cd03c amendment precedent — no silent body rewrite) enumerating all five supersessions; status header updated to stages 3+4 COMPLETE |
+| R2-1 | M | Round-2 security: fix 3 incomplete — the consuming `ristrettoScalarmult` overload routes the secret DH product through `ristrettoEncode`, which copies the point's coordinates into ~20 named `Fe` locals (x0/y0/z0/t0, zPlusY, u1/u2, zInv, ...) and has NO wipe path — encode's no-wipe design assumed to-be-published points. Stack-residue disclosure class (core dump/OOB-read/cold-boot), not timing. x25519 A1 precedent: each secret-holding path wipes its OWN named locals (field-primitive internals like feInvert's are the accepted boundary — same treatment in the x25519 ladder). Fix: `ristrettoEncode` wipes its own named locals unconditionally (negligible vs its feInvert-dominated cost; no dual path, no drift-prone duplicate). | fixed (uncommitted) | all 25 named Fe locals hoisted above `try`, ct.wipe'd in `finally` (A1 ladder precedent); doc paragraph records why + the dudect uniform-work note; R06/R07 re-anchored (indent shift), mutation 72/72 killed; test.sh green 334 OK |
+| R2-2 | M | Round-2 design: `scIsCanonicalCT`'s symex-decline rationale lives only in this ledger — the project's validation-bar register puts such disclosures in the code/`tests/verify/` docs (symex_mask/symex_reduce precedent), so the next implementer reading scalar.nim sees an undisclosed gap. Fix: one-sentence recorded-decline note in `scIsCanonicalCT`'s doc comment (cross-referencing symex_reduce's resource-wall precedent). | fixed (uncommitted) | 4-sentence considered-and-declined paragraph added citing symex_reduce's resource wall + the empirical suite carrying the weight |
+| R2-3 | M | Round-2 design+security (found independently by both reviewers): README's new ECIES example wipes `shared` BEFORE any use (comment says feed toBytes to a KDF; code never does) and never demonstrates cross-role DH agreement — a reader copying it destroys the secret unused, and the static-role recipient side never shows the encode-and-wipe idiom the surrounding prose recommends. Fix: reorder — compute both sides, doAssert `toBytes(shared) == toBytes(ristrettoEncode(recipientShared))`, then wipe both per role-appropriate idiom; re-run check-readme.sh. | fixed (uncommitted) | fence reworked: both sides computed, doAssert agreement, role-appropriate cleanup both sides; check-readme.sh 8/8 fences clean |
+
+Round 2 (2026-08-14): three reviewers (security, design, correctness) over
+the uncommitted fix diff. Correctness: fully clean (borrow chain proved
+correct by construction; both feSqrtRatioM1 sites verified; byte-identical
+overload return; property falsifiable; mutants unique). Security + design:
+the three NEW findings above (R2-1/R2-2/R2-3), all Medium, all within the
+approved mandate — fixed, see statuses.
+
+| id | sev | finding | status | proof / reason |
+|----|-----|---------|--------|----------------|
+| R3-1 | M | Round-3 design (escalated from a round-2 minor): the consuming DH overload returns bare `RistrettoShared` with no degenerate-peer rejection — a peer sending `RistrettoIdentity` (or k ≡ 0 mod L, negligible for fresh ephemerals) yields S = identity, fully predictable without knowing k. sello's own `x25519` rejects the analogous case (`Option`/`none` on all-zero output) and libsodium's `crypto_scalarmult_ristretto255` refuses identity results outright; nothing in code or docs said whether this was accepted risk or oversight. In-codebase precedent unambiguous → fix: `Option[RistrettoShared]`, `none` iff S = identity, x25519's register; document why here and not on the publish-register overloads (Pedersen/OPRF results may legitimately be identity). | fixed (uncommitted) | Option[RistrettoShared] + or-accumulate identity check (ladder zero-check register); RED twice (type mismatch; inverted check cascaded failures — load-bearing, not vacuous); identity-peer isNone test + none-path wipe-hygiene probe test; docs updated at overload/type/module/facade; test.sh + check-readme green |
+| R3-2 | L | Round-3 design: README fence's `doAssert sharedBytes == recipientSharedBytes` compares raw arrays instead of demonstrating the documented vartime `RistrettoEncoded ==` idiom the very next section teaches — missed teaching opportunity, not wrong. Folded into R3-1's fence rework. | fixed (uncommitted) | fence now compares via `ristrettoEncode(recipientShared) == toRistrettoEncoded(sharedBytes)` + isSome/get + std/options import; check-readme 8/8 |
+| R3-3 | M | Round-3 coherence: CLAUDE.md still says "70/70"/"70 mutants" in four places (implementation-status bullet, mutation.sh inline comment, tests/mutation/ section, validation-bar bullet); actual catalog is 72 (S25 + R11 added by this review). Genuine drift in the authoritative doc. | fixed (uncommitted) | all four locations updated to 72 + terse S25/R11 mentions; repo-wide grep found no other stale counts (handoff historical entries correctly left) |
+
+Round 3 (2026-08-14): security (wipe completeness name-by-name, hoisting
+init semantics, .root change, CT posture, whole-diff regression sweep) —
+CLEAN, no new findings. Design — the three findings above, all fixed.
+
+| id | sev | finding | status | proof / reason |
+|----|-----|---------|--------|----------------|
+| R4-1 | M | Round-4 security: `ristrettoEncode(ristrettoUnchecked(s))` inside the consuming overload creates an anonymous `RistrettoPoint` temporary — a ~160-byte copy of the secret GeP3 DH product with NO wipe path (not a named local in either scope; `ristrettoEncode` deliberately doesn't wipe `pt`), contradicting the overload's own "every secret-derived local wiped" claim. Whether it persists on the stack is compiler-dependent — exactly the assumption class this codebase refuses to trust unverified. Fix: bind `let sPoint = ristrettoUnchecked(s)` hoisted + added to the `finally` wipe list. | fixed (uncommitted) | sPoint hoisted var + ct.wipe(sPoint) in finally (generic wipe handles the plain object); doc paragraph re-enumerates wiped set truthfully; all R01-R11 anchors re-verified intact; test.sh green |
+| R4-2 | M | Round-4 security: the new identity-rejection branch (`acc == 0`) has no curated mutant — its x25519 sibling zero-check carries two (X01/X02); covered by hand-written tests but a hole in the systematic validation-bar artifact. Fix: one mutant flipping the verdict, verified killed; CLAUDE.md counts 72→73. | fixed (uncommitted) | R12_ristrettoscalarmult_ephemeral_zerocheck_flip added (unique match, harness-verified); mutation 73/73 killed, 0 survivors, 657s; CLAUDE.md four locations updated to 73 + R12 mention |
+
+Round-4 design: three doc-only Lows (wipe() doc vs the new Option check;
+CLAUDE.md facade enumeration and ct.nim secretHooks list missing
+RistrettoShared) — all three fixed INLINE by the control loop same day
+(doc text only, no executable code). Round-4 security: items 2/3 clean
+(sink consumption on none path probe-tested; prime-order doc claims
+hold); the two findings above fixed (see statuses).
+
+| id | sev | finding | status | proof / reason |
+|----|-----|---------|--------|----------------|
+| R5-1 | M | Round-5 security: R4-1's twin on the encode OUTPUT side — `toBytes(ristrettoEncode(sPoint))` creates an anonymous `RistrettoEncoded` temporary (byte-identical copy of the still-secret DH encoding) with no name and no wipe path; `ristrettoEncode` deliberately leaves its return value unwiped (publish-bound at every other call site). Only production site combining the two on secret data (grep-verified). Also the doc clause "and encoded (already CT)" conflated a timing property with a wipe property. | fixed (uncommitted) | fixed INLINE by control loop (executable but a mechanical 6-line mirror of R4-1): hoisted `var reTmp: RistrettoEncoded`, assigned in try, `encoded = toBytes(reTmp)`, `ct.wipe(reTmp)` in finally; doc paragraph rewritten to name it; all 73 mutant anchors re-verified exactly-once by script; test.sh green (11 unit + 5 property) |
+
+Round 5 (2026-08-14): design lens CLEAN (counts/enumerations/doc edits
+all verified accurate); security lens found R5-1 above — fixed inline
+same day.
+
+Round 6 (2026-08-14): FLOOR. Combined security+design pass over the
+R5-1 delta — security CLEAN (full secret-holding-value inventory of the
+overload body: sc/s/sPoint/reTmp/encoded all wiped; `acc` justified as
+caller-visible-verdict register, x25519 zero-check precedent; no new
+anonymous temporary; doc paragraph exactly true), design CLEAN except
+one cosmetic line-wrap Low, reflowed inline same day. **0 Critical / 0
+High / 0 Medium — review loop complete; rfc-flow ship gate (0 C/H)
+satisfied.**
+
+Verified correct (round 1, for the record): all five RFC 9496 §4.3.1
+decode rejects + §4.3.2 encode (independently re-implemented in Python,
+byte-identical); quotient `==` formula + bitwise combine; MAP
+line-for-line; `geScalarmultCT` Horner composition (hand-verified s=0,
+s=1); all four new constants algebraically against d = -121665/121666;
+`RistrettoBasePoint` = A.1 i=1 byte-for-byte; `pointDecode` rewrite
+semantically equivalent to the old vartime decoder; effect contracts,
+facade export list (all 27 symbols), checks-off scoping, ORC hooks,
+sink semantics, FFI declarations all clean; wipe discipline correct on
+both accept/reject paths; type gates hold (no SecretScalar/role-type
+route to any vartime path); A.1/A.2/A.3/A.4 vector coverage complete;
+all 20 new mutants unique-match verified; fixtures fail for the
+intended reasons; layering clean (import-list verified).

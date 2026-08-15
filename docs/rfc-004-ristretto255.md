@@ -3,10 +3,14 @@
 - **Status:** APPROVED (Corey, 2026-08-13) — architect rounds 1, 2 AND 3 COMPLETE
   (rounds 1–2 2026-08-09, round 3 2026-08-13; all rounds' four-lens findings
   applied to this text — see "Open questions — resolved in round 1", "Round-2
-  changes", and "Round-3 changes"). Stage 3 (implementation grind) in progress;
-  one wrong-spec escalation amended mid-grind — see "Stage-3 amendment
-  (2026-08-14)". Unlike RFC-002/003 this is a fresh feature RFC, not an
-  audit output, so the architect rounds were NOT waived.
+  changes", and "Round-3 changes"). Stage 3 (implementation grind) COMPLETE
+  2026-08-14 (all 15 slices, version 0.4.0); one wrong-spec escalation amended
+  mid-grind — see "Stage-3 amendment (2026-08-14)". Stage 4 (code review)
+  COMPLETE 2026-08-14 at the 0-critical/0-high floor after six rounds — see
+  "Stage-4 review outcome (2026-08-14)" at the end of this document for what
+  the review changed relative to this text. Unlike RFC-002/003 this is a
+  fresh feature RFC, not an audit output, so the architect rounds were NOT
+  waived.
 - **Handoff doc:** `docs/rfc-004-ristretto255.handoff.md` (live progress ledger — read it
   first when resuming).
 - **Standing orders:** identical to RFC-001/002/003 (PhD-CS bar; no consumers yet,
@@ -1075,3 +1079,36 @@ behavior; (3) the Context framing corrected from "quotient by its 8-torsion /
 8 points ARE one element" to [2]E/E[4]. Library code needed NO changes — the
 error lived only in the test plan's premise; decode/encode/group ops are
 byte-correct against every RFC 9496 vector.
+
+## Stage-4 review outcome (2026-08-14): what the review changed vs. this text
+
+Six review rounds (five-lens round 1, then fix-and-re-review to the floor;
+full ledger in the handoff doc) — recorded here, ledger-style, so this
+frozen design text stays honest about where the shipped code supersedes it:
+
+1. **`toRistrettoStaticSecret` validates via `scalar.scIsCanonicalCT`**, a
+   new CT subtract-with-borrow canonicity check — NOT the vartime
+   `scIsCanonical` this text names (round-1 finding 2: early-exit compare
+   on imported secret bytes, the scalar-side twin of the
+   `feBytesCanonicalCT` trap this RFC's own round 3 closed on the field
+   side). `ed25519.verify`'s vartime use stands (public data).
+2. **`feSqrtRatioM1`'s two boolean combines are bitwise** (`bool(uint8(a)
+   or uint8(b))`), not Nim's short-circuit `or` — the same hazard the `==`
+   design in this text already documented, found surviving as real branches
+   in release disassembly (round-1 finding 1).
+3. **A `RistrettoShared` role type exists** (secretHooks-wiped,
+   `X25519Shared` mirror) and the consuming ephemeral `ristrettoScalarmult`
+   returns `Option[RistrettoShared]` — `none` on an identity-valued product
+   (degenerate peer / k ≡ 0, x25519's Option register; libsodium refuses
+   the same case). This text's design returned a bare `RistrettoPoint` from
+   that call and its no-wipe rationale never addressed the DH-share case
+   (round-1 finding 3, deepened by rounds 3-5: `ristrettoEncode` now also
+   wipes its 25 named locals unconditionally, and both anonymous
+   secret-derived temporaries at its call boundary are named and wiped).
+4. **Validation additions:** the equality-vs-encoding-equality property
+   this text promised but slice 8d never delivered; mutation catalog 70 →
+   73 (`scIsCanonicalCT` verdict flip, `geCachedNegate` swap omission, the
+   identity-rejection flip); a recorded symex decline for the new borrow
+   chain (`symex_reduce` resource-wall precedent).
+5. **Wipe-shape cleanup:** `geScalarmultBase`/`geScalarmultCT` retired
+   their end-of-try duplicate wipes (finally-only, zero-benefit redundancy).
