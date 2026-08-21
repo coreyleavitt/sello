@@ -6,9 +6,12 @@ core.**
 
 sello exists because the Nim ecosystem had no production pure-Nim
 ed25519/X25519: every existing option wraps [orlp's ed25519][orlp] C.
-`nimcrypto` covers hashes, HMAC, and symmetric ciphers well but has neither
-25519 primitive. sello fills that gap: pure-Nim ed25519, X25519,
-Curve25519, EdDSA, RFC 8032, RFC 7748.
+sello fills that gap: pure-Nim ed25519, X25519, Curve25519, EdDSA, RFC 8032,
+RFC 7748 -- **zero runtime dependencies**. SHA-512 (ed25519's internal hash)
+was originally sourced from `nimcrypto`; as of RFC-006 it is in-house,
+implemented directly from FIPS 180-4 and validated against the full NIST
+CAVP SHAVS vector corpus, so nothing outside this source tree ever touches
+a secret.
 
 [orlp]: https://github.com/orlp/ed25519
 
@@ -143,11 +146,13 @@ threat model:
 requires "sello"
 ```
 
-Nim >= 2.2.10. Depends on `nimcrypto` for SHA-512 (the one primitive sello
-deliberately does not reimplement); everything else is pure Nim. Development
-resolves and pins `nimcrypto` via milpa (`milpa.kdl`/`milpa.lock`, commit SHA
-+ content hash); nimble-ecosystem consumers resolve it normally via
-`sello.nimble`'s `requires` floor.
+Nim >= 2.2.10. **Zero dependencies** -- SHA-512 is implemented in-house
+(`src/sello/private/sha512.nim`, FIPS 180-4); `nimcrypto` was sello's SHA-512
+dependency through the 0.4.0 release and has been fully retired. A plain
+`milpa fetch` (development) or `nimble install` (ecosystem consumers)
+resolves nothing at all for the core library; `proptest` remains, optional
+and dev-only, for property-based testing (see "Building and testing"
+below).
 
 `nim >= 2.2.10` in `sello.nimble` is a compatibility floor, not a tested
 matrix: every claim in this README (RFC vectors, Wycheproof, the timing
@@ -472,37 +477,40 @@ full boundary.
 ## Building and testing
 
 sello is developed against milpa (Corey's Nim dependency resolver), not
-nimble: `milpa.kdl` declares `nimcrypto` as a pinned git dependency,
-`milpa fetch` clones it into `_deps/` and emits `nim.cfg`, and `milpa.lock`
-records the exact commit SHA + content hash resolved (see
-[`NOTICE`](NOTICE)). Run `milpa fetch` once after cloning.
+nimble. As of RFC-006 (in-house SHA-512 retired the `nimcrypto`
+dependency), `milpa.kdl` declares no unconditional dependency at all: a
+plain `milpa fetch` resolves ZERO deps, emitting a `nim.cfg` with just
+`src/`'s own `--path` line. `proptest` (see below) is the one dependency
+`milpa.lock` ever records, and only once fetched with `--features
+proptest`. Run `milpa fetch` once after cloning.
 
 **Reproducibility note:** milpa is the author's own tool, and this
-repository does not reference a public URL for it (unlike its
-dependencies, e.g. `nimcrypto`, `proptest`, which are ordinary public git
-repositories pinned in `milpa.lock`); the container image the dev scripts
-build against, `ghcr.io/coreyleavitt/nim:2.2.10`, is likewise not
-established here as publicly pullable. Neither is required to verify
-sello's claims, though: everything milpa generates for this project is
-`nim.cfg`'s `--path` lines (one for `src/`, one per resolved dependency
-directory -- `nim.cfg` itself is gitignored/regenerated, not checked in;
-`config.nims`, which milpa never touches, is the other file Nim reads).
-The manual equivalent in any Nim 2.2.10 environment (plus
-`libsodium-devel`/`z3-devel` for the optional backend and proofs) is:
-clone `nimcrypto` at the commit `milpa.lock` records
-(`b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08`, tag `v0.7.3`) and, for the
-property tests, `proptest` similarly, then pass `--path:src`
-plus `--path:<each clone>` to `nim c`/`nim check` in place of running
-`milpa fetch` first. The exact invocations themselves (what flags, what
-image, what mounts) are documented in `scripts/*.sh`, so the build is
-reproducible from the scripts' own text even without milpa or the
-container image.
+repository does not reference a public URL for it (unlike `proptest`,
+which is an ordinary public git repository pinned in `milpa.lock` once
+fetched); the container image the dev scripts build against,
+`ghcr.io/coreyleavitt/nim:2.2.10`, is likewise not established here as
+publicly pullable. Neither is required to verify sello's claims, though:
+everything milpa generates for this project is `nim.cfg`'s `--path` lines
+(`src/`, plus one per resolved dependency directory -- `nim.cfg` itself is
+gitignored/regenerated, not checked in; `config.nims`, which milpa never
+touches, is the other file Nim reads). The manual equivalent in any Nim
+2.2.10 environment for the core library is simply `--path:src` passed to
+`nim c`/`nim check` -- no dependency clone of any kind is needed. For the
+optional property tests (below), add [proptest][proptest-repo] cloned at
+the commit `milpa.lock` records once fetched, plus its own transitive
+`nim-z3`/`softlink` clones, each contributing one more `--path:<clone>` --
+this is the one case where a dependency clone is needed at all, and it is
+never needed for a plain build of the library itself. The exact
+invocations themselves (what flags, what image, what mounts) are
+documented in `scripts/*.sh`, so the build is reproducible from the
+scripts' own text even without milpa or the container image.
+
+[proptest-repo]: https://github.com/coreyleavitt/proptest
 
 The property-based tests (`tests/unit/test_properties_*.nim`) need
-[proptest](https://github.com/coreyleavitt/proptest), declared as an
-*optional* milpa dep so plain `milpa fetch` never pulls it in for
-consumers of sello. Enable it once for local development:
-`milpa fetch --features proptest`.
+[proptest][proptest-repo], declared as an *optional* milpa dep so plain
+`milpa fetch` never pulls it in for consumers of sello. Enable it once for
+local development: `milpa fetch --features proptest`.
 
 There is no host Nim toolchain requirement beyond the container image used
 in development; the commands below are what CI-less verification looks
@@ -514,7 +522,7 @@ nim c -r tests/unit/test_field.nim       # one test module (after milpa fetch)
 ```
 
 A fresh clone's plain `milpa fetch` (no `--features proptest`) is enough to
-run `scripts/test.sh` green: the four `test_properties_*.nim` files are
+run `scripts/test.sh` green: the six `test_properties_*.nim` files are
 detected as unavailable and print a loud `SKIPPED (proptest not fetched --
 run: milpa fetch --features proptest)` line instead of failing the build.
 
@@ -569,5 +577,9 @@ proves instead.
 ## License
 
 Apache License, Version 2.0 -- see [`LICENSE`](LICENSE). Third-party
-attributions (ref10, orlp/ed25519, and TweetNaCl, all public domain; the
-`nimcrypto` dependency, MIT) are in [`NOTICE`](NOTICE).
+attributions (ref10, orlp/ed25519, and TweetNaCl, all public domain; RFC
+9496, whose formulas and constants `sello/ristretto` transcribes, subject
+to the IETF Trust's terms; FIPS 180-4, a public NIST standard, whose
+algorithm and constants `sello/private/sha512` transcribes; the `nimcrypto`
+dependency, MIT, retired as of RFC-006 -- its SHA-512 implementation served
+sello through the 0.4.0 release) are in [`NOTICE`](NOTICE).

@@ -10,8 +10,12 @@
 # suite", following the same shape as scripts/test.sh and scripts/fuzz.sh.
 #
 # Layout:
-#   tests/mutation/mutants/*.mutant   — the curated catalog (46 mutants as of
-#                                        RFC-003 slice 3, up from RFC-002
+#   tests/mutation/mutants/*.mutant   — the curated catalog (84 mutants as of
+#                                        RFC-006 slice 4's twelve-mutant
+#                                        sha512.nim batch, up from 73/70/50
+#                                        through the review-round/RFC-004/
+#                                        round-3 batches before it, up from
+#                                        RFC-003 slice 3's 46 and RFC-002
 #                                        slice 5's original 36 — file-
 #                                        addressed, so growing it to cover a
 #                                        new source file is just adding more
@@ -30,8 +34,10 @@
 # full unit suite per the RFC — do not silently subset"). Everything happens
 # inside ONE podman invocation, not one per mutant: run_mutation.py reuses a
 # single scratch copy of the source tree across the whole campaign, which
-# lets Nim's own nimcache carry unrelated dependencies (nimcrypto, proptest,
-# ...) across mutants instead of paying their full compile cost each time —
+# lets Nim's own nimcache carry unrelated dependencies (proptest and its own
+# transitive deps, when fetched — sello resolves no unconditional
+# dependency at all as of RFC-006) across mutants instead of paying their
+# full compile cost each time —
 # only the mutated file(s) and their transitive dependents actually
 # recompile per mutant. Measured, not merely estimated (the original "low
 # tens of minutes" guess was never checked against a real run): 318s for

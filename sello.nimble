@@ -11,7 +11,7 @@
 # consumers (`nimble install`, `requires "sello"` in a downstream .nimble);
 # it carries no task definitions -- those live in scripts/ now.
 
-version       = "0.4.0"
+version       = "0.5.0"
 author        = "corey"
 description   = "Pure-Nim ed25519 + X25519 (Curve25519). No FFI in the core; optional libsodium signer adapter. RFC 8032, RFC 7748."
 license        = "Apache-2.0"

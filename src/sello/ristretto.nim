@@ -1413,12 +1413,16 @@ func ristrettoFromUniformBytes*(b: array[64, byte]): RistrettoPoint =
   ## **The `array[64, byte]` parameter IS the length check**, at compile
   ## time, with no runtime failure path to design around -- deliberately no
   ## `openArray[byte]` overload (that would trade a compile-time guarantee
-  ## for a runtime one on an otherwise-total function). A nimcrypto SHA-512
-  ## digest already has exactly this type (see `challenge.nim`'s own
-  ## `sha512.finish(var array[64, byte])` usage), but this module is
-  ## deliberately nimcrypto-free, so the EXPECTED caller arrives from some
-  ## other hash/XOF whose output is a `seq[byte]` or `string` -- for that
-  ## caller, the one checked-copy idiom to reach for is:
+  ## for a runtime one on an otherwise-total function). `sello/private/
+  ## sha512`'s own `sha512(a, b)` one-shot already produces exactly this
+  ## type (a 64-byte digest, e.g. `sha512(contextString, inputBytes)` for a
+  ## domain-separated hash-to-group call), but that module is `private/`
+  ## and not a general-purpose hash API this module is entitled to depend
+  ## on for arbitrary callers -- this module stays hash-agnostic by design
+  ## (RFC 9496 SS4.3.4 leaves the hash out of scope), so the EXPECTED
+  ## caller arrives from whatever hash/XOF their own protocol specifies,
+  ## typically producing a `seq[byte]` or `string` -- for that caller, the
+  ## one checked-copy idiom to reach for is:
   ##
   ## .. code-block:: nim
   ##   var buf: array[64, byte]

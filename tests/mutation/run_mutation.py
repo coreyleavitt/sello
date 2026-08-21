@@ -80,8 +80,8 @@ Method: for each mutant, in isolation --
          handled in-slice per the RFC (a new test gets added to kill it,
          and this harness gets re-run to confirm).
   Short-circuits on the first failing file (compile or test) once a
-  mutant is already provably killed -- for a curated catalog (46 mutants
-  as of RFC-003 slice 3) with an otherwise-thorough suite, most mutants
+  mutant is already provably killed -- for a curated catalog (84 mutants
+  as of RFC-006 slice 4) with an otherwise-thorough suite, most mutants
   die early and this matters for wall clock; a SURVIVED verdict still
   requires running every file (nothing short of the whole suite passing
   green earns that verdict).
@@ -90,9 +90,10 @@ Never touches the real working tree: everything above operates on a
 throwaway copy under /tmp inside the container, made once at startup and
 reused (mutate-restore in place) across the whole campaign -- reusing the
 scratch copy (rather than re-cloning the repo per mutant) is what lets the
-Nim compiler's own nimcache carry unrelated dependencies (nimcrypto,
-proptest, ...) across mutants within the one container invocation, instead
-of paying their full compile cost once per mutant.
+Nim compiler's own nimcache carry unrelated dependencies (proptest and its
+own transitive deps, when fetched -- sello resolves no unconditional
+dependency at all as of RFC-006) across mutants within the one container
+invocation, instead of paying their full compile cost once per mutant.
 """
 import os
 import pathlib

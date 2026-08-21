@@ -47,19 +47,27 @@ https://tweetnacl.cr.yp.to/
 
 ------------------------------------------------------------------------
 
-nimcrypto (Eugene Kabanov / cheatfate)
+nimcrypto (Eugene Kabanov / cheatfate) -- RETIRED, RFC-006
 https://github.com/cheatfate/nimcrypto
 
   MIT License. Copyright (c) 2018 Eugene Kabanov.
 
-  Not vendored: resolved as an ordinary dependency and used unmodified as
-  sello's SHA-512 implementation (RFC 8032's internal hash) -- the one
-  primitive sello deliberately does not reimplement. Development pins it
-  via milpa (milpa.kdl/milpa.lock) to tag v0.7.3, commit
-  b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08, content-addressed by milpa.lock's
-  dag-sha256 identity; nimble-ecosystem consumers resolve it via the
-  `requires "nimcrypto >= 0.7.3"` floor in sello.nimble. Full MIT license
-  text (verbatim from upstream LICENSE):
+  Historical entry: nimcrypto was resolved as an ordinary dependency and
+  used unmodified as sello's SHA-512 implementation (RFC 8032's internal
+  hash) from the 0.2.0 release through 0.4.0. RFC-006 replaced it with an
+  in-house SHA-512 (FIPS 180-4, `src/sello/private/sha512.nim`, see the
+  new entry below) so that the seed -- sello's root secret -- no longer
+  transits code held to none of this project's hygiene discipline;
+  nimcrypto is no longer a dependency of sello in any form (not in
+  `milpa.kdl`, not in `sello.nimble`'s `requires`) as of that release.
+  This entry is retained for provenance/history rather than deleted
+  outright, since nimcrypto's code shipped in every sello release through
+  0.4.0. During that period it was pinned via milpa (milpa.kdl/milpa.lock)
+  to tag v0.7.3, commit b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08,
+  content-addressed by milpa.lock's dag-sha256 identity; nimble-ecosystem
+  consumers resolved it via a `requires "nimcrypto >= 0.7.3"` floor in
+  sello.nimble, since removed along with the dependency itself. Full MIT
+  license text (verbatim from upstream LICENSE), preserved for the record:
 
   Permission is hereby granted, free of charge, to any person obtaining
   a copy of this software and associated documentation files (the
@@ -79,6 +87,47 @@ https://github.com/cheatfate/nimcrypto
   CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
   TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
   SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+------------------------------------------------------------------------
+
+FIPS 180-4 ("Secure Hash Standard (SHS)", NIST, 2015)
+https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
+
+  sello's `src/sello/private/sha512.nim` (in-house SHA-512, RFC-006) is
+  implemented directly from FIPS 180-4 Section 5 (preprocessing/padding)
+  and Section 6.4 (the SHA-512 message schedule and compression
+  function). The eighty `K` round constants and the eight `Sha512IV`
+  words are transcribed verbatim from the spec's own published hex
+  tables (FIPS 180-4 SS4.2.3 / SS5.3.5). FIPS 180-4 is a public NIST
+  standard with no license restricting implementation of its algorithms;
+  this entry records the transcription for the same attribution
+  discipline this project applies to every other source it ports from.
+
+------------------------------------------------------------------------
+
+NIST CAVP SHAVS test vectors
+https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/shs/shabytetestvectors.zip
+
+  tests/vectors/ vendors the NIST Cryptographic Algorithm Validation
+  Program's SHAVS (Secure Hash Algorithm Validation System) known-answer
+  and Monte Carlo test vectors for SHA-512, verbatim, as downloaded
+  2026-08-20 (zip sha256
+  929ef80b7b3418aca026643f6f248815913b60e01741a44bba9e118067f4c9b8):
+  `SHA512ShortMsg.rsp` (36800 bytes, sha256
+  e53a36c03609e5a3e3cc4b6e117a499db7864c23ec825c6cec99503a45f40764),
+  `SHA512LongMsg.rsp` (1687845 bytes, sha256
+  b1f3f05d5c209777954d49521d7ea1349447c36a0c52849e044bc397a27dd410), and
+  `SHA512Monte.rsp` (15215 bytes, sha256
+  8ca78659286c2f01667a98fc7accd32fc171ae7b24ac00f1a8ce6b77770247fa). NIST
+  publishes these as public-domain test material with no license
+  restricting redistribution; they are used only to run sello's own test
+  suite (`tests/unit/cavp_vectors.nim`, `tests/unit/test_sha512.nim`) and
+  are not part of the built library artifact. `tests/vectors/
+  gen_sha512_boundary_vectors.py` additionally generates a small set of
+  padding-boundary expected digests via Python's `hashlib.sha512`
+  (cross-checked against `openssl dgst -sha512`), an independent
+  second-implementation check on lengths (129, 239, 240 bytes) that fall
+  outside both the ShortMsg and LongMsg corpora.
 
 ------------------------------------------------------------------------
 

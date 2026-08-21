@@ -1,3 +1,16 @@
+ **Amendment (2026-08-14, RFC-006):** the brief below made SHA-512 the one
+  primitive sello would not reimplement, on the reasoning that it was
+  "pure Nim, well-exercised" via `nimcrypto`. Corey approved reopening
+  that scope cut: as of RFC-006, SHA-512 is implemented in-house
+  (`src/sello/private/sha512.nim`, FIPS 180-4, validated against the full
+  NIST CAVP SHAVS corpus) so that the seed -- sello's root secret -- never
+  transits code held to none of this project's own hygiene discipline.
+  `nimcrypto` is no longer a dependency of sello in any form. The four
+  passages below that assumed otherwise are updated in place rather than
+  left to mislead a reader working top-to-bottom through this document;
+  see `docs/rfc-006-sha512.md` for the full rationale and validation
+  story.
+
  Build `sello` — a pure-Nim cryptographic library for the Curve25519 family. This
   is a NEW standalone library, pure nim.
 
@@ -24,10 +37,15 @@
     curve core (it's the same math minus the SHA-512 wrapping), and it's the other
     real pure-Nim gap. Two gaps, one core.
   - Ristretto255 — DEFER (a layer up; not needed initially; leave room for it).
-  - SHA-512 (ed25519's internal hash) — do NOT reimplement; depend on nimcrypto
-    (pure Nim, well-exercised). Keep `sello`'s "trust me" surface limited to the
-    25519 math, not hashing.
-  Anything past this (AES, RSA, P-256) is scope creep — nimcrypto/others cover it.
+  - SHA-512 (ed25519's internal hash) — **[RFC-006 amendment, 2026-08-14: this
+    scope cut is reopened. SHA-512 is now implemented in-house from FIPS 180-4,
+    validated against the full NIST CAVP SHAVS corpus, so that the seed never
+    transits third-party code held to none of sello's hygiene discipline —
+    see `docs/rfc-006-sha512.md`.]** Originally: do NOT reimplement; depend on
+    nimcrypto (pure Nim, well-exercised). Keep `sello`'s "trust me" surface
+    limited to the 25519 math, not hashing.
+  Anything past this (AES, RSA, P-256) is scope creep — a general-purpose hash
+  library or similar covers it; sello stays a 25519 library, not a hash toolkit.
 
   ## The load-bearing design decision: split SIGN from VERIFY
   Sign and verify are independent implementations of the same standard (they
@@ -78,14 +96,21 @@
   - Port from a well-regarded, permissively-licensed reference (ref10/djb [public
     domain], TweetNaCl [public domain], or orlp/ed25519) — attribute properly. Get
     functional correctness against vectors FIRST, then CT-harden the signer.
-  - Nim 2.x, `--mm:orc`. Match my toolchain conventions: milpa for deps (nimcrypto
-    is in my milpa CAS), podman-wrapped build/test (no host nim) — mirror crisol's
-    `./dev` wrapper pattern; set up the equivalent for this repo.
+  - Nim 2.x, `--mm:orc`. Match my toolchain conventions: milpa for deps
+    (**[RFC-006 amendment: sello resolves zero unconditional dependencies as of
+    that RFC; `proptest`, the optional property-testing dep, is the one thing
+    milpa's CAS still resolves for this project, and only when fetched with
+    `--features proptest`]**), podman-wrapped build/test (no host nim) —
+    mirror crisol's `./dev` wrapper pattern; set up the equivalent for this
+    repo.
   - Tests in `tests/unit/` (vectors, Wycheproof) and a `tests/ct/` for the timing
     harness.
 
   ## Suggested first steps
-  1. add nimcrypto dep.
+  1. **[RFC-006 amendment: this step is obsolete. The original plan added
+     nimcrypto as sello's SHA-512 dependency; RFC-006 replaced it with an
+     in-house implementation and nimcrypto is no longer a dependency at all
+     — see the amendment note at the top of this document.]**
   2. Build the field-arithmetic + Curve25519 scalar-mul core (shared by both).
   3. ed25519 verify → pass RFC 8032 + Wycheproof. (Pure win, no CT concerns.)
   4. ed25519 sign + keygen, CT-hardened → pass vectors + dudect.

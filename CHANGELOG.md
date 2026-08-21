@@ -7,6 +7,128 @@ sello is pre-1.0: versioning follows semver's spirit but not its letter --
 a breaking change bumps the minor version (0.x.0), not the major version,
 until 1.0.0.
 
+## [0.5.0] - 2026-08-21
+
+RFC-006: in-house SHA-512 (FIPS 180-4), the zero-dependency close-out.
+sello now resolves zero runtime dependencies in the core -- `nimcrypto`,
+sello's SHA-512 dependency since 0.2.0, is fully retired.
+
+### Added
+
+- **`sello/private/sha512`** -- an in-house SHA-512 implementation
+  (FIPS 180-4 SS5/SS6.4), replacing `nimcrypto` as the source of ed25519's
+  internal hash. Not public API (sello is a 25519 library, not a hash
+  toolkit; see the RFC's Non-goals) -- consumed by `challenge.nim` and
+  `private/backend.nim`. Production face is three fixed-arity one-shot
+  `func`s (`sha512(a)`/`sha512(a, b)`/`sha512(a, b, c)`,
+  `openArray[byte] -> array[64, byte]`), each running `init`/`update`/
+  `finish` on a stack-confined context and wiping it before returning; a
+  streaming `Sha512Context`/`init`/`update`/`finish` register is exported
+  for the test estate only.
+  - **The motivation, not merely a dependency swap:** the seed -- sello's
+    root secret -- previously flowed through `nimcrypto`'s `update`/
+    `finish`, code held to none of this project's own hygiene discipline
+    (stack-only, wiped message schedule and working variables, CT
+    posture). In-housing closes that asterisk: the compression core wipes
+    its own message schedule and working variables via `private/ct.wipe`
+    on every call, uniformly, with no skip-wipe fast path for
+    public-data callers (a hash context has no type-level notion of
+    "this input is secret" the way `SecretScalar` does elsewhere in this
+    codebase, so a two-path design would be an unflaggable hygiene fork).
+  - **Wipe-cost redesign (slice 1b):** the first working implementation
+    materialized the full 80-word message schedule and wiped it
+    byte-by-byte, measuring ~47-50% overhead over an unwiped baseline --
+    far past the RFC's single-digit-percent expectation and its own
+    escalation trigger. Rather than accept the cost or weaken the
+    hygiene posture, the schedule became a rolling 16-word circular
+    buffer (`W[t]` depends only on `W[t-2]/W[t-7]/W[t-15]/W[t-16]`, so
+    the full 80-word array never needs to exist -- secret-bearing
+    scratch shrinks from 704 to 192 bytes), and `private/ct.nim` gained a
+    word-granular sibling `wipe[N](var array[N, uint64])` overload
+    (volatile per-`uint64` stores instead of per-byte, routed to
+    automatically by overload resolution for any `array[N, uint64]`).
+    Net: 24 volatile word stores per block instead of 704 byte stores
+    (~30x less wipe work), overhead restored to ~8%, wipe discipline
+    unchanged.
+  - **Validation:** the full NIST CAVP SHAVS corpus (`SHA512ShortMsg.rsp`
+    129/129, `SHA512LongMsg.rsp` 128/128, `SHA512Monte.rsp`'s 100-checkpoint
+    Monte Carlo chain, vendored verbatim in `tests/vectors/` with
+    provenance in `NOTICE`) via a new `.rsp`-format loader
+    (`tests/unit/cavp_vectors.nim`, `wycheproof_vectors.nim`'s sibling);
+    all 9 padding-boundary lengths (0, 1, 111, 112, 127, 128, 129, 239,
+    240 bytes) in both the one-shot and incremental-split registers;
+    property-based determinism/incremental-agreement coverage
+    (`test_properties_sha512.nim`); a differential suite against
+    libsodium's `crypto_hash_sha512` under `-d:selloLibsodium` (a new
+    `sodiumHashSha512` wrapper in `private/backend_sodium.nim`), landing
+    before the consumer swap let the new implementation sign anything; a
+    twelve-mutant batch (`H01`-`H12`, catalog 73 -> 84, one mutant
+    retired as confirmed-equivalent and replaced), all killed; a tenth
+    dudect timing target (`sha512`'s 4-block compress), carrying a
+    documented carve-out like the pre-existing `` ristretto.`==` ``/
+    `x25519(static)` targets rather than a clean full-battery pass,
+    investigated via five isolated control trials (all clean) and
+    attributed to a harness resolution-floor artifact at its
+    comparatively low per-call cost rather than a genuine leak; and
+    `-d:release` disassembly verification that both the compression
+    core's wipes and the secret-bearing one-shot call sites' by-value
+    digest returns survive as intended (no intermediate unwiped copy).
+  - Fuzzing and Z3/symex proof targets were both considered and declined
+    for this module: a hash has no accept/reject boundary for a coverage
+    fuzzer to explore, and ARX correctness is the CAVP corpus's job, with
+    no novel mask/carry algebra introduced beyond what the existing
+    proofs already cover -- both declines recorded in the module's own
+    doc comment.
+
+### Changed
+
+- **Zero dependencies in the core.** `milpa.kdl` no longer declares
+  `nimcrypto`; a plain `milpa fetch` resolves nothing at all.
+  `sello.nimble` drops its `requires "nimcrypto >= 0.7.3"` line entirely,
+  so a `nimble install` consumer resolves nothing either. `proptest`
+  remains, optional and dev-only, unaffected by this change.
+- `challenge.nim` and `private/backend.nim` (`derivePublic`/
+  `signDetached`) collapse their SHA-512 call sites onto the new
+  one-shot `sha512` funcs; the caller-side streaming-context
+  declarations and wipes they replace are deleted, not migrated --
+  context lifecycle and hygiene now live in one audited place.
+  `test_scalar.nim`'s three SHA-512-as-PRNG call sites and
+  `test_ct.nim`'s context-wipe coverage (now a whole-object raw-byte
+  scan over `Sha512Context`, since its fields are private) were swapped
+  over in the same pass. Three mutation-catalog entries whose exact-string
+  OLD text this swap deleted (`C01`/`C02`/`B03`) were re-anchored against
+  the new one-shot call sites, preserving each one's original defect
+  class, per the existing `F23` re-anchoring precedent.
+- `CLAUDE.md`, `README.md`, `NOTICE`, `prompt.md`, and the
+  `scripts/test.sh`/`scripts/mutation.sh`/`tests/mutation/run_mutation.py`
+  header comments updated for the zero-dependency story: `NOTICE`'s
+  `nimcrypto` entry is retained as a retired/historical record (it
+  shipped in every sello release through 0.4.0) rather than deleted
+  outright, with new FIPS 180-4 and NIST CAVP SHAVS provenance entries
+  alongside it; `README`'s dependency pitch, build recipe (the
+  no-proptest case now needs no dependency clone at all), and License
+  attribution sentence updated to match; `prompt.md`'s four passages
+  that instructed depending on `nimcrypto` for SHA-512 are corrected in
+  place with a dated amendment note, per this RFC's own instruction --
+  the brief remains the authoritative historical record with its
+  superseded scope cut clearly marked, not silently rewritten.
+  `private/ct.nim`'s doc comment, which referred to nimcrypto's
+  `Sha2Context`, now describes the in-house `Sha512Context` it actually
+  wipes; `ristretto.nim`'s hash-to-group doc example, which cited a
+  nimcrypto digest as its motivating case, now cites `private/sha512`'s
+  own one-shot output instead.
+
+### Breaking changes
+
+- None to the public facade -- `sello/private/sha512` is `private/` and
+  was never public API. Breaking only for a direct, unsupported importer
+  of `sello/private/backend`/`sello/challenge` who happened to rely on
+  their prior `nimcrypto` import (neither module's public signatures
+  changed). Every RFC 8032/7748/Wycheproof/CAVP known-answer vector and
+  every libsodium differential suite produced byte-identical verdicts
+  before and after the swap and the dependency drop -- zero vector
+  change, per the RFC's own requirement.
+
 ## [0.4.0] - 2026-08-14
 
 RFC-004: ristretto255 (RFC 9496), sello's first new group construction

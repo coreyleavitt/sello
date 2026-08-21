@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Run sello's unit test suite (pure-Nim backend) inside the base Nim
 # toolchain image. Replaces the old `nimble test` task now that milpa is
-# the resolver: nimcrypto is pinned in milpa.lock and resolved into
-# _deps/nimcrypto rather than vendored or nimble-fetched.
+# the resolver. As of RFC-006 (in-house SHA-512 retired the nimcrypto
+# dependency), a plain `milpa fetch` resolves ZERO dependencies for the
+# core library -- _deps/ is empty unless proptest has been fetched (see
+# below).
 #
 # Usage:  scripts/test.sh              # plain pure-Nim backend
 #         scripts/test.sh -d:release   # extra defines forwarded to each nim c
@@ -22,7 +24,8 @@
 # RFC #23 §3.2) so consumers of sello never transitively fetch
 # proptest+nim-z3+softlink just by depending on sello. A plain `milpa fetch`
 # prunes it (verified empirically: nim.cfg gains no proptest/z3/softlink
-# --path lines and _deps/ contains only nimcrypto). To enable it for local
+# --path lines and _deps/ is left empty -- there is no other dependency
+# left to populate it). To enable it for local
 # dev, run once: `milpa fetch --features proptest` -- this resolves and
 # fetches proptest AND its own transitive deps (z3, softlink; proptest's own
 # manifest declares z3 unconditionally), and nim.cfg gains their --path

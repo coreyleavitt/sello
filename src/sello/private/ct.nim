@@ -30,21 +30,24 @@
 ## rounds: `{.emit.}` asm barriers compile fine inside `func` with no
 ## effect-checker complaint) — so `wipe` can be a `func`, matching the
 ## `func`-only shape of the rest of the secret-handling call sites
-## (`backend.nim`, nimcrypto's own SHA-512 API) with no `{.noSideEffect.}`
-## friction, despite doing a raw pointer write under the hood.
+## (`backend.nim`, `private/sha512.nim`'s own one-shot API) with no
+## `{.noSideEffect.}` friction, despite doing a raw pointer write under the
+## hood.
 ##
 ## `wipe` is generic over any stack-only value type `T`, not just
 ## `array[N, byte]`: it wipes `sizeof(T)` bytes by raw reinterpretation, so
 ## the same audited primitive covers fixed secret byte arrays (`h`, `a`,
 ## `prefix`, `r` in `backend.nim`; `e` in `x25519.nim`; `Seed.bytes` in
 ## `signing.nim`) AND stack-only secret-bearing objects such as
-## nimcrypto's `Sha2Context` (verified free of `seq`/`ref`/`string` —
-## fixed arrays, scalars, and a proc pointer only), which buffers a
+## `private/sha512`'s `Sha512Context` (verified free of `seq`/`ref`/
+## `string` — fixed arrays and scalars only), which buffers a
 ## secret-containing block internally and must be wiped after `finish()`
-## at every call site that hashes secret input. Do not call `wipe` on a
-## type containing a `seq`/`ref`/`string` field — it would zero the
-## pointer/length header, not the heap payload, silently leaving the real
-## secret bytes alive on the heap.
+## at every call site that hashes secret input (in production, the
+## one-shot `sha512` funcs do this internally before returning; the
+## streaming register is test-estate only, see that module's own doc
+## comment). Do not call `wipe` on a type containing a `seq`/`ref`/`string`
+## field — it would zero the pointer/length header, not the heap payload,
+## silently leaving the real secret bytes alive on the heap.
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy. A wipe
