@@ -48,6 +48,17 @@
 ## `tests/unit/test_libsodium_interop.nim` for where that assertion
 ## actually runs and the empirical (major, minor) derivation backing it.
 ##
+## RFC-006 slice 2 adds one further wrapper, `sodiumHashSha512`, over
+## libsodium's OWN `crypto_hash_sha512` (unrelated to the `crypto_sign_*`
+## group above -- libsodium's generic-hash API, not its signature API):
+## a differential-test oracle ONLY, confirming `sello/private/sha512`'s
+## in-house implementation agrees with an independently audited SHA-512
+## before slice 3 lets it sign anything -- the same "the oracle lands with
+## or before first production use" register RFC-004 slice 8c's ristretto255
+## oracles follow. Never wired into `signing.nim`'s dispatch or any other
+## production call path; consumed exclusively by
+## `tests/unit/test_libsodium_interop.nim`.
+##
 ## `crypto_sign_seed_keypair` backs `derivePublic`; `signDetached` below
 ## does NOT call it (see the RFC-001 ledger finding 13 note on
 ## `signDetached` itself) -- both match `backend.nim`'s seed-level contract
@@ -125,6 +136,11 @@ proc c_crypto_sign_verify_detached(sig: ptr UncheckedArray[byte];
 
 proc c_crypto_scalarmult(q, n, p: ptr UncheckedArray[byte]): cint
   {.importc: "crypto_scalarmult", header: "<sodium.h>".}
+
+proc c_crypto_hash_sha512(outp: ptr UncheckedArray[byte];
+                           inp: ptr UncheckedArray[byte];
+                           inlen: culonglong): cint
+  {.importc: "crypto_hash_sha512", header: "<sodium.h>".}
 
 proc c_crypto_core_ristretto255_is_valid_point(p: ptr UncheckedArray[byte]): cint
   {.importc: "crypto_core_ristretto255_is_valid_point", header: "<sodium.h>".}
@@ -284,6 +300,23 @@ proc sodiumScalarmult*(priv: array[32, byte]; pub: array[32, byte]): Option[arra
     cast[ptr UncheckedArray[byte]](unsafeAddr pub[0]))
   if rc != 0: none(array[32, byte])
   else: some(q)
+
+proc sodiumHashSha512*(msg: openArray[byte]): array[64, byte] =
+  ## `crypto_hash_sha512` -- libsodium's own SHA-512, the differential
+  ## oracle for RFC-006 slice 2's `sello/private/sha512`. See the module
+  ## doc comment's RFC-006 paragraph for the full rationale. Documented
+  ## infallible by libsodium (always returns 0) -- the `doAssert` below is
+  ## the same self-checking-FFI-boundary register as
+  ## `sodiumRistrettoFromHash`'s (RFC-001 ledger finding 20), not a
+  ## defensive path this signature otherwise implies.
+  ensureSodiumInit()
+  var digest: array[64, byte]
+  let rc = c_crypto_hash_sha512(
+    cast[ptr UncheckedArray[byte]](addr digest[0]),
+    toPtr(msg),
+    culonglong(msg.len))
+  doAssert rc == 0, "crypto_hash_sha512 failed with rc=" & $rc
+  digest
 
 proc sodiumLibraryVersion*(): tuple[major, minor: int] =
   ## Exposed for the ristretto255 differential suite's up-front version

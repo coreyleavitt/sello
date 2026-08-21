@@ -30,6 +30,7 @@ when defined(selloLibsodium):
   import sello/scalar
   import sello/private/backend
   import sello/private/backend_sodium
+  import sello/private/sha512
   import ./wycheproof_vectors
 
   # RFC 8032 §7.1 TEST 1 seed -- reused here purely as a convenient fixed
@@ -202,6 +203,52 @@ when defined(selloLibsodium):
       let pureSig = backend.signDetached(sb, purePub, msg)
       let sodiumSig = backend_sodium.signDetached(sb, sodiumPub, msg)
       ensure purePub == sodiumPub and pureSig == sodiumSig
+
+  # ---------------------------------------------------------------------
+  # RFC-006 slice 2: differential testing against libsodium's OWN
+  # crypto_hash_sha512 (`sodiumHashSha512`, `sello/private/backend_sodium`)
+  # -- the differential oracle for `sello/private/sha512`'s in-house
+  # implementation, landing BEFORE slice 3 lets it sign anything. Fixed
+  # vectors plus a random-length one-shot sweep plus a random-split
+  # incremental sweep, matching this RFC's own "one-shot + random-split
+  # incremental" wording.
+  # ---------------------------------------------------------------------
+
+  suite "differential: sello.private.sha512 vs libsodium crypto_hash_sha512 (RFC-006 slice 2)":
+    test "fixed vectors: empty message, \"abc\", and a two-block-boundary message agree":
+      let empty: seq[byte] = @[]
+      check backend_sodium.sodiumHashSha512(empty) == sha512(empty)
+
+      let abc = @[byte(0x61), 0x62, 0x63]
+      check backend_sodium.sodiumHashSha512(abc) == sha512(abc)
+
+      let twoBlock = newSeq[byte](200)
+      check backend_sodium.sodiumHashSha512(twoBlock) == sha512(twoBlock)
+
+  proc randByteSha512(): Strategy[byte] =
+    integers(0, 255).map(proc(x: int): byte = byte(x))
+
+  proc sha512SweepSettings(): Settings =
+    result = defaultSettings()
+    result.maxExamples = 50
+
+  suite "differential: sha512 random-input sweep (RFC-006 slice 2)":
+    property "one-shot agreement on random-length messages":
+      with sha512SweepSettings()
+      given msg in bytes(0, 300)
+      ensure backend_sodium.sodiumHashSha512(msg) == sha512(msg)
+
+    property "incremental (random split point) agreement":
+      with sha512SweepSettings()
+      given msg in bytes(0, 300), splitFrac in integers(0, 1000)
+      let splitPoint = if msg.len == 0: 0 else: (splitFrac * msg.len) div 1000
+      var ctx: sha512.Sha512Context
+      ctx.init()
+      ctx.update(msg[0 ..< splitPoint])
+      ctx.update(msg[splitPoint ..< msg.len])
+      var digest: array[64, byte]
+      ctx.finish(digest)
+      ensure backend_sodium.sodiumHashSha512(msg) == digest
 
   # ---------------------------------------------------------------------
   # RFC-004 slice 8c: differential testing against libsodium's OWN

@@ -230,6 +230,36 @@ suite "sha512 streaming: init-after-finish reuse (supported per the type's contr
     check d2 == sha512(@[byte(0x64), 0x65, 0x66])
     check d1 != d2
 
+suite "sha512 Monte Carlo (SHAVS chain, RFC-006 slice 2)":
+  test "all 100 checkpoints match, per SHAVS: MDi = sha512(MDi-3, MDi-2, MDi-1), 1000 inner steps per checkpoint, reseeded between checkpoints":
+    # All 100 checkpoints run unconditionally, by default -- the RFC's
+    # named fallback (a 10-checkpoint default prefix behind
+    # -d:selloSha512MonteFull) is a contingency for exceeding the current
+    # slowest standing unit file's debug runtime, measured at slice-2
+    # implementation time and recorded in the handoff: the full 100-
+    # checkpoint chain (100,000 sequential sha512(a, b, c) calls, the
+    # three-part production one-shot) adds roughly 1.5-2s over this file's
+    # own no-Monte baseline (~3.4s), nowhere near
+    # test_properties_ristretto.nim's ~125s (the slowest standing unit
+    # test file at measurement time) -- so the contingency does not
+    # trigger and no ifdef split is needed.
+    const raw = staticRead("../vectors/SHA512Monte.rsp")
+    let monte = loadMonteVector(raw)
+    var md0 = monte.seed
+    var md1 = monte.seed
+    var md2 = monte.seed
+    for j in 0 ..< 100:
+      for i in 0 ..< 1000:
+        let mdNext = sha512(md0, md1, md2)
+        md0 = md1
+        md1 = md2
+        md2 = mdNext
+      check md2 == monte.checkpoints[j]
+      # SHAVS reseed: MD0 = MD1 = MD2 = the just-verified checkpoint value,
+      # before the next outer round's 1000 inner iterations begin.
+      md0 = md2
+      md1 = md2
+
 suite "sha512 context hygiene: smoke test (full test_ct.nim migration is slice 3's job)":
   test "ct.wipe zeroes an entire Sha512Context, whole-object byte scan":
     var ctx: Sha512Context

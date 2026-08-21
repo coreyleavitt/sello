@@ -25,6 +25,7 @@ unit_test_files=(
   tests/unit/test_properties_signing.nim
   tests/unit/test_properties_x25519.nim
   tests/unit/test_properties_ristretto.nim
+  tests/unit/test_properties_sha512.nim
 )
 
 # proptest is an OPTIONAL milpa dep (see scripts/test.sh's header comment):
