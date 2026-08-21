@@ -19,6 +19,7 @@ unit_test_files=(
   tests/unit/test_wycheproof.nim
   tests/unit/test_wycheproof_x25519.nim
   tests/unit/test_libsodium_interop.nim
+  tests/unit/test_sha512.nim
   tests/unit/test_properties_field.nim
   tests/unit/test_properties_scalar.nim
   tests/unit/test_properties_signing.nim

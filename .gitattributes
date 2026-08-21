@@ -1,0 +1,9 @@
+# NIST CAVP response files (RFC-006): vendored VERBATIM, byte-identical
+# to the upstream zip contents, with provenance sha256 hashes recorded in
+# docs/rfc-006-sha512.handoff.md. They are native CRLF; without this
+# entry, a checkout-side core.autocrlf=input setting normalizes CRLF to
+# LF on `git add` (verified empirically while vendoring these files),
+# silently invalidating the recorded hashes for every future clone. `-text`
+# disables all newline conversion so the stored blob and every checkout
+# stay byte-exact.
+tests/vectors/*.rsp -text
