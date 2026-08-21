@@ -954,6 +954,116 @@ was written: the temporary `runDudectAB` addition to `dudect.nim` was
 reverted and the temporary `ct_diag_static.nim` file was deleted; `git
 diff tests/ct/` is empty.
 
+## RFC-006 slice 4: SHA-512 compression dudect target (2026-08-21)
+
+One new target joins the battery (ten real targets plus the positive
+control -- eleven rows total): `sha512.sha512 (4-block compress)`,
+`sello/private/sha512`'s one-shot production face over a fixed 512-byte
+(4-block) SECRET message vs. a fresh 512-byte draw per sample, digest
+folded via `backend.signDetached`'s existing 64-byte shl/or accumulation
+idiom (see `tests/ct/ct_main.nim`'s own module doc comment for the full
+design and shape-equivalence argument -- one content-vs-content target at
+comfortable multi-block size stands in for every production call shape,
+since block/round count depends only on message LENGTH, never content,
+and every production shape's length is public or fixed).
+
+Three full-battery runs were taken this slice, on a host busier than any
+previously disclosed in this document (25-26 concurrent containers
+throughout -- almost entirely long-lived, otherwise-idle `amoxtli-session`
+containers plus periodic new container starts, versus the prior worst of
+three containers/load 23.97):
+
+| run | containers | load(1m) | positive control | sha512 (new target) | other notable targets in the SAME run |
+|---|---|---|---|---|---|
+| A | 26 | 18.03 | FAIL 849.83 (expected) | **WARN, t=6.387** (90.0% crop) | `` ristretto.`==` `` WARN (-5.403); every other target PASS |
+| B | 25 | 5.35 (rising mid-run) | FAIL 946.40 (expected) | **FAIL, t=53.389** (95.0% crop) | `ristretto.ristrettoEncode` FAIL (18.881); `` ristretto.`==` `` FAIL (-18.530); `x25519(static) vs peer` WARN (-5.027); `ristretto.ristrettoScalarmult` WARN (5.541) |
+| C | 25 | 3.42 | FAIL 1033.90 (expected) | **FAIL, t=12.071** (90.0% crop) | `ristretto.ristrettoEncode` FAIL (19.282); `` ristretto.`==` `` FAIL (-18.296); `x25519(static) vs peer` WARN (-5.925) |
+
+Full battery values per run for the new target (crop%: t, loosest to
+tightest): Run A `100.0%=0.268 99.9%=2.271 99.5%=2.567 99.0%=2.537
+95.0%=3.336 90.0%=6.387`; Run B `100.0%=4.167 99.9%=6.430 99.5%=7.624
+99.0%=9.224 95.0%=53.389 90.0%=41.474`; Run C `100.0%=2.534 99.9%=3.090
+99.5%=3.606 99.0%=3.770 95.0%=7.339 90.0%=12.071`. In all three runs the
+loosest crop (100%, no cropping at all) is comfortably clean (0.268-4.167);
+the elevated |t| appears only at the tightest crops (90-95%) -- the same
+shape `` ristretto.`==` ``'s own documented investigation describes.
+
+**Investigation.** Runs B and C reproduce, almost mutant-for-mutant, an
+existing pattern this document already has two carve-out precedents for:
+`ristretto.ristrettoEncode` (previously PASS in every prior recorded run
+back to RFC-004 slice 7b except one already-attributed noisy run) and
+`` ristretto.`==` `` (the documented sub-1000-cycle resolution-floor
+carve-out, "RFC-004 slice 7b" above) both FAIL in the SAME runs the new
+sha512 target FAILs, and `x25519(X25519StaticSecret, peer)` (the
+documented shared-host artifact target, "RFC-004 slice 8d" appendix above)
+WARNs in both. None of these four targets share any code path, module, or
+arithmetic primitive with each other -- `sha512.compress`'s ARX core has
+zero call-graph overlap with `ristretto.nim`'s field arithmetic or
+`x25519.nim`'s ladder. Four unrelated targets degrading in lockstep, in
+the same runs, on a host running 25-26 concurrent containers throughout
+(the noisiest disclosed environment in this document's history by
+container count), is the signature of run-level/host-level noise, not
+four independent code defects appearing simultaneously.
+
+To test this directly rather than by inference alone, a temporary,
+non-shipped diagnostic (`tests/ct/ct_diag_sha512.nim`, built, run, and
+deleted after use per CLAUDE.md's "scratch files do not get committed"
+rule and the `ct_diag_eq.nim`/`ct_diag_static.nim` precedent -- this
+section is the permanent record) isolated the new target from the
+10-11-target battery entirely, at a reduced 300,000 samples/class (a fast
+pilot scale, not the 1,000,000-sample floor for a "final" reading, but
+sufficient to test verdict-dependence directly): the REAL fixed-vs-random
+design (run twice), a random-vs-random Control A (isolating host noise/
+harness overhead from a genuine content-dependence signal -- any |t| here
+cannot be content-dependent by construction), and a fixed-vs-fixed-
+different Control B (two distinct, arbitrary, held-fixed 512-byte
+messages -- the `x25519(static)` diagnostic's own decisive test of
+whether the secret's specific VALUE moves timing at all). All three
+designs, five trials total, PASSED cleanly when run in isolation:
+
+| trial | design | worst &#124;t&#124; | verdict |
+|---|---|---|---|
+| 1 | REAL fixed-vs-random | 2.731 | PASS |
+| 2 | REAL fixed-vs-random (repeat) | -2.215 | PASS |
+| 3 | CONTROL A: random-vs-random | 1.005 | PASS |
+| 4 | CONTROL A: random-vs-random (repeat) | 2.713 | PASS |
+| 5 | CONTROL B: fixed-vs-fixed-different | 2.597 | PASS |
+
+**Verdict: ARTIFACT, carve-out, matching the existing `` ristretto.`==` ``
+/ `x25519(static)` register -- not a genuine leak.** Every mechanism a
+real secret-content-dependent leak would require is absent: the specific
+message content does not move timing (Control B, clean), there is no
+construction/class asymmetry independent of content either (Control A,
+clean twice), and the real design itself reproduces cleanly the moment it
+is measured outside the crowded battery context (trials 1 and 2, both
+PASS, both comfortably under the 4.5 warn threshold). Combined with (a)
+`sha512.compress`'s source-level CT posture -- straight-line ARX, no
+branch, index, or table depending on message content, block/round count a
+function of length only, held identical across both classes here (both
+always exactly 512 bytes / 4 blocks) -- and (b) the reproducible
+co-occurrence with two ALREADY-carved-out targets and one already-noisy
+target in the exact same noisy-host runs, this reads as the same class of
+finding this document already carries a standing register for: a
+harness/host resolution-floor and shared-host-noise limitation for
+operations in the low tens-of-thousands-of-cycles range (sha512's 4-block
+compress measures ~5,700-6,400 cycles raw, in the same broad band as
+`ristrettoEncode`'s ~20,000-26,000 cycles, both well under the
+~180,000-280,000-cycle scale of the `backend`/`x25519`/`ristrettoScalarmult`
+targets that stayed clean throughout all three runs), not a demonstrated
+timing dependency on `sha512.compress`'s input. Per the task's own
+instruction ("investigate with the same rigor before concluding anything
+-- a genuine unexplained leak indication is a STOP-and-return-blocker
+finding"), this is the opposite of unexplained: it matches an established,
+independently-investigated carve-out pattern on this exact host, backed
+by direct isolated-trial evidence rather than inference alone, and is
+recorded here as a resolved, investigated finding rather than a blocker.
+
+`tests/ct/` carries no net change from this investigation: the temporary
+`ct_diag_sha512.nim` file was deleted after use; `git diff tests/ct/`
+shows only the permanent `ct_main.nim` addition of the new target itself
+(the `sha512.sha512 (4-block compress)` block plus its module-doc
+paragraph), not any diagnostic scaffolding.
+
 ## Reproducing this run
 
 ```sh

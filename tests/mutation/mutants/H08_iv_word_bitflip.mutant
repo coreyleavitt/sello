@@ -1,0 +1,8 @@
+id: H08
+target: src/sello/private/sha512.nim
+desc: Sha512IV table (FIPS 180-4 Sec 5.3.5, "fractional parts of the square roots of the first 8 primes") transcription error -- the first IV word's low hex nibble flipped, '0x6a09e667f3bcc908' -> '0x6a09e667f3bcc909', corrupting the initial chaining value every hash in the corpus starts from. The RFC-006 slice 4 list's named IV-word-tweak mutant.
+====OLD====
+    0x6a09e667f3bcc908'u64, 0xbb67ae8584caa73b'u64,
+====NEW====
+    0x6a09e667f3bcc909'u64, 0xbb67ae8584caa73b'u64,
+====END====

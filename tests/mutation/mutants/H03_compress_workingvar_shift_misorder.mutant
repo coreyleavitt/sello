@@ -1,0 +1,14 @@
+id: H03
+target: src/sello/private/sha512.nim
+desc: compress: FIPS 180-4 Sec 6.4.2 per-round working-variable reassignment chain (h<-g<-f<-e<-d<-c<-b<-a) misordered -- the 'v[6] = v[5]' and 'v[5] = v[4]' statements are swapped, so 'v[6]' picks up the ALREADY-OVERWRITTEN v[5] (i.e. the old v[4]) instead of the true old v[5]; every working variable past that point in the chain carries the wrong value for the rest of the round and every subsequent round. The per-round shift-chain misorder the RFC-006 slice 4 mutant list names by name.
+====OLD====
+    v[7] = v[6]
+    v[6] = v[5]
+    v[5] = v[4]
+    v[4] = v[3] + temp1
+====NEW====
+    v[7] = v[6]
+    v[5] = v[4]
+    v[6] = v[5]
+    v[4] = v[3] + temp1
+====END====

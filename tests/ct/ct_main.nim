@@ -153,6 +153,32 @@
 ##     headlines, even though the map itself is a total function with no
 ##     accept/reject verdict.
 ##
+## RFC-006 slice 4 adds ONE more target over `sello/private/sha512`: the
+## compression core over SECRET input, fixed 512-byte (4-block) message
+## vs. a fresh random 512-byte draw per sample, a single one-shot
+## `sha512(msg)` call, digest folded via `opSignDetached`'s existing
+## 64-byte shl/or accumulation idiom above (NOT `foldBytes32`, which is
+## hard-typed to 32 bytes and cannot take a 64-byte SHA-512 digest -- the
+## harness carries two fold idioms, and this is the one that applies
+## here). Four blocks (512 = 4*128) buys real margin over the sub-1000-
+## cycle resolution floor that bit ``ristretto.`==` `` -- whose carve-out
+## precedent applies if the instrument bites here too, though it is not
+## expected to: this target's per-sample cost (four `compress` calls) is
+## comparable to the mid-weight targets above, not the ~800-900-cycle
+## outlier. Shape-equivalence argument (RFC-006 slice 4, stated rather
+## than left implicit): production's other call shapes (the 32-byte
+## single-block seed hash, `sha512(prefix, msg)`'s two-part split, the
+## three-part `challenge` hash) differ from this target's measured shape
+## only in length structure and `update` boundaries, both PUBLIC under
+## `sha512.nim`'s own content-independence CT posture (block/round counts
+## are a function of message LENGTH only, never content) -- so timing can
+## vary only with content if that posture is violated, and
+## content-dependence is shape-invariant. One content-vs-content target
+## at a comfortably-multi-block size therefore measures the property for
+## every production shape; a per-shape second target would only re-measure
+## the same property closer to the resolution floor.
+
+##
 ## Random ristretto255 elements for the encode and `==` targets come from
 ## `randomRistrettoPoint` below -- a THIRD, independent copy of the same
 ## rejection-sampling loop shape `dudect.runDudect`'s own Phase 1 (fresh
@@ -168,6 +194,7 @@
 
 import std/[os, parseutils, strutils, random, options]
 import sello/private/backend
+import sello/private/sha512
 import sello/field
 import sello/scalar
 import sello/x25519
@@ -484,6 +511,35 @@ proc opRistrettoFromUniformBytes(bytes: array[64, byte]): uint64 =
   foldBytes32(toBytes(ristrettoEncode(p)))
 
 # ---------------------------------------------------------------------------
+# Target 10: sha512.sha512 (compression core over secret input) --
+# fixed-vs-random 512-byte (4-block) SECRET message. RFC-006 slice 4.
+# ---------------------------------------------------------------------------
+
+proc randomBytes512(): array[512, byte] =
+  for i in 0 ..< 512: result[i] = byte(rand(255))
+
+proc opSha512Compress(msg: array[512, byte]): uint64 =
+  ## `sha512.compress`'s straight-line ARX core, driven through the
+  ## one-shot production face (`sha512(a)`, the exact function
+  ## `backend.derivePublic`/`signDetached` call on real secret material).
+  ## Fixed class: one 512-byte message, generated once before timing
+  ## starts, reused for every fixed-class sample -- four full blocks (512
+  ## = 4*128 bytes), no partial-block padding path, so this measures the
+  ## compression loop itself rather than the padding/finalization
+  ## boundary logic. Random class: a fresh 512-byte draw per sample. Fold
+  ## via the SAME 64-byte shl/or accumulation idiom `opSignDetached` above
+  ## uses for its 64-byte signature (NOT `foldBytes32`, which is
+  ## hard-typed to 32 bytes and cannot take a 64-byte digest) -- see the
+  ## module doc comment for the shape-equivalence argument covering why
+  ## this one content-vs-content target stands in for every production
+  ## call shape (the 32-byte seed hash, the two-part nonce hash, the
+  ## three-part challenge hash).
+  let digest = sha512(msg)
+  var acc: uint64 = 0
+  for b in digest: acc = (acc shl 1) or uint64(b and 1'u8)
+  acc
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -552,6 +608,11 @@ when isMainModule:
   block:
     reports.add runDudect("ristretto.ristrettoFromUniformBytes", n,
       fixedUniformBytes64, randomBytes64, opRistrettoFromUniformBytes)
+
+  block:
+    let fixedMsg512 = randomBytes512()
+    reports.add runDudect("sha512.sha512 (4-block compress)", n,
+      fixedMsg512, randomBytes512, opSha512Compress)
 
   for r in reports:
     report(r)

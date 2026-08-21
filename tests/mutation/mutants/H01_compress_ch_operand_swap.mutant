@@ -1,0 +1,8 @@
+id: H01
+target: src/sello/private/sha512.nim
+desc: compress: FIPS 180-4 Sec 6.4.2 Ch(e,f,g) = (e and f) xor ((not e) and g) formula error -- the f/g operands (v[5]/v[6]) swapped, 'let ch = (v[4] and v[5]) xor ((not v[4]) and v[6])' -> 'let ch = (v[4] and v[6]) xor ((not v[4]) and v[5])', so every round selects bits from the WRONG working-variable pair whenever v[5] != v[6]. Classic hand-ported-compression bug class the RFC-006 slice 4 mutant list names by name.
+====OLD====
+    let ch = (v[4] and v[5]) xor ((not v[4]) and v[6])
+====NEW====
+    let ch = (v[4] and v[6]) xor ((not v[4]) and v[5])
+====END====

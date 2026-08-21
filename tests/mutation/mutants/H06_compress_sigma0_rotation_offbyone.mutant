@@ -1,0 +1,12 @@
+id: H06
+target: src/sello/private/sha512.nim
+desc: compress: FIPS 180-4 Sec 4.1.3 sigma0(x) = ROTR(x,1) xor ROTR(x,8) xor SHR(x,7) message-schedule rotation-amount off-by-one, first rotate '1' -> '2' in the rolling-schedule recurrence's own sigma0 term, 'let s0 = rotr64(w[(t - 15) and 15], 1) xor' -> '... 2) xor'. One of the RFC-006 slice 4 list's named Sigma/sigma rotation-amount off-by-one mutants (the message-schedule sigma0, distinct from H05's round-function BigSigma1).
+====OLD====
+      let s0 = rotr64(w[(t - 15) and 15], 1) xor
+               rotr64(w[(t - 15) and 15], 8) xor
+               (w[(t - 15) and 15] shr 7)
+====NEW====
+      let s0 = rotr64(w[(t - 15) and 15], 2) xor
+               rotr64(w[(t - 15) and 15], 8) xor
+               (w[(t - 15) and 15] shr 7)
+====END====

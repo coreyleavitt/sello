@@ -1,0 +1,8 @@
+id: H04
+target: src/sello/private/sha512.nim
+desc: K round-constant table (FIPS 180-4 Sec 4.2.3, "fractional parts of the cube roots of the first 80 primes") transcription error -- the first entry's low hex nibble flipped, '0x428a2f98d728ae22' -> '0x428a2f98d728ae23', a single-bit transcription error in K[0] (added to every round-0 temp1 across all 128 compression calls the CAVP corpus exercises).
+====OLD====
+    0x428a2f98d728ae22'u64, 0x7137449123ef65cd'u64,
+====NEW====
+    0x428a2f98d728ae23'u64, 0x7137449123ef65cd'u64,
+====END====

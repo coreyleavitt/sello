@@ -1,0 +1,8 @@
+id: H11
+target: src/sello/private/sha512.nim
+desc: finish: buffer-fill boundary comparison flip, 'if ctx.fill > 112:' -> 'if ctx.fill >= 112:', changing whether a message whose padded fill lands EXACTLY at 112 (no room for the 0x80 byte plus an 8-byte length half, but exactly enough for the 0x80 byte alone) takes the two-block finalization path -- flips behavior precisely at fill == 112, one of the exact padding-boundary edges (RFC-006 slice 1's 111/112/127/128 boundary lengths) CAVP vector lengths alone are not guaranteed to hit. The RFC-006 slice 4 list's named buffer-fill boundary-flip mutant.
+====OLD====
+  if ctx.fill > 112:
+====NEW====
+  if ctx.fill >= 112:
+====END====

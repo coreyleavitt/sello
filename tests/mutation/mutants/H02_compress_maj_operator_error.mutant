@@ -1,0 +1,8 @@
+id: H02
+target: src/sello/private/sha512.nim
+desc: compress: FIPS 180-4 Sec 6.4.2 Maj(a,b,c) = (a and b) xor (a and c) xor (b and c) formula error -- the first term's 'and' changed to 'or', 'let maj = (v[0] and v[1]) xor (v[0] and v[2]) xor (v[1] and v[2])' -> 'let maj = (v[0] or v[1]) xor (v[0] and v[2]) xor (v[1] and v[2])', corrupting the majority-vote bit for every round where v[0] and v[1] are not equal. The other classic hand-ported-compression bug class the RFC-006 slice 4 mutant list names by name, alongside H01's Ch mutant.
+====OLD====
+    let maj = (v[0] and v[1]) xor (v[0] and v[2]) xor (v[1] and v[2])
+====NEW====
+    let maj = (v[0] or v[1]) xor (v[0] and v[2]) xor (v[1] and v[2])
+====END====

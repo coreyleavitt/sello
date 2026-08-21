@@ -1,0 +1,8 @@
+id: H10
+target: src/sello/private/sha512.nim
+desc: compress: the rolling 16-word circular-buffer index mask narrowed, 'let idx = t and 15' -> 'let idx = t and 7', collapsing the message schedule's rolling window from 16 slots to 8 -- every W[t] read/write for t >= 8 aliases the wrong slot, corrupting both the schedule recurrence and the round function's w[idx] input. The RFC-006 slice 4 list's named message-schedule index-error mutant.
+====OLD====
+    let idx = t and 15
+====NEW====
+    let idx = t and 7
+====END====

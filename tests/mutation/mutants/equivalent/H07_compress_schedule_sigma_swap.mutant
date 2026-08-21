@@ -1,0 +1,10 @@
+id: H07
+target: src/sello/private/sha512.nim
+desc: compress: message-schedule recurrence W[t] = W[t-16] + sigma0(W[t-15]) + W[t-7] + sigma1(W[t-2]) -- the two ALREADY-COMPUTED sigma terms (s0, s1) reordered within the sum, 'w[idx] = w[idx] + s0 + w[(t - 7) and 15] + s1' -> 'w[idx] = w[idx] + s1 + w[(t - 7) and 15] + s0'.
+status: equivalent (retired -- excluded from the active catalog, not counted in the kill rate)
+note: Provably equivalent by an exact algebraic identity, not merely an empirical finding -- SURVIVED the full 84-mutant run (502.2s, the longest of any mutant in this batch, consistent with the suite never finding a distinguishing input because none exists). uint64 addition in Nim under '{.push checks: off.}' is ordinary arithmetic in the abelian group (Z/2^64Z, +): commutative and associative for EVERY representable value, with no exception for wraparound (wraparound IS how that group's addition is defined, not a deviation from it). 'w[idx] + s0 + w[(t-7) and 15] + s1' and 'w[idx] + s1 + w[(t-7) and 15] + s0' are the same four addends summed in a different order and grouping; by commutativity and associativity of + on this group, the two expressions are equal for ALL possible values of w[idx], s0, w[(t-7) and 15], and s1 -- not just for the specific values any test suite happens to exercise. This mutant does not test the "sigma-function swap" defect class the RFC-006 slice 4 list calls for (applying sigma0's rotation amounts to sigma1's input and vice versa) -- it only reorders two values that were already fully computed by the (unmutated) sigma0/sigma1 formulas above this line, so swapping their position in a commutative sum changes nothing. H12 replaces it, targeting the real defect (swapping which schedule word -- W[t-15] vs W[t-2] -- each sigma formula reads, so sigma0's rotation amounts land on the wrong input and vice versa), the same "retire-and-replace-with-a-new-ID" precedent F21/F22 -> F23/F24 established in docs/mutation-results.md's catalog numbering note.
+====OLD====
+      w[idx] = w[idx] + s0 + w[(t - 7) and 15] + s1
+====NEW====
+      w[idx] = w[idx] + s1 + w[(t - 7) and 15] + s0
+====END====

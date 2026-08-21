@@ -1,0 +1,18 @@
+id: H12
+target: src/sello/private/sha512.nim
+desc: compress: FIPS 180-4 Sec 6.4.2 message-schedule recurrence W[t] = W[t-16] + sigma0(W[t-15]) + W[t-7] + sigma1(W[t-2]) -- sigma0 and sigma1 read the WRONG schedule word: sigma0's own rotation amounts (1, 8, shr 7) are applied to w[(t-2) and 15] instead of w[(t-15) and 15], and sigma1's own rotation amounts (19, 61, shr 6) are applied to w[(t-15) and 15] instead of w[(t-2) and 15] -- the two sigma FORMULAS keep their own distinct rotation constants but are pointed at each other's input word. Replaces the retired H07 (equivalent/H07_compress_schedule_sigma_swap.mutant: reordering two already-computed summands in a commutative sum is a no-op, not a real defect) against the RFC-006 slice 4 list's actual named sigma-function-swap defect class, the same retire-and-replace-with-a-new-ID register F21/F22 -> F23/F24 established.
+====OLD====
+      let s0 = rotr64(w[(t - 15) and 15], 1) xor
+               rotr64(w[(t - 15) and 15], 8) xor
+               (w[(t - 15) and 15] shr 7)
+      let s1 = rotr64(w[(t - 2) and 15], 19) xor
+               rotr64(w[(t - 2) and 15], 61) xor
+               (w[(t - 2) and 15] shr 6)
+====NEW====
+      let s0 = rotr64(w[(t - 2) and 15], 1) xor
+               rotr64(w[(t - 2) and 15], 8) xor
+               (w[(t - 2) and 15] shr 7)
+      let s1 = rotr64(w[(t - 15) and 15], 19) xor
+               rotr64(w[(t - 15) and 15], 61) xor
+               (w[(t - 15) and 15] shr 6)
+====END====

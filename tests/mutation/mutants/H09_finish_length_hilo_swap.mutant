@@ -1,0 +1,14 @@
+id: H09
+target: src/sello/private/sha512.nim
+desc: finish: FIPS 180-4 Sec 5.1.2's 128-bit big-endian message-bit-length field assembly ("site 3") -- the high and low halves swapped, 'ctx.buffer[112 + i] = byte((bitsHi shr ...))' / 'ctx.buffer[120 + i] = byte((bitsLo shr ...))' -> bitsLo written to the leading (112) half and bitsHi to the trailing (120) half, so every padded message's encoded bit-length is wrong except the unreachable case bitsHi == bitsLo. The RFC-006 slice 4 list's named padding length-encoding-error mutant.
+====OLD====
+  for i in 0 ..< 8:
+    ctx.buffer[112 + i] = byte((bitsHi shr (56 - i * 8)) and 0xFF'u64)
+  for i in 0 ..< 8:
+    ctx.buffer[120 + i] = byte((bitsLo shr (56 - i * 8)) and 0xFF'u64)
+====NEW====
+  for i in 0 ..< 8:
+    ctx.buffer[112 + i] = byte((bitsLo shr (56 - i * 8)) and 0xFF'u64)
+  for i in 0 ..< 8:
+    ctx.buffer[120 + i] = byte((bitsHi shr (56 - i * 8)) and 0xFF'u64)
+====END====

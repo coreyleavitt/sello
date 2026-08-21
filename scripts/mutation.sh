@@ -45,7 +45,11 @@
 # to ~40s when the killing test happens to sit late in the file list).
 # Budget accordingly as the catalog grows further; a survivor that needs
 # a new test still requires re-running this script (or a targeted subset
-# while iterating) to confirm the kill.
+# while iterating) to confirm the kill. RFC-006 slice 4 grew the catalog
+# to 84 mutants (73 -> 84, an 11-mutant sha512.nim batch minus one retired
+# as a confirmed-equivalent replacement, see docs/mutation-results.md's
+# catalog numbering note) — measured 553s on this shared host, still
+# single-digit minutes and consistent with the same roughly-linear scaling.
 #
 # Needs only the base Nim image (python3 is present there; confirmed
 # empirically, same standard as the rest of this project's toolchain
