@@ -75,5 +75,38 @@ func wipe*[T](data: var T) {.noinline.} =
     volatileStoreByte(addr base[i], 0'u8)
   {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
+func volatileStoreWord(dest: ptr uint64; val: uint64) {.inline.} =
+  ## Word-granular sibling of `volatileStoreByte`: stores `val` through
+  ## `dest` as a volatile 64-bit write, same reasoning as the byte
+  ## primitive above (the C standard forbids the compiler from proving a
+  ## volatile store dead).
+  {.emit: ["*((volatile unsigned long long*)(", dest, ")) = ", val, ";"].}
+
+func wipe*[N: static int](data: var array[N, uint64]) {.noinline.} =
+  ## Word-granular sibling of the byte-generic `wipe[T]` above (RFC-006
+  ## slice-1b amendment, see `docs/rfc-006-sha512.md`'s Hygiene section
+  ## and `docs/rfc-006-sha512.handoff.md`'s slice-1b finding): `N`
+  ## volatile per-`uint64` stores instead of `8*N` per-byte stores, then
+  ## the identical `asm volatile("" ::: "memory")` barrier. Exists because
+  ## `sha512.compress`'s per-call wipe of its message schedule and working
+  ## variables, measured against a 704-byte scratch region wiped one byte
+  ## at a time, cost roughly 50% overhead — far past the RFC's
+  ## single-digit-percent expectation. Overload resolution routes any
+  ## `array[N, uint64]` argument to THIS overload automatically (Nim
+  ## prefers the more specific signature over the generic `T` one) — no
+  ## call site chooses a register by name, so a secret-holding
+  ## `array[N, uint64]` cannot accidentally take the slower byte-generic
+  ## path, or vice versa. The byte-generic `wipe[T]` above is untouched
+  ## and stays the primitive for every non-`array[N, uint64]` secret shape
+  ## in the codebase (fixed byte arrays, `Sha2Context`-shaped objects,
+  ## ...). Like the byte-generic wipe, this joins the slice-4 disassembly
+  ## obligation (RFC-006): confirming the wipe survives as genuine store
+  ## instructions at `-d:release`, not eliminated as a dead store to
+  ## locals with no further read.
+  let base = cast[ptr UncheckedArray[uint64]](addr data)
+  for i in 0 ..< N:
+    volatileStoreWord(addr base[i], 0'u64)
+  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+
 {.pop.}
 {.pop.}

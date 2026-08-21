@@ -1,15 +1,17 @@
 ## tests/unit/test_sha512.nim — RFC-006 (in-house SHA-512, FIPS 180-4).
 ##
-## Slice 1a scope only: coverage for `cavp_vectors.nim`'s `.rsp` loader
-## (parser correctness against hand-written fixtures, then the real
-## vendored NIST CAVP corpus) and a shape sanity check on the
-## boundary-digest generator's JSON output. No `sello/private/sha512`
-## import here yet -- that module does not exist until slice 1b, which
-## extends this same file with the hash KATs (per the RFC's own slice
-## split: "the parser and the core have independent RED cycles").
+## Slice 1a landed `cavp_vectors.nim`'s `.rsp` loader coverage (parser
+## correctness against hand-written fixtures, then the real vendored NIST
+## CAVP corpus) and a shape sanity check on the boundary-digest
+## generator's JSON output. Slice 1b (this extension) adds the hash KATs
+## against `sello/private/sha512` itself: the CAVP ShortMsg/LongMsg
+## sweeps and the padding-boundary cases, both one-shot and incremental,
+## per the RFC's slice-1b scope.
 
 import std/[unittest, json, strutils]
 import ./cavp_vectors
+import ../../src/sello/private/sha512
+import ../../src/sello/private/ct
 
 suite "cavp_vectors: Len/Msg/MD loader (hand-written fixture)":
   test "parses records; Len = 0's placeholder Msg = 00 is trimmed to zero bytes":
@@ -114,7 +116,30 @@ suite "cavp_vectors: real CAVP corpus":
     check monte.checkpoints[99] == hexToArray64(
       "4aa7dad74eb51d09a6ae7735c4b795b078f51c314f14f42a0d63071e13bdc5fd9f51612e77b36d44567502a3b5eb66c609ec017e51d8df93e58d1a44f3c1e375")
 
-suite "gen_sha512_boundary_vectors.py output (shape only -- no sha512.nim yet)":
+suite "sha512 one-shot: empty message (slice 1b, first RED)":
+  test "sha512(\"\") matches the parsed ShortMsg Len=0 KAT":
+    const raw = staticRead("../vectors/SHA512ShortMsg.rsp")
+    let records = loadShaByteVectors(raw)
+    let empty: seq[byte] = @[]
+    check sha512(empty) == records[0].md
+
+suite "sha512 one-shot: full CAVP ShortMsg sweep (129 records)":
+  test "every ShortMsg record's digest matches sha512(msg)":
+    const raw = staticRead("../vectors/SHA512ShortMsg.rsp")
+    let records = loadShaByteVectors(raw)
+    check records.len == 129
+    for r in records:
+      check sha512(r.msg) == r.md
+
+suite "sha512 one-shot: full CAVP LongMsg sweep (128 records)":
+  test "every LongMsg record's digest matches sha512(msg)":
+    const raw = staticRead("../vectors/SHA512LongMsg.rsp")
+    let records = loadShaByteVectors(raw)
+    check records.len == 128
+    for r in records:
+      check sha512(r.msg) == r.md
+
+suite "gen_sha512_boundary_vectors.py output (shape only)":
   test "9 entries, one per named padding-boundary length, 64-byte digests":
     const raw = staticRead("../vectors/sha512_boundary_test.json")
     let root = parseJson(raw)
@@ -127,3 +152,90 @@ suite "gen_sha512_boundary_vectors.py output (shape only -- no sha512.nim yet)":
       check v["length"].getInt == expectedLengths[i]
       check v["msg"].getStr.len == expectedLengths[i] * 2
       check v["digest"].getStr.len == 128 # 64 bytes, hex-encoded
+
+type
+  BoundaryVector = object
+    length: int
+    msg: seq[byte]
+    digest: array[64, byte]
+
+proc loadBoundaryVectors(): seq[BoundaryVector] =
+  const raw = staticRead("../vectors/sha512_boundary_test.json")
+  let root = parseJson(raw)
+  result = @[]
+  for v in root["vectors"]:
+    result.add BoundaryVector(
+      length: v["length"].getInt,
+      msg: hexToBytes(v["msg"].getStr),
+      digest: hexToArray64(v["digest"].getStr))
+
+suite "sha512 one-shot: padding-boundary lengths (0,1,111,112,127,128,129,239,240)":
+  test "sha512(msg) matches the independent Python hashlib digest at every boundary length":
+    for bv in loadBoundaryVectors():
+      check sha512(bv.msg) == bv.digest
+
+suite "sha512 streaming: incremental split exactly at padding-boundary thresholds":
+  test "init/update/update/finish matches the one-shot digest with the update boundary placed at 0/1/111/112/127/128 wherever that split point fits inside the message":
+    # Deliberate boundary placement (RFC-006 slice 1b), not random split-point
+    # sampling (that is slice 2's proptest job) -- these candidates are
+    # exactly the thresholds a buffer-fill-off-by-one bug would hide behind.
+    const candidateSplits = [0, 1, 111, 112, 127, 128]
+    for bv in loadBoundaryVectors():
+      for p in candidateSplits:
+        if p <= bv.length:
+          var ctx: Sha512Context
+          ctx.init()
+          ctx.update(bv.msg[0 ..< p])
+          ctx.update(bv.msg[p ..< bv.length])
+          var digest: array[64, byte]
+          ctx.finish(digest)
+          check digest == bv.digest
+
+suite "sha512 one-shot: 2-arg/3-arg agreement with the concatenated 1-arg call":
+  test "sha512(a, b) == sha512(a & b)":
+    let cases: seq[(seq[byte], seq[byte])] = @[
+      (newSeq[byte](0), newSeq[byte](0)),
+      (@[byte(1), 2, 3], newSeq[byte](0)),
+      (newSeq[byte](0), @[byte(9), 8, 7]),
+      (@[byte(0xAA), 0xBB], @[byte(0xCC), 0xDD, 0xEE]),
+      (newSeq[byte](130), @[byte(0x01)]), # crosses a block boundary
+    ]
+    for (a, b) in cases:
+      check sha512(a, b) == sha512(a & b)
+
+  test "sha512(a, b, c) == sha512(a & b & c)":
+    let cases: seq[(seq[byte], seq[byte], seq[byte])] = @[
+      (newSeq[byte](0), newSeq[byte](0), newSeq[byte](0)),
+      (@[byte(1)], newSeq[byte](0), @[byte(2)]),
+      (newSeq[byte](0), @[byte(5), 6], newSeq[byte](0)),
+      (newSeq[byte](111), @[byte(0xFF)], newSeq[byte](20)), # crosses a block boundary
+    ]
+    for (a, b, c) in cases:
+      check sha512(a, b, c) == sha512(a & b & c)
+
+suite "sha512 streaming: init-after-finish reuse (supported per the type's contract)":
+  test "reusing a context via init after finish produces correct digests for two distinct messages in sequence":
+    var ctx: Sha512Context
+    var d1, d2: array[64, byte]
+
+    ctx.init()
+    ctx.update(@[byte(0x61), 0x62, 0x63]) # "abc"
+    ctx.finish(d1)
+
+    ctx.init()
+    ctx.update(@[byte(0x64), 0x65, 0x66]) # "def"
+    ctx.finish(d2)
+
+    check d1 == sha512(@[byte(0x61), 0x62, 0x63])
+    check d2 == sha512(@[byte(0x64), 0x65, 0x66])
+    check d1 != d2
+
+suite "sha512 context hygiene: smoke test (full test_ct.nim migration is slice 3's job)":
+  test "ct.wipe zeroes an entire Sha512Context, whole-object byte scan":
+    var ctx: Sha512Context
+    ctx.init()
+    ctx.update(@[byte(1), 2, 3, 4, 5])
+    ct.wipe(ctx)
+    let bytes = cast[ptr UncheckedArray[byte]](addr ctx)
+    for i in 0 ..< sizeof(Sha512Context):
+      check bytes[i] == 0

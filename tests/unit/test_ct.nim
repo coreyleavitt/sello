@@ -27,6 +27,28 @@ suite "ct.wipe":
     ct.wipe(a)
     check a[31] == 0
 
+  test "zeroes an array[16, uint64] via the word-granular overload":
+    # RFC-006 slice-1b amendment: coverage for the word-granular
+    # `wipe[N](var array[N, uint64])` sibling overload (private/ct.nim),
+    # added when sha512.compress's rolling 16-word message schedule
+    # replaced the fully-materialized 80-word one to cut wipe cost. This
+    # is refactor-under-green, not a REDable behavior change: the
+    # pre-existing byte-generic `wipe[T]` already zeroed this exact shape
+    # correctly (it wipes by raw byte reinterpretation regardless of
+    # element type) -- the new overload changes wipe COST (word stores
+    # instead of byte stores), not the observable zeroing behavior this
+    # test checks.
+    var w: array[16, uint64]
+    for i in 0 ..< 16: w[i] = 0xDEAD_BEEF_0000_0000'u64 + uint64(i)
+    ct.wipe(w)
+    check w == default(array[16, uint64])
+
+  test "zeroes an array[8, uint64] via the word-granular overload":
+    var v: array[8, uint64]
+    for i in 0 ..< 8: v[i] = 0xFFFF_FFFF_FFFF_FFFF'u64
+    ct.wipe(v)
+    check v == default(array[8, uint64])
+
   test "zeroes a stack-only Sha2Context-shaped object (nimcrypto sha512)":
     var sha: sha512
     sha.init()
