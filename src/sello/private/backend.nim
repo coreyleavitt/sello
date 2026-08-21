@@ -9,7 +9,9 @@
 ##
 ## Seed-level primitives only, no `Keypair` knowledge. Builds strictly on
 ## `sello/field` + `sello/scalar` + `sello/challenge` (the shared
-## `challenge` hash, RFC-002 slice 2) + nimcrypto's SHA-512 — deliberately
+## `challenge` hash, RFC-002 slice 2) + `sello/private/sha512` (the
+## in-house SHA-512, RFC-006 slice 3 -- nimcrypto's `sha2` is gone from
+## this file and from the dependency tree entirely) — deliberately
 ## never `sello/ed25519`, which stays a verify-only module that never
 ## touches a secret. `derivePublic`/`signDetached` below return raw
 ## `array[32/64, byte]`, not `PublicKey`/`Signature` (RFC-001 finding 9):
@@ -38,11 +40,11 @@
 ## same two-secret/one-public three-argument `signDetached` signature so
 ## `signing.nim`'s dispatch stays a one-line import swap.
 
-import nimcrypto/sha2
 import sello/field
 import sello/scalar
 import sello/challenge
 import sello/private/ct
+import sello/private/sha512
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy. The pure-Nim
@@ -56,8 +58,10 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## * B, canonically encoded. `seed` and the intermediate hash/scalar are
   ## secret; both live in fixed-size stack arrays with zero heap
   ## allocation and are wiped via `ct.wipe` (volatile stores + compiler
-  ## barrier — RFC-001 slice 8) once no longer needed, including the
-  ## `Sha2Context` itself, which buffers the secret seed internally.
+  ## barrier — RFC-001 slice 8) once no longer needed. The one-shot
+  ## `sha512(seed)` call (RFC-006 slice 3) wipes its own internal context
+  ## before returning -- no context is caller-visible here at all, so
+  ## there is no separate context to wipe on this side.
   ##
   ## `proc`, not `func` (round-3 finding A4): this and `signDetached` below
   ## were already effect-free in practice and compiled fine as `func`, but
@@ -86,14 +90,10 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
   ## exit; `finally`'s re-wipe of already-zeroed memory is a harmless
   ## no-op there.
   var h: array[64, byte]
-  var sha: sha512
   var aBytes: array[32, byte]
   var a: SecretScalar
   try:
-    sha.init()
-    sha.update(seed)
-    sha.finish(h)
-    ct.wipe(sha)
+    h = sha512(seed)
 
     for i in 0 ..< 32: aBytes[i] = h[i]
     clampScalar(aBytes)
@@ -105,7 +105,6 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
     ct.wipe(aBytes)
     ct.wipe(a)
   finally:
-    ct.wipe(sha)
     ct.wipe(h)
     ct.wipe(aBytes)
     ct.wipe(a)
@@ -142,11 +141,12 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   ## real secret; both trust the seed-level caller (`signing.sign`, which
   ## reaches into `Keypair`'s own already-validated fields). `A` is public
   ## data either way, so accepting it as a parameter changes no secrecy
-  ## boundary. Every secret intermediate below, including both
-  ## `Sha2Context`s (each buffers a secret-containing block internally:
-  ## `sha` the seed, `nonceSha` the prefix), is wiped via `ct.wipe`
+  ## boundary. Every secret intermediate below is wiped via `ct.wipe`
   ## (volatile stores + compiler barrier — RFC-001 slice 8) once no longer
-  ## needed.
+  ## needed. The two one-shot calls (RFC-006 slice 3), `sha512(seed)` and
+  ## `sha512(prefix, msg)`, each wipe their own internal context before
+  ## returning -- no context is caller-visible here at all, so there is no
+  ## separate context to wipe on this side.
   ##
   ## The whole body runs under one `try`/`finally` (RFC-001 ledger finding
   ## 18, defensive, currently unreachable) covering every secret declared
@@ -154,19 +154,14 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
   ## redundant with the explicit wipe-as-soon-as-unneeded calls on the
   ## happy path.
   var h: array[64, byte]
-  var sha: sha512
   var aBytes: array[32, byte]
   var a: SecretScalar
   var prefix: array[32, byte]
   var nonceHash: array[64, byte]
-  var nonceSha: sha512
   var rBytes: array[32, byte]
   var r: SecretScalar
   try:
-    sha.init()
-    sha.update(seed)
-    sha.finish(h)
-    ct.wipe(sha)
+    h = sha512(seed)
 
     for i in 0 ..< 32: aBytes[i] = h[i]
     clampScalar(aBytes)
@@ -207,11 +202,7 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
         "signDetached: publicBytes does not match derivePublic(seed)"
       {.pop.}
 
-    nonceSha.init()
-    nonceSha.update(prefix)
-    nonceSha.update(msg)
-    nonceSha.finish(nonceHash)
-    ct.wipe(nonceSha)
+    nonceHash = sha512(prefix, msg)
     ct.wipe(prefix)
 
     scReduce(rBytes, nonceHash)
@@ -230,13 +221,11 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
     ct.wipe(rBytes)
     ct.wipe(r)
   finally:
-    ct.wipe(sha)
     ct.wipe(h)
     ct.wipe(aBytes)
     ct.wipe(a)
     ct.wipe(prefix)
     ct.wipe(nonceHash)
-    ct.wipe(nonceSha)
     ct.wipe(rBytes)
     ct.wipe(r)
 

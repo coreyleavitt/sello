@@ -1,11 +1,8 @@
 id: C02
 target: src/sello/challenge.nim
-desc: challenge: dropped hash component, A (the public key) removed from the SHA-512(R || A || msg) input entirely -- the classic key-substitution-attack shape (a challenge hash that doesn't bind the signer's identity). Like C01, a sign/verify self-consistency roundtrip cannot catch this (both sides share the one mutated function); only RFC 8032/Wycheproof known-answer vectors with fixed expected bytes pin the real three-component hash.
+desc: challenge: dropped hash component, A (the public key) removed from the SHA-512(R || A || msg) input entirely -- the classic key-substitution-attack shape (a challenge hash that doesn't bind the signer's identity). Like C01, a sign/verify self-consistency roundtrip cannot catch this (both sides share the one mutated function); only RFC 8032/Wycheproof known-answer vectors with fixed expected bytes pin the real three-component hash. Re-anchored (RFC-006 slice 3): the swap onto the in-house `sha512` one-shot collapsed the three `sha.update` calls this mutant's OLD text targeted into one `sha512(R, A, msg)` call expression -- the OLD/NEW pair here was updated to match the new source text verbatim, dropping the `A` argument from the three-arg one-shot call (`sha512(R, msg)`, the two-arg overload) while preserving the identical dropped-component defect class, the same re-anchoring register as F23's precedent.
 ====OLD====
-  sha.update(R)
-  sha.update(A)
-  sha.update(msg)
+  let k64 = sha512(R, A, msg)
 ====NEW====
-  sha.update(R)
-  sha.update(msg)
+  let k64 = sha512(R, msg)
 ====END====

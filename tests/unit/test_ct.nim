@@ -6,7 +6,7 @@
 
 import std/unittest
 import sello/private/ct
-import nimcrypto/sha2
+import sello/private/sha512
 
 suite "ct.wipe":
   test "zeroes a 32-byte array":
@@ -49,20 +49,26 @@ suite "ct.wipe":
     ct.wipe(v)
     check v == default(array[8, uint64])
 
-  test "zeroes a stack-only Sha2Context-shaped object (nimcrypto sha512)":
-    var sha: sha512
-    sha.init()
-    sha.update(@[0x61'u8, 0x62, 0x63])
+  test "zeroes a stack-only Sha512Context object (in-house SHA-512, RFC-006 slice 3)":
+    # RFC-006 slice 3: this used to check nimcrypto's `sha512` context
+    # field-by-field (state/buffer/length); that type is gone from the
+    # dependency tree entirely. `Sha512Context`'s fields are private (see
+    # `private/sha512.nim`'s own doc comment), so a foreign-module
+    # field-by-field check is not available here -- a whole-object raw byte
+    # scan is the only shape compatible with that, and it is strictly
+    # stronger than the old field-by-field check besides (it also catches
+    # any struct padding a field-by-field check would miss).
+    var ctx: Sha512Context
+    ctx.init()
+    ctx.update(@[0x61'u8, 0x62, 0x63])
     var digest: array[64, byte]
-    sha.finish(digest)
+    ctx.finish(digest)
     # After finish(), the context's internal state/buffer/length are still
     # populated (finish() does not clear them) -- exactly the residue this
     # wipe call site exists to erase.
-    ct.wipe(sha)
+    ct.wipe(ctx)
+    let bytes = cast[ptr UncheckedArray[byte]](addr ctx)
     var allZero = true
-    for s in sha.state:
-      if s != 0'u64: allZero = false
-    for b in sha.buffer:
-      if b != 0'u8: allZero = false
-    if sha.length != 0'u64: allZero = false
+    for i in 0 ..< sizeof(Sha512Context):
+      if bytes[i] != 0'u8: allZero = false
     check allZero

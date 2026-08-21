@@ -21,8 +21,8 @@
 ## other kinship with that split: it is one algorithm both sides must
 ## compute byte-for-byte identically, not a wire-format/hygiene concern.
 
-import nimcrypto/sha2
 import sello/scalar
+import sello/private/sha512
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy.
@@ -35,13 +35,7 @@ func challenge*(R, A: array[32, byte]; msg: openArray[byte]): array[32, byte] =
   ## latent sign/verify self-consistency break with no compiler signal.
   ## R, A, msg, and k are all public in both protocols, so this carries no
   ## CT requirement of its own.
-  var sha: sha512
-  sha.init()
-  sha.update(R)
-  sha.update(A)
-  sha.update(msg)
-  var k64: array[64, byte]
-  sha.finish(k64)
+  let k64 = sha512(R, A, msg)
   scReduce(result, k64)
 
 {.pop.}

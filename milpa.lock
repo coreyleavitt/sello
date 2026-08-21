@@ -2,26 +2,6 @@
 version 1
 strategy "maxver"
 
-dep "nimcrypto" {
-    source {
-        kind "git"
-        url (url)"https://github.com/cheatfate/nimcrypto"
-        ref "v0.7.3"
-    }
-    identity "dag-sha256:ac4b01b28b4c27bf107999ff3e435d31fb2545ea3d087dae23bbdf681ec57a58"
-    version "0.7.3"
-    declared_version_source "nimble"
-    src_dir ""
-    requires
-    provenance {
-        origin "observed"
-        kind "git"
-        url "https://github.com/cheatfate/nimcrypto.git"
-        ref "v0.7.3"
-        commit_sha "b3dbc9c4d08e58c5b7bfad6dc7ef2ee52f2f4c08"
-    }
-}
-
 dep "proptest" {
     source {
         kind "git"

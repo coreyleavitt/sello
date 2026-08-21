@@ -1,14 +1,8 @@
 id: B03
 target: src/sello/private/backend.nim
-desc: signDetached: RFC 8032 5.1.6 step 2 nonce derivation r = SHA-512(prefix || msg) computed as SHA-512(msg || prefix) instead -- the two `nonceSha.update` calls swapped, corrupting the per-message nonce r (and therefore R = [r]B and S = k*a + r) for every message except the degenerate empty-prefix-or-empty-msg case.
+desc: signDetached: RFC 8032 5.1.6 step 2 nonce derivation r = SHA-512(prefix || msg) computed as SHA-512(msg || prefix) instead -- the two-part hash's argument order swapped, corrupting the per-message nonce r (and therefore R = [r]B and S = k*a + r) for every message except the degenerate empty-prefix-or-empty-msg case. Re-anchored (RFC-006 slice 3): the swap onto the in-house `sha512` one-shot collapsed the `nonceSha.init()`/`update`(x2)/`finish()` streaming sequence this mutant's OLD text targeted into one `sha512(prefix, msg)` call expression -- the OLD/NEW pair here was updated to match the new source text verbatim while preserving the identical argument-order-swap defect class, the same re-anchoring register as F23's precedent.
 ====OLD====
-    nonceSha.init()
-    nonceSha.update(prefix)
-    nonceSha.update(msg)
-    nonceSha.finish(nonceHash)
+    nonceHash = sha512(prefix, msg)
 ====NEW====
-    nonceSha.init()
-    nonceSha.update(msg)
-    nonceSha.update(prefix)
-    nonceSha.finish(nonceHash)
+    nonceHash = sha512(msg, prefix)
 ====END====

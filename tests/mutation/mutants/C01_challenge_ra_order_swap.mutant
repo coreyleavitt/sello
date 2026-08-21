@@ -1,10 +1,8 @@
 id: C01
 target: src/sello/challenge.nim
-desc: challenge: hash-input order swap, SHA-512(R || A || msg) computed as SHA-512(A || R || msg) instead -- the one formula shared byte-for-byte by verify and signDetached, so this cannot be caught by a sign/verify self-consistency roundtrip (both sides call the SAME mutated function); only RFC 8032 known-answer vectors with fixed expected signature bytes pin the real R||A||msg order.
+desc: challenge: hash-input order swap, SHA-512(R || A || msg) computed as SHA-512(A || R || msg) instead -- the one formula shared byte-for-byte by verify and signDetached, so this cannot be caught by a sign/verify self-consistency roundtrip (both sides call the SAME mutated function); only RFC 8032 known-answer vectors with fixed expected signature bytes pin the real R||A||msg order. Re-anchored (RFC-006 slice 3): the swap onto the in-house `sha512` one-shot collapsed the three `sha.update` calls this mutant's OLD text targeted into one `sha512(R, A, msg)` call expression -- the OLD/NEW pair here was updated to match the new source text verbatim while preserving the identical R/A argument-order-swap defect class, the same re-anchoring register as F23's precedent.
 ====OLD====
-  sha.update(R)
-  sha.update(A)
+  let k64 = sha512(R, A, msg)
 ====NEW====
-  sha.update(A)
-  sha.update(R)
+  let k64 = sha512(A, R, msg)
 ====END====

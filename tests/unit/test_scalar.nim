@@ -6,9 +6,9 @@
 ## of sello's own arithmetic) into tests/vectors/scmuladd_test.json.
 
 import std/[unittest, json, strutils, osproc, os]
-import nimcrypto/sha2
 import sello/scalar
 import sello/field
+import sello/private/sha512
 
 const rawVectors = staticRead("../vectors/scmuladd_test.json")
 
@@ -196,11 +196,7 @@ proc prngScalar32(counter: uint64): array[32, byte] =
   var counterBytes: array[8, byte]
   for i in 0 ..< 8:
     counterBytes[i] = byte((counter shr (8 * i)) and 0xFF'u64)
-  var sha: sha512
-  sha.init()
-  sha.update(counterBytes)
-  var digest: array[64, byte]
-  sha.finish(digest)
+  let digest = sha512(counterBytes)
   for i in 0 ..< 32: result[i] = digest[i]
 
 proc prngReducedScalar32(counter: uint64): array[32, byte] =
@@ -278,11 +274,7 @@ suite "geScalarmultBase (RFC-001 slice 4)":
       0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
       0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
     ]
-    var sha: sha512
-    sha.init()
-    sha.update(seed)
-    var expanded: array[64, byte]
-    sha.finish(expanded)
+    let expanded = sha512(seed)
     var a: array[32, byte]
     for i in 0 ..< 32: a[i] = expanded[i]
     clampScalar(a)
@@ -364,11 +356,7 @@ suite "geScalarmultCT (RFC-004 slice 7a)":
       0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
       0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
     ]
-    var sha: sha512
-    sha.init()
-    sha.update(seed)
-    var expanded: array[64, byte]
-    sha.finish(expanded)
+    let expanded = sha512(seed)
     var a: array[32, byte]
     for i in 0 ..< 32: a[i] = expanded[i]
     clampScalar(a)
