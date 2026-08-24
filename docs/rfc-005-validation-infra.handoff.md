@@ -13,7 +13,13 @@
   lane. Slice 7 (DONE 2026-08-24 except the ghcr push itself, see Open
   forks -- everything credential-independent is complete, including a
   real red-then-green demo of the new drift check) closed out image
-  consolidation. Next up: slice 8 (clang-backend job).
+  consolidation. Slice 8 (DONE 2026-08-24) landed the clang-backend
+  matrix leg -- `unit-linux-amd64-clang`/`property-linux-amd64-clang`,
+  the `--cc <name>` backend-selection mechanism in `scripts/test.sh`/
+  `scripts/ci-property.sh`, and `scripts/lib/toolchain-canary.sh`'s
+  platform-identity canary, with a real red-then-green demo (canary
+  inversion) through the actual new check names. Eight required jobs
+  total. Next up: slice 9 (ASan/UBSan job).
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -733,7 +739,10 @@ Phase 0 — bootstrap (private repo):
 
 Phase 1 — matrix (7 first, then 8–13 independent):
 - [x] 7. Image consolidation (sello-dev to ghcr by digest; package enumeration; arm64 manifest check) -- DONE 2026-08-24 except the real ghcr push (blocked on credentials, filed Corey-owned; see Open forks and the full slice entry below).
-- [ ] 8. clang-backend job
+- [x] 8. clang-backend job -- DONE 2026-08-24. Code `60d7d02` (mechanism +
+      jobs), red demo `cc6e3be`, revert+doc commit `<this commit>`. See
+      the full slice entry below (after slice 7's) for mechanism design,
+      run ids, canary evidence, and the red-then-green sequence.
 - [ ] 9. ASan/UBSan job (red: planted overflow)
 - [ ] 10. --cpu:i386 job (canary: 4-byte pointers)
 - [ ] 11. linux/arm64 job
@@ -1053,6 +1062,137 @@ Phase 4 — nightly, timing, release:
   direct-Nim-install on a hosted `ubuntu-24.04-arm` runner for slice 11,
   mirroring the already-planned macOS-arm64 pattern, since the base
   image's build source is explicitly out of this repo's scope.
+- 2026-08-24: slice 8 (clang-backend job) DONE end-to-end, first matrix
+  leg, no core-arithmetic bug surfaced (the escalation rule was not
+  triggered).
+
+  **Mechanism.** `scripts/test.sh` gained one optional leading argument,
+  `--cc <name>` (must be first if present -- a bespoke two-token check,
+  not `getopts`, since this script has exactly one flag-with-value),
+  threading `--cc:<name>` into every `nim c` invocation the script's
+  `cmd` string builds; unset, Nim resolves its own gcc default unchanged.
+  `scripts/ci-property.sh` accepts and forwards `--cc <name>` verbatim to
+  `scripts/test.sh` with no parsing of its own -- in its in-container body
+  via `"$@"`, and in its host-mode podman recursion via a `printf %q`-
+  requoted reconstruction of the recursive command line (previously
+  argument-less). The ARGUMENT form (not an env var like `SELLO_CC`) was
+  chosen specifically so `scripts/lib/gates.txt`'s two new lines read as
+  literal, self-documenting commands (`scripts/test.sh --cc clang`,
+  `scripts/ci-property.sh --cc clang`) -- a reviewer sees exactly which
+  backend each check exercises with no side-channel lookup, and
+  `merge-gate.sh`/the workflow's `run:` steps stay the same one-code-path
+  shape they always were (RFC-005 Part B's build-path invariant: one
+  script serves both backends, no forked clang-flavored script). No
+  sello-dev dependency: slice 7 already verified clang/clang22 present in
+  the base `ghcr.io/coreyleavitt/nim:2.2.10` image, re-confirmed live by
+  this slice's own green run.
+
+  **Platform-identity canary.** New `scripts/lib/toolchain-canary.sh`
+  (executable bit set via `git update-index --chmod=+x`, the standing
+  slice-1 trap). `scripts/test.sh` routes the FIRST unit test file's
+  compile through it instead of a bare `nim c`: the helper runs the given
+  `nim c ... --listCmd -f -r <file>` invocation (`--listCmd` prints every
+  command Nim executes; `-f`/`--forceBuild` guarantees a fresh compiler
+  invocation line even against a warm nimcache), captures the combined
+  output, greps it for the actual C-compiler-invocation line, and asserts
+  the requested compiler's name appears in it -- proof Nim really invoked
+  that binary, not merely that the flag was accepted (a bare `clang
+  --version` check would only prove clang exists on `PATH`). Runs
+  unconditionally, gcc included ("for free" per the task brief: the cost
+  is one already-necessary compile, not an extra one). Live evidence, run
+  `32739472628` (below): `unit-linux-amd64-gcc`'s canary line reads `CC:
+  system/exceptions.nim: gcc -c -w -fmax-errors=3 ...`; `unit-linux-amd64-
+  clang`'s reads `CC: system/exceptions.nim: clang -c -w -ferror-limit=3
+  ...` -- the two compilers' own distinct diagnostic-limit flag spellings
+  (`-fmax-errors` vs `-ferror-limit`) are independent confirmation these
+  are genuinely different binaries, not a renamed/aliased one.
+
+  **Two new jobs**, same digest-pinned container as their gcc siblings:
+  `unit-linux-amd64-clang` (`scripts/ci-setup.sh && SELLO_IN_CONTAINER=1
+  scripts/test.sh --cc clang`) and `property-linux-amd64-clang`
+  (`SELLO_IN_CONTAINER=1 scripts/ci-property.sh --cc clang`), plus their
+  `scripts/lib/gates.txt` entries -- eight required jobs total.
+
+  **Ruleset ordering, as executed (matches the brief's predicted
+  ordering exactly):** `scripts/ruleset-apply.sh` (dry run first, printed
+  the expected two-line diff adding `unit-linux-amd64-clang`/`property-
+  linux-amd64-clang` to `main`'s required-check array and nothing else)
+  then `scripts/ruleset-apply.sh --apply`, run LOCALLY on the already-
+  committed branch BEFORE the branch was pushed -- `ruleset-apply.sh`
+  reads only local files (`scripts/lib/gates.txt`) and mutates live
+  GitHub state via `gh api`, so it needs no push to run. This meant the
+  branch's own first `ruleset-sync` run compared an ALREADY-updated live
+  ruleset against an ALREADY-updated committed manifest and passed clean
+  on the very first push -- no red/apply/re-run cycle was needed this
+  time (unlike slice 4's bootstrap, where the ruleset didn't exist live
+  at all yet). The ordering held because `main`'s ruleset only enforces
+  on `refs/heads/main` pushes (`target: "branch"`, condition scoped to
+  `main`) -- branch pushes to `rfc-005-slice8` were never blocked by the
+  live edit regardless of ordering; applying first only mattered for
+  `ruleset-sync`'s own drift comparison, which it satisfied immediately.
+
+  **Runs and evidence.**
+  - Push 1 (mechanism + jobs, commit `60d7d02`): run `32739472628`, ALL
+    EIGHT jobs green on the first push, including `ruleset-sync` (the
+    apply-before-push ordering above). Timings: `unit-linux-amd64-gcc`
+    59s, `unit-linux-amd64-clang` 54s, `property-linux-amd64-gcc` 9m7s,
+    `property-linux-amd64-clang` 9m45s (clang's property leg ran ~38s
+    slower than gcc's -- the one clang-vs-gcc timing difference observed;
+    everything else was within noise) -- the two property jobs ran in
+    parallel, so wall-clock cost of adding the clang leg was the DELTA
+    between the two property jobs' durations, not their sum. No other
+    clang-vs-gcc behavioral difference observed (no new warnings, same
+    test results) -- sello's C surface (through Nim's own generated C) is
+    evidently clean under clang's stricter defaults too.
+  - Push 2 (red demo, commit `cc6e3be`): run `32740549790`. Hardcoded the
+    canary's expected-compiler argument to the literal `"gcc"` in
+    `scripts/test.sh` (was `$cc_name`) -- "claims gcc always" per the
+    task brief's own suggested cleanest red (canary inversion), a
+    one-line, trivially-revertible change to the ONE script both backends
+    share. Result: `unit-linux-amd64-clang` RED (job `97473701331`, 31s)
+    and `property-linux-amd64-clang` RED (job `97473701198`, 1m15s) --
+    the real actual-compiler-vs-claimed-compiler mismatch the canary
+    exists to catch, on the real new check names, through a real push;
+    all six other jobs (both gcc legs, both docs jobs, all three
+    governance jobs including `ruleset-sync`) stayed green, confirming
+    the red was scoped exactly to the inverted assertion and nothing
+    else. Captured failure line (`unit-linux-amd64-clang`, job
+    `97473701331`): `toolchain canary: FAIL -- expected the C compiler
+    invocation to contain 'gcc', but observed: CC: system/exceptions.nim:
+    clang -c -w -ferror-limit=3 ...`.
+  - Push 3 (revert `scripts/test.sh` to `$cc_name` -- confirmed
+    byte-identical to `60d7d02` via `git diff` before committing -- plus
+    this handoff/CLAUDE.md doc commit): run id and result recorded in the
+    slice's own close-out note below once landed.
+  - Fast-forward to `main`: run id recorded below once landed.
+
+  **Traps for slices 9–13 (recorded per this slice's own findings, not
+  the RFC's a priori text):**
+  - The `--cc <name>` / canary pattern generalizes directly to slice 10's
+    `--cpu:i386` job (Nim's own `--cpu:` flag, same "thread one argument
+    through `scripts/test.sh`, assert an identity fact from the build's
+    own output" shape) -- that slice's own canary ("pointers are 4 bytes")
+    is a runtime assertion inside the compiled test binary instead of a
+    grep over `--listCmd` output, but the design principle (prove the
+    claim from something the build/run itself produced, not from the
+    flag alone) carries over unchanged.
+  - `--listCmd -f` on the canary's forced first-file rebuild adds a few
+    seconds per run (a full rebuild of `field.nim`/`scalar.nim`/etc.,
+    once) -- negligible against the ~9-10 minute property-job floor, but
+    worth knowing before assuming a leg's wall-clock is 100% test time.
+  - Applying `scripts/ruleset-apply.sh --apply` BEFORE pushing (rather
+    than after, as slice 4's bootstrap had to) is safe and simpler
+    whenever the ruleset already exists live and only its required-check
+    SET is changing (not its existence) -- do this by default for future
+    slices adding required checks; only fall back to the push-then-apply-
+    then-rerun dance slice 4 used if a ruleset itself doesn't exist yet.
+  - `gh run watch <id>` without `--exit-status` still exits nonzero when
+    the underlying run fails but does not itself raise a shell error worth
+    treating as a tool failure -- useful for deliberately observing a red
+    demo run to completion without the exit code aborting a script; use
+    `--exit-status` only when a nonzero run SHOULD stop the calling flow
+    (i.e., for the real green-required pushes, not the deliberate red
+    one).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
