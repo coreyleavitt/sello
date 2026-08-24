@@ -74,7 +74,7 @@ jobs:
       image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: scripts/ci-property.sh
+      - run: SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
