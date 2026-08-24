@@ -442,6 +442,13 @@ wipe(shared)
 wipe(sharedBytes)
 ```
 
+<!-- RFC-005 slice 6 red demo (scratch branch, never merged): deliberately
+     broken fence to prove pr-check-readme catches a bad PR. -->
+```nim
+import sello
+thisIdentifierDoesNotExist(1, 2, 3)
+```
+
 The static-role overload above (`ristrettoScalarmult(secret:
 RistrettoStaticSecret, ...)`) is deliberately UNCHANGED -- it still returns
 a plain `RistrettoPoint`, because its own documented consumers (an OPRF
