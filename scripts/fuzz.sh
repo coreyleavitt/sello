@@ -50,6 +50,45 @@
 #   scripts/fuzz.sh                    # default: 60s/target x 4 = ~4 min total
 #   scripts/fuzz.sh 15                 # 15s/target x 4 = ~1 min total (smoke-sized)
 #   SELLO_FUZZ_SECONDS=15 scripts/fuzz.sh   # same, via env (arg wins if both given)
+#   scripts/fuzz.sh --build-only       # compile stages 1-3 only; run NEITHER
+#                                         binary (RFC-005 slice 16, below)
+#   SELLO_IN_CONTAINER=1 scripts/fuzz.sh [...]   # already inside the pinned
+#                                                   image (see "Dual-mode" below)
+#
+# --build-only (RFC-005 slice 16, the build-smoke check): builds the
+# proptest_cov.o runtime object, the SanitizerCoverage-instrumented
+# external target (stage 1+2, unchanged), AND compiles (but does not run)
+# the plain driver, `fuzz_main.nim` (stage 3, `-r` dropped). This is
+# exactly Part B's "compiles the fuzz external target + driver" half of
+# build-smoke's definition. It deliberately stops at compile for the
+# driver: `scripts/build-smoke.sh` performs its own single deterministic
+# input through the already-built `build/fuzz_external_target` directly
+# (piped via stdin, no proptest campaign loop involved) rather than
+# invoking this script's normal stage-3 campaign run -- `MinEdgesGate`
+# below is calibrated against real multi-second campaigns (observed
+# 291-350 edges at 20s/target) and would make a required merge-gate check
+# flaky at a deliberately minimal smoke budget with no iteration-count
+# knob to pin it down exactly. A direct single-input run is a strictly
+# stronger proof that the compiled, linked, instrumented binary actually
+# executes end-to-end than watching a campaign attempt a possibly-too-
+# short budget. Ignores any positional seconds argument / SELLO_FUZZ_SECONDS
+# when set.
+#
+# Dual-mode (RFC-005 slice 16 retrofit -- this script previously had only
+# one mode, always wrapping itself in podman; scripts/test.sh,
+# scripts/check-readme.sh, and scripts/ci-property.sh already had this
+# split from earlier slices). With no SELLO_IN_CONTAINER set (a
+# maintainer's host), this script wraps itself in the pinned podman image
+# exactly as it always has. Under SELLO_IN_CONTAINER=1 (CI's own
+# `container:` field, or a caller -- scripts/build-smoke.sh -- already
+# running inside one), it runs the identical commands directly with no
+# podman wrapper and no host milpa-lock preflight, mirroring every other
+# dual-mode script's own rationale: there is no host to preflight-check
+# from inside a container CI already runs in, and nesting a second podman
+# invocation inside a CI container job would need a podman binary (and
+# usually privilege) the pinned Nim image does not carry. One `cmd`
+# string builds "what actually runs" exactly once; both entrypoints hand
+# it to `bash -c` (locally or via `podman run`).
 #
 # Needs only the base Nim image + the optional proptest milpa dep --
 # `milpa fetch --features proptest` (see scripts/test.sh's header comment
@@ -65,43 +104,58 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Lockfile-conformance preflight (RFC-001 ledger finding 30) -- see
-# scripts/lib/milpa-preflight.sh for exactly what this does and does not
-# treat as fatal.
-source "$(dirname "$0")/lib/milpa-preflight.sh"
-milpa_preflight
+build_only=0
+if [[ "${1:-}" == "--build-only" ]]; then
+  build_only=1
+  shift
+fi
 
 seconds="${1:-${SELLO_FUZZ_SECONDS:-60}}"
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
-podman run --rm \
-  -v "$PWD:/workspace" \
-  -v "$HOME/.cache/milpa:/.cache/milpa" \
-  -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
-  -w /workspace \
-  -e "SELLO_FUZZ_SECONDS=$seconds" \
-  "$img" \
-  bash -c '
-    set -euo pipefail
+# Stage 1+2 (unchanged in either mode): the vendored proptest_cov.c
+# runtime, compiled WITHOUT the sancov flag (it would otherwise
+# instrument its own callback and recurse into a crash -- USAGE.md is
+# explicit about this), then the instrumented external target itself.
+# `-fno-pie`/`-no-pie` pins the load address (gcc's PC-hash backend
+# hashes absolute return addresses, so ASLR would break determinism
+# across runs otherwise).
+cmd='set -euo pipefail
+mkdir -p build
+gcc -DPROPTEST_COV_GCC -fno-pie -c _deps/proptest/src/proptest/proptest_cov.c -o build/proptest_cov.o
+nim c --outdir:build \
+      --passC:"-fsanitize-coverage=trace-pc -fno-pie" \
+      --passL:"-no-pie build/proptest_cov.o" \
+      -d:release tests/fuzz/fuzz_external_target.nim
+'
+if [[ "$build_only" -eq 1 ]]; then
+  cmd+='echo "fuzz.sh --build-only: compiling driver (fuzz_main.nim), not running it"
+nim c --outdir:build -d:release tests/fuzz/fuzz_main.nim
+echo "fuzz.sh --build-only: build complete -- build/fuzz_external_target and build/fuzz_main both compiled, neither run."
+'
+else
+  # Stage 3 (normal mode): the plain (uninstrumented) driver, which spawns
+  # build/fuzz_external_target once per generated input via proptest's
+  # externalTarget/fuzz.
+  cmd+='nim c --outdir:build -d:release -r tests/fuzz/fuzz_main.nim
+'
+fi
 
-    # Stage 1: the vendored proptest_cov.c runtime, compiled WITHOUT the
-    # sancov flag (it would otherwise instrument its own callback and
-    # recurse into a crash -- USAGE.md is explicit about this). The gcc
-    # backend needs PROPTEST_COV_GCC defined on the runtime translation
-    # unit to match the trace-pc wire format the target side emits.
-    mkdir -p build
-    gcc -DPROPTEST_COV_GCC -fno-pie -c _deps/proptest/src/proptest/proptest_cov.c -o build/proptest_cov.o
+if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
+  SELLO_FUZZ_SECONDS="$seconds" bash -c "$cmd"
+else
+  # Lockfile-conformance preflight (RFC-001 ledger finding 30) -- see
+  # scripts/lib/milpa-preflight.sh for exactly what this does and does not
+  # treat as fatal.
+  source "$(dirname "$0")/lib/milpa-preflight.sh"
+  milpa_preflight
 
-    # Stage 2: the instrumented external target. `-fno-pie`/`-no-pie` pins
-    # the load address (gccs PC-hash backend hashes absolute return
-    # addresses, so ASLR would break determinism across runs otherwise).
-    nim c --outdir:build \
-          --passC:"-fsanitize-coverage=trace-pc -fno-pie" \
-          --passL:"-no-pie build/proptest_cov.o" \
-          -d:release tests/fuzz/fuzz_external_target.nim
-
-    # Stage 3: the plain (uninstrumented) driver, which spawns
-    # build/fuzz_external_target once per generated input via
-    # proptests externalTarget/fuzz.
-    nim c --outdir:build -d:release -r tests/fuzz/fuzz_main.nim
-  '
+  podman run --rm \
+    -v "$PWD:/workspace" \
+    -v "$HOME/.cache/milpa:/.cache/milpa" \
+    -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+    -w /workspace \
+    -e "SELLO_FUZZ_SECONDS=$seconds" \
+    "$img" \
+    bash -c "$cmd"
+fi

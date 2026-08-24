@@ -140,6 +140,26 @@
 # other hosted-only-residual gate above, running this entry on a
 # non-Windows host fails loud at the OS canary, by design.
 #
+# RFC-005 slice 16 (build-smoke check, taken out of order -- slices
+# 10/14/15 remain blocked on a Corey-owned ghcr write:packages credential
+# for the sello-dev image; this slice needed only the always-available
+# base ghcr.io/coreyleavitt/nim image, so it was pulled forward): compiles
+# the fuzz external target (real SanitizerCoverage instrumentation) plus
+# its driver and runs one deterministic input through the built target
+# directly, and compiles (never runs) tests/ct/ct_main.nim -- the
+# harnesses under tests/fuzz/ and tests/ct/ that would otherwise first
+# compile at a maintainer's manual scripts/fuzz.sh/scripts/ct.sh
+# invocation or a future nightly, discovered broken only then. Scope
+# today is exactly these two harnesses; the taint (slice 19) and disasm
+# (slice 23) binaries do not exist in this repository yet and are
+# deliberately NOT covered -- those slices extend this same script/job in
+# place. scripts/build-smoke.sh's own header comment has the full design,
+# including why it reuses scripts/fuzz.sh --build-only /
+# scripts/ct.sh --build-only rather than duplicating either script's
+# build recipe, and the explicit no-verdict-authority statement for
+# ct_main (RFC-005 Part B: hosted CI runs the dudect harness in
+# compile-smoke mode only).
+#
 # check-name                        script-invocation
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
@@ -154,3 +174,4 @@ check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh
 policy-lint                         scripts/policy-lint.sh
+build-smoke                         scripts/build-smoke.sh

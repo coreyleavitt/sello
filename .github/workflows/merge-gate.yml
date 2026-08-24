@@ -391,3 +391,42 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/policy-lint.sh
+
+  # RFC-005 slice 16 (build-smoke check; taken out of order -- slices
+  # 10/14/15 remain blocked on a Corey-owned ghcr write:packages
+  # credential for the sello-dev image push, but this leg needs only the
+  # always-available base image, so it was pulled forward rather than
+  # blocking on that credential). Compiles the fuzz external target with
+  # its real SanitizerCoverage instrumentation plus its plain driver
+  # (scripts/fuzz.sh --build-only), runs ONE deterministic known-valid
+  # input directly through the built target binary (not the proptest
+  # mutation campaign -- see scripts/fuzz.sh's --build-only header for
+  # why), and compiles (never runs) tests/ct/ct_main.nim
+  # (scripts/ct.sh --build-only) -- three harnesses under tests/fuzz/ and
+  # tests/ct/ that would otherwise first compile at a maintainer's manual
+  # invocation or a future nightly, discovered broken only then (RFC-005
+  # Part B, round-2 finding A5). ct_main is COMPILED ONLY here, never run
+  # for a timing verdict -- scripts/build-smoke.sh's own run log states
+  # this explicitly and unmissably (RFC-005 Part B: "hosted CI runs the
+  # dudect harness in compile-smoke mode only... stated in the workflow
+  # name" -- satisfied in spirit via the loud log statement rather than a
+  # job-name qualifier, since this one job's name already covers the fuzz
+  # target/driver too, not ct_main alone). SCOPE, stated honestly: the
+  # taint (slice 19) and disasm (slice 23) binaries do not exist in this
+  # repository yet and are therefore NOT covered by this job -- those
+  # slices extend this exact script/job in place when they land, per the
+  # RFC's own phased sequencing (see scripts/build-smoke.sh's own header
+  # comment for the full writeup). Same digest-pinned image as every
+  # other amd64 build job; needs milpa+proptest (the fuzz driver imports
+  # proptest, unlike ct_main), so its one run step needs no `ci-setup.sh`
+  # chain -- scripts/build-smoke.sh's own in-container body does its own
+  # milpa install + `--features proptest --locked` fetch, mirroring
+  # property-linux-amd64-gcc's run step shape exactly.
+  build-smoke:
+    name: build-smoke
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: SELLO_IN_CONTAINER=1 scripts/build-smoke.sh
