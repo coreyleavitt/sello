@@ -131,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-nim-setup.sh --expect-arch aarch64
-      - run: SELLO_IN_CONTAINER=1 scripts/test.sh
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
 
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds

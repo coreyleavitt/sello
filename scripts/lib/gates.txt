@@ -109,7 +109,7 @@
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
 unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan
-unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/test.sh
+unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
 property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
