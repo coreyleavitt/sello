@@ -17,8 +17,8 @@
 # Pinned-toolchain convention (RFC-005 slice 11): if
 # $HOME/.sello-nim/current/bin/nim exists, its directory is prepended to
 # PATH before anything below runs. This is how hosted matrix legs with no
-# digest-pinnable container image (linux/arm64 today; macOS-arm64/
-# Windows-MinGW later, RFC-005 slices 12-13) get a pinned Nim onto PATH:
+# digest-pinnable container image (linux/arm64, macOS-arm64, and
+# Windows-MinGW, RFC-005 slices 11-13) get a pinned Nim onto PATH:
 # scripts/ci-nim-setup.sh installs there (its own header has the full pin
 # story) and this script picks it up automatically -- no $GITHUB_PATH
 # plumbing, no sourcing gymnastics, and no branch-specific handling, since
@@ -27,6 +27,18 @@
 # command line (scripts/lib/gates.txt's convention for this leg). A no-op
 # everywhere else -- container jobs never populate this directory, so
 # `nim`/`gcc` keep resolving from the image's own PATH exactly as before.
+#
+# Pinned MinGW-w64 convention (RFC-005 slice 13, windows/MinGW-gcc leg
+# only): the exact same idea, one directory over -- if
+# $HOME/.sello-nim-mingw/current/bin/gcc(.exe) exists,
+# $HOME/.sello-nim-mingw/current/bin is ALSO prepended to PATH. Windows
+# ships no C compiler of any kind in-box, and Nim's own Windows toolchain
+# zip is compiler-less (verified against the real asset, see
+# scripts/lib/nim-pin.txt's own comment) -- scripts/ci-nim-setup.sh
+# --with-mingw installs the pinned MinGW-w64 toolchain there (its own
+# header has the full pin story). A no-op everywhere else -- no other leg
+# ever populates this directory, so the check is unconditional and
+# harmless the same way the Nim one above already is.
 #
 # --cc <name> (RFC-005 slice 8, the clang-backend matrix leg): threads
 # `--cc:<name>` into every `nim c` invocation below, so this ONE script
@@ -170,6 +182,13 @@ cd "$(dirname "$0")/.."
 # nim/gcc on PATH; harmless no-op everywhere else.
 if [ -x "$HOME/.sello-nim/current/bin/nim" ]; then
   export PATH="$HOME/.sello-nim/current/bin:$PATH"
+fi
+
+# Pinned MinGW-w64 convention (RFC-005 slice 13) -- see the header comment
+# above. Prepend, not overwrite; harmless no-op everywhere else (no other
+# leg ever populates $HOME/.sello-nim-mingw).
+if [ -x "$HOME/.sello-nim-mingw/current/bin/gcc.exe" ] || [ -x "$HOME/.sello-nim-mingw/current/bin/gcc" ]; then
+  export PATH="$HOME/.sello-nim-mingw/current/bin:$PATH"
 fi
 
 # --cc <name> / --sanitize <name> (RFC-005 slices 8/9) -- see the header

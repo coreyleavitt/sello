@@ -247,6 +247,77 @@ jobs:
       - run: scripts/ci-nim-setup.sh --expect-arch arm64
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
 
+  # RFC-005 slice 13: the Windows/MinGW-gcc leg, the last hosted-native
+  # matrix leg. Unit suite ONLY, no property sibling -- same rationale as
+  # unit-macos-arm64-clang above (no milpa/proptest fetch story on this
+  # runner). `runs-on: windows-2025` -- the current, non-deprecated
+  # GitHub-hosted Windows runner label, recorded explicitly here since,
+  # like macOS, there is no separate image digest to carry that story
+  # instead.
+  #
+  # `defaults: run: shell: bash` -- Part B's Windows execution model is
+  # explicit ("run steps use shell: bash (Git Bash); the scripts ARE the
+  # entry point -- no PowerShell snowflake"): every run step below is Git
+  # Bash, not the runner's own PowerShell default, so the exact same
+  # scripts/ invocations every other leg uses run here too, unmodified.
+  #
+  # No `container:` field -- Windows runners have no digest-pinnable
+  # container image at all (same category as macOS). Nim's own Windows
+  # toolchain zip ships NO C compiler (verified directly against the real
+  # asset -- no gcc/mingw entry anywhere in its file list --
+  # scripts/lib/nim-pin.txt's own comment on the `windows-x86_64` row has
+  # the full writeup), and the RFC's own text flags that the
+  # RUNNER-BUNDLED MinGW a Windows image ships out of the box drifts
+  # silently -- so both toolchains are installed from this project's own
+  # checksum-verified pins rather than trusting whatever the runner image
+  # happens to carry: `scripts/ci-nim-setup.sh --with-mingw` (that
+  # script's own header has the full pin/install-convention writeup for
+  # both scripts/lib/nim-pin.txt's `windows-x86_64` row and the sibling
+  # scripts/lib/mingw-pin.txt).
+  #
+  # Naming: `unit-windows-amd64-gcc`, matching the existing job-naming
+  # axis across this whole matrix (the job name encodes the C COMPILER --
+  # `unit-linux-amd64-gcc`/`-clang`, `unit-linux-arm64-gcc`,
+  # `unit-macos-arm64-clang` -- not the distribution channel a compiler
+  # happened to be fetched from), not `unit-windows-amd64-mingw`.
+  #
+  # Identity canary, two parts (RFC-005 Part B's matrix-leg rule, and this
+  # leg's own scoping problem: Git Bash's `uname -m` on 64-bit Windows
+  # reports `x86_64` -- the SAME string a plain Linux amd64 host reports
+  # for the same physical architecture, unlike the aarch64-vs-arm64
+  # Linux/Darwin split every earlier leg relied on -- so arch alone cannot
+  # tell this runner apart from an ordinary Linux dev workstation):
+  #   1. `--expect-arch x86_64` -- the existing arch canary, asserted the
+  #      same as every leg.
+  #   2. `--expect-os 'MINGW64_NT*|MSYS*'` -- a NEW, slice-13-only OS-
+  #      identity canary asserted against the RAW `uname -s` value (which
+  #      Git Bash reports as `MINGW64_NT-<kernel-build>`), closing the
+  #      exact gap arch alone leaves open. scripts/ci-nim-setup.sh's own
+  #      header comment has the full mechanism.
+  # Plus the toolchain-version canary `--with-mingw` runs internally
+  # (asserts the installed `gcc --version` output contains the PINNED
+  # version from scripts/lib/mingw-pin.txt, not merely that some gcc-named
+  # binary landed on PATH) and scripts/test.sh's own
+  # scripts/lib/toolchain-canary.sh call, which still runs unconditionally
+  # underneath (gcc, the default `--cc`), proving Nim actually invoked it,
+  # for free, exactly like every other leg.
+  #
+  # `--expect-proptest-skip`: this leg's own proptest-skip assertion (the
+  # exact inverse of every property-* job's own "banner ABSENT"
+  # assertion), same as unit-macos-arm64-clang above -- this runner has no
+  # milpa/proptest fetch story of its own, so the banner's PRESENCE is the
+  # correct, expected outcome.
+  unit-windows-amd64-gcc:
+    name: unit-windows-amd64-gcc
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-proptest-skip
+
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
   # podman and skip the host milpa preflight -- see that script's header

@@ -489,7 +489,12 @@ proofs -- lives in [`docs/`](docs/): [`docs/ct-results.md`](docs/ct-results.md)
 and [`docs/mutation-results.md`](docs/mutation-results.md) are the standing
 evidence records, and `docs/rfc-001-signing.md` through
 `docs/rfc-006-sha512.md` are the design docs each piece of that evidence
-was built against. This section is deliberately minimal for now -- a
+was built against. The required CI matrix builds sello on Linux (amd64
+and arm64), macOS (arm64), and Windows (amd64, MinGW-w64 gcc) -- MSVC
+(`vcc`) is not a supported build target: the constant-time signer's
+secret-wipe primitive (`private/ct.nim`) depends on an `asm volatile`
+compiler barrier, which MSVC's compiler intrinsics have no equivalent
+for. This section is deliberately minimal for now -- a
 hand-curated table mapping every validation-bar claim to its enforcing
 mechanism, with its own drift check against CI, is planned but not yet
 built; until it lands, this section makes no per-check claims beyond the

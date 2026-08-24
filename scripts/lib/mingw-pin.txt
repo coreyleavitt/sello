@@ -1,0 +1,73 @@
+# scripts/lib/mingw-pin.txt -- RFC-005 slice 13: the pin table for
+# scripts/ci-nim-setup.sh's MinGW-w64 install (the `--with-mingw` flag),
+# used by the Windows/MinGW-gcc matrix leg. A sibling of nim-pin.txt, not
+# a merged row in that same file -- deliberately: this pins a C TOOLCHAIN
+# (a `.zip` from a source with no release-tag/asset-name split the way
+# nim-lang/nightlies has), not a Nim binary, and the RFC's own explicit
+# demand ("MinGW pinned -- the runner-bundled MinGW drifts -- pin story
+# explicit") is a genuinely separate supply-chain event from the Nim pin:
+# GitHub's windows-* runner images DO ship a MinGW toolchain out of the
+# box (part of the standard image's "Chocolatey"-installed software list),
+# but its exact version is whatever the runner image's own maintainers
+# most recently bundled -- an un-pinned, silently-moving dependency this
+# project's whole pin-everything posture exists to close (the same class
+# of risk RFC-005 slice 7 caught live when `ghcr.io/coreyleavitt/nim`'s
+# own `2.2.10` TAG moved out from under an in-progress session). This
+# table's own row is what `scripts/ci-nim-setup.sh --with-mingw` installs
+# INSTEAD of touching the runner-bundled copy at all.
+#
+# Source: winlibs (github.com/brechtsanders/winlibs_mingw) -- one of the
+# two realistic standalone mingw-w64 distributions named in this slice's
+# own task brief (the other, niXman/mingw-builds-binaries, ships `.7z`
+# archives only; winlibs ships a plain `.zip` PLUS a companion
+# `.sha256` file published alongside every release asset, which is both
+# easier to extract portably on a fresh Windows runner -- no `7z` on PATH
+# required, Windows' own in-box bsdtar or a plain `unzip` handles a `.zip`
+# directly -- and gives an upstream-published checksum to cross-verify
+# against, not just this project's own single computation). Verified
+# 2026-08-24 by downloading the asset fresh and computing its SHA-256
+# locally (`sha256sum`), which matched the upstream `.sha256` file's own
+# recorded value byte for byte before being pinned here -- this project's
+# standing "verify empirically, pin the real hash" convention.
+#
+# Build selected: x86_64, POSIX threading model, SEH exception handling,
+# UCRT runtime (`mingw-w64ucrt`) -- the modern, recommended combination
+# for x86_64 targets (SEH is the native Windows x86_64 unwind mechanism,
+# not a compatibility shim the way SJLJ is on x86_64; UCRT is the runtime
+# every supported Windows version, including the `windows-2025` hosted
+# runner, ships in-box as `ucrtbase.dll`, so no extra runtime install is
+# needed). GCC 16.2.0 (this release's own version, matching the release
+# tag) -- the exact version string `scripts/ci-nim-setup.sh --with-mingw`
+# asserts against the installed `gcc --version` output after extraction
+# (RFC-005 Part B's matrix-leg canary rule, and this slice's own DoD:
+# "assert the gcc version string matches the pin's recorded version" --
+# not merely that SOME gcc-named binary landed on PATH).
+#
+# Archive layout (verified by listing the real zip's contents, not
+# assumed): top-level directory `mingw64/`, unprefixed `bin/gcc.exe` (plus
+# `g++.exe`, `gdb.exe`, and the `x86_64-w64-mingw32-`-prefixed sibling
+# binaries) -- a plain "extract, then add mingw64/bin to PATH" install,
+# no further layout translation needed.
+#
+# Format: four whitespace-separated columns per line --
+#   platform-key   url   sha256   gcc-version
+# platform-key matches scripts/lib/nim-pin.txt's own convention (`<uname
+# -s, lowercased>-<uname -m>`, post `scripts/ci-nim-setup.sh`'s
+# MINGW*/MSYS*/CYGWIN* -> `windows` normalization -- see that script's own
+# header for why the raw `uname -s` string is deliberately NOT used as the
+# lookup key: it embeds the Windows kernel build number
+# (`MINGW64_NT-10.0-20348`-shaped), which would otherwise force a new pin
+# row every time GitHub bumps the runner OS build, even though nothing
+# about the pinned COMPILER changed). `url` is the full download URL (no
+# release-tag/asset-name split -- winlibs' own release layout doesn't
+# share nim-lang/nightlies' convention, so this file doesn't force one).
+# `gcc-version` is the exact string `scripts/ci-nim-setup.sh --with-mingw`
+# requires to appear in the installed `gcc --version` output's first line
+# -- the toolchain-identity half of this leg's canary, proving the
+# PINNED gcc is what actually compiled the suite, not merely "a gcc."
+# Comments start with `#` as the first non-whitespace character of the
+# line (whole-line only); blank lines ignored -- same convention as every
+# other `scripts/lib/*-pin.txt` file.
+#
+# platform-key      url                                                                                                                                              sha256                                                             gcc-version
+windows-x86_64       https://github.com/brechtsanders/winlibs_mingw/releases/download/16.2.0posix-14.0.0-ucrt-r1/winlibs-x86_64-posix-seh-gcc-16.2.0-mingw-w64ucrt-14.0.0-r1.zip  c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4  16.2.0

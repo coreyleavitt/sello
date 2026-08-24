@@ -117,6 +117,29 @@
 # expectation: this leg has no proptest fetch story, so the banner's
 # PRESENCE is the correct, asserted outcome).
 #
+# RFC-005 slice 13 (Windows/MinGW-gcc leg): the last hosted-native matrix
+# leg. Same SELLO_IN_CONTAINER=1-hardcoded register as the arm64/macOS
+# legs above (no podman/container story on Windows either) plus a second,
+# NEW identity canary specific to this leg: `--expect-os
+# 'MINGW64_NT*|MSYS*'`, asserted against the RAW `uname -s` value
+# alongside the existing `--expect-arch x86_64`. Arch alone stops being
+# sufficient here -- Git Bash's `uname -m` on 64-bit Windows reports
+# `x86_64`, the SAME string a plain Linux amd64 host reports for the
+# identical `uname -m` value, unlike the aarch64-vs-arm64 Linux/Darwin
+# split every earlier leg could rely on -- so this leg's own
+# scripts/ci-nim-setup.sh invocation would otherwise "pass" its arch
+# canary on an ordinary Linux workstation running this manifest entry
+# locally. `--expect-os` closes that gap directly (that script's own
+# header has the full mechanism). `--with-mingw` additionally installs
+# the pinned MinGW-w64 toolchain (scripts/lib/mingw-pin.txt) neither Nim's
+# own Windows zip nor Windows itself ships, and asserts the installed
+# `gcc --version` output matches the pin's own recorded version -- this
+# leg's toolchain-identity canary, the direct analog of every other leg's
+# scripts/lib/toolchain-canary.sh call (which still runs unconditionally
+# underneath, via scripts/test.sh's own default `--cc` of gcc). Like every
+# other hosted-only-residual gate above, running this entry on a
+# non-Windows host fails loud at the OS canary, by design.
+#
 # check-name                        script-invocation
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
@@ -126,6 +149,7 @@ property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 unit-macos-arm64-clang              scripts/ci-nim-setup.sh --expect-arch arm64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
+unit-windows-amd64-gcc              scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-proptest-skip
 check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh

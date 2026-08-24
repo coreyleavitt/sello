@@ -26,12 +26,11 @@
 # manifest's script-invocation column can stay a literal, host-runnable
 # command).
 #
-# THIS RUNS THE LINUX SET, PLUS THE ONE HOSTED MACOS RESIDUAL BELOW.
-# Windows/MinGW (RFC-005 slice 13) does not exist yet, and when it lands
-# it runs NATIVELY on its own host (Git Bash) -- there is no "run the
-# Windows leg locally" mode on a Linux workstation, and this script does
-# not pretend otherwise. Update this comment and the help text below in
-# the same slice that adds that leg, not before.
+# THIS RUNS THE LINUX SET, PLUS THE TWO HOSTED RESIDUALS BELOW (MACOS,
+# WINDOWS). Every gate in the manifest is included so this script and
+# scripts/lib/gates.txt stay each other's single source of truth (RFC-005
+# Part B) -- the residual gates are runnable FROM here, just not for real
+# on a typical Linux workstation; see below.
 #
 # Within "the Linux set," the two `*-arm64-*` gates (RFC-005 slice 11)
 # are themselves host-arch-dependent: their script-invocation column
@@ -55,6 +54,18 @@
 # workstation this gate FAILS by design at the arch-canary step, same as
 # the two arm64 gates above; run it for real only on an actual macOS-
 # arm64 host, or rely on the CI job.
+#
+# unit-windows-amd64-gcc (RFC-005 slice 13) is the last such residual, and
+# fails a step EARLIER than the arm64/macOS legs on a typical Linux
+# workstation: its `--expect-arch x86_64` alone would trivially PASS on an
+# ordinary amd64 Linux host (Git Bash's `uname -m` on Windows reports the
+# SAME `x86_64` string a Linux amd64 host does, unlike the distinct
+# aarch64/arm64 split the other residuals rely on) -- so this gate ALSO
+# carries a `--expect-os 'MINGW64_NT*|MSYS*'` canary against the raw
+# `uname -s` value specifically to make a non-Windows host fail loud here
+# too, rather than silently downloading a Windows/MinGW toolchain onto a
+# Linux box. Run it for real only on an actual Windows/Git-Bash host, or
+# rely on the CI job.
 #
 # Fail-fast per gate, full summary at the end: every gate script already
 # runs under its own `set -euo pipefail` (fails fast internally, at its
@@ -89,10 +100,10 @@ EOF
   done
   cat <<'EOF'
 
-THIS RUNS THE LINUX SET, PLUS THE ONE HOSTED MACOS RESIDUAL BELOW.
-Windows/MinGW (RFC-005 slice 13) is not in the manifest yet, and when it
-lands it runs natively on its own host, not through this script on a
-Linux workstation.
+THIS RUNS THE LINUX SET, PLUS THE TWO HOSTED RESIDUALS BELOW (MACOS,
+WINDOWS). Both residual gates are listed here for completeness and are
+runnable through this script, but genuinely pass only on their own
+native host -- see below for what happens running them elsewhere.
 
 The unit-linux-arm64-gcc / property-linux-arm64-gcc gates (RFC-005 slice
 11) are a hosted-only residual WITHIN the Linux set: they have no
@@ -107,6 +118,15 @@ Nim toolchain, and fails loud via the same canary on any non-arm64-Darwin
 host -- including a real arm64 Linux host, since Darwin's `uname -m`
 (`arm64`) differs from Linux's (`aarch64`) for the identical physical
 architecture.
+
+unit-windows-amd64-gcc (RFC-005 slice 13) is the last hosted residual: no
+container/podman story, installs a native windows-x86_64 Nim toolchain
+plus a pinned MinGW-w64 gcc. It fails loud on a non-Windows host too, but
+via a SECOND canary this leg alone carries (`--expect-os
+'MINGW64_NT*|MSYS*'` against the raw `uname -s`) -- its `--expect-arch
+x86_64` alone would otherwise trivially pass on an ordinary Linux amd64
+workstation, since Git Bash's `uname -m` on Windows reports the identical
+`x86_64` string.
 
 Prerequisites: podman on PATH, and `milpa fetch` run at least once in
 this checkout (same prerequisite scripts/test.sh's own header documents)

@@ -69,6 +69,23 @@
 # matching the value slice 11's own research had already found and
 # recorded, byte for byte -- not merely copied forward unverified).
 #
+# RFC-005 slice 13 (Windows/MinGW) adds the `windows-x86_64` row below,
+# again the SAME nightlies release/source commit. The asset is a `.zip`,
+# not `.tar.xz` -- the only platform this table pins that isn't -- so
+# `scripts/ci-nim-setup.sh` branches its extraction step on the asset's
+# own extension (a `.zip`-specific `unzip`/`tar -xf` branch, `tar -xf`
+# falling back to Windows' own in-box bsdtar, which extracts zip natively,
+# when `unzip` isn't on PATH). Verified by downloading the asset fresh and
+# inspecting it directly (not merely trusting the asset name): the zip's
+# top-level directory is `nim-2.2.10` (same convention as every other row
+# here, so the existing `mv "$extract_tmp"/nim-*/* ...` line needed no
+# change), and it ships NO C COMPILER of any kind (no `gcc`/`mingw` entry
+# anywhere in its 5832-entry file list) -- confirming empirically, not
+# merely assuming from Nim's own docs, that Nim's Windows zip is
+# compiler-less; `scripts/lib/mingw-pin.txt` is the separate, dedicated
+# pin for the MinGW-w64 toolchain this leg needs on top.
+#
 # platform-key      release-tag                                                       asset-name                          sha256
 linux-aarch64        2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_arm64.tar.xz       cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a
 darwin-arm64         2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-macosx_arm64.tar.xz      9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e
+windows-x86_64       2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-windows_x64.zip          fe0686a9b298e5b13d0a983df37e002a8c6320f8b16cc45a51d15cf4046a109f
