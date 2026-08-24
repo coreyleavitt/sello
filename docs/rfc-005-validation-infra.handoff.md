@@ -60,7 +60,67 @@ Phase 0 — bootstrap (private repo):
       on the same push, confirming the reds are targeted, not incidental.
       CLAUDE.md updated in the same commit as the code (per-slice doc
       rule).
-- [ ] 3. Gates manifest + merge-gate.sh local runner + workflow-vs-manifest drift check
+- [x] 3. Gates manifest + local runner -- DONE 2026-08-24. Code `bb77b05`
+      + fix `9cbab5c`. `scripts/lib/gates.txt` (two-column check-name /
+      script-invocation data file, not executable), `scripts/lib/gates.sh`
+      (shared parser, `load_gates()`), `scripts/merge-gate.sh` (full or
+      named-subset local runner, honest linux-only help text, per-gate
+      PASS/FAIL/wall-time summary, does not stop at the first failure),
+      `scripts/gates-manifest-check.sh` (the new `gates-manifest-sync`
+      job -- light awk scan over the workflow YAML, cross-checks its own
+      job-key and `name:`-value extractions against each other before
+      trusting either, fails loud on a parse surprise). Manifest's
+      script-invocation column is the PLAIN script name (no
+      `SELLO_IN_CONTAINER=1`, no `ci-setup.sh` chaining) for all four
+      gates -- required retrofitting `scripts/ci-property.sh` with the
+      same dual-mode split `test.sh`/`check-readme.sh` already had (host:
+      wraps itself in podman and recurses with SELLO_IN_CONTAINER=1,
+      byte-identical to the CI job, not a parallel host-side
+      reimplementation). `gates-manifest-sync` runs on a plain
+      `ubuntu-latest` runner, no container (pure text scan, no toolchain
+      dependency) -- still exactly one `scripts/` invocation.
+      **Bug found and fixed via the first green-run attempt, not
+      anticipated in the plan:** the dual-mode retrofit made
+      `ci-property.sh` check `SELLO_IN_CONTAINER`, but
+      `merge-gate.yml`'s `property-linux-amd64-gcc` job never set that
+      variable (the pre-retrofit script assumed container context
+      unconditionally, so it was never needed) -- the job's own
+      `container:` field puts the step inside the pinned image already,
+      but the script's new host branch doesn't know that without the
+      variable, so it tried to `podman run` from inside a container with
+      no podman binary (exit 127). Fixed by prefixing that job's run
+      step with `SELLO_IN_CONTAINER=1`, matching the other two container
+      jobs' existing pattern. First push (`bb77b05`, run `32710672161`)
+      caught this red for real; the fix (`9cbab5c`) went green on run
+      `32710858177` (all four jobs: gates-manifest-sync 3s,
+      unit-linux-amd64-gcc 57s, property-linux-amd64-gcc 9m32s,
+      check-readme 20s). Red demo on scratch branch
+      `rfc-005-slice3-red-demo` (commit `b2cacfe`, run `32711805163`):
+      removed `check-readme` from `gates.txt` with no matching workflow
+      edit -- `gates-manifest-sync` failed exactly as designed
+      ("DRIFT -- job(s) present in .github/workflows/merge-gate.yml with
+      no scripts/lib/gates.txt entry: check-readme", exit 1) while the
+      other three jobs stayed green (unit 55s, property 9m31s,
+      check-readme 23s); branch deleted locally and on origin after
+      (confirmed via `gh api .../branches/rfc-005-slice3-red-demo` ->
+      404). Local validation: `scripts/merge-gate.sh` full battery
+      8m50.973s wall clock (unit 48s / property 473s / check-readme 10s /
+      gates-manifest-sync 0s); subset invocations
+      (`unit-linux-amd64-gcc`, `check-readme gates-manifest-sync`,
+      `property-linux-amd64-gcc` standalone) also run and pass
+      individually. CLAUDE.md updated in the same commits as the code
+      (per-slice doc rule).
+      TRAP for slice 4+ (ruleset-apply.sh, mutation.sh/other future
+      manifest entries): a script's CI `run:` step and its
+      `scripts/lib/gates.txt` entry are NOT required to be textually
+      identical (the manifest column is deliberately the plain,
+      host-runnable form) -- but whatever the workflow step's own env/
+      flags are, they must still make the script behave correctly INSIDE
+      the container it already carries a `container:` field for. Adding
+      or changing a script's dual-mode check is a two-file edit (the
+      script AND the workflow step that invokes it), not just the
+      script -- this slice's own red/fix pair is the concrete example to
+      point at.
 - [ ] 4. Rulesets + branch model (committed JSON, apply script, waiver, policy-lint; red demos)
 - [ ] 5. Go public (history scan, SECURITY.md, approval-for-all flip, CONTRIBUTING, minimal README section)
 - [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo)
@@ -129,6 +189,15 @@ Phase 4 — nightly, timing, release:
   newest pre-source-rename commit rather than current main HEAD, keeping
   every existing `import proptest` call site unchanged. A future
   slice/RFC owns migrating to `import nelli` if/when that's wanted.
+- 2026-08-24: slice 3 done end-to-end (green + red through real pushes).
+  Discovered/resolved in-slice (not escalated as a blocker): the
+  `ci-property.sh` `SELLO_IN_CONTAINER` dual-mode retrofit needed a
+  matching one-line workflow edit (the property job's `run:` step never
+  set the variable) -- caught by the first real push going red on the
+  actual required check, not by local validation (local validation
+  exercises the script's own two branches directly, never the workflow
+  YAML that decides which branch a given CI job takes -- see the
+  handoff's slice-3 TRAP note).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
