@@ -26,8 +26,23 @@
   flag canary, with a real red-then-green demo (a planted heap-buffer-
   overflow, ASan-detectable only) through the actual new check name; the
   real unit suite ran clean under ASan/UBSan with no genuine finding
-  (escalation rule not triggered). Nine required jobs total. Next up:
-  slice 10 (`--cpu:i386` job).
+  (escalation rule not triggered). Nine required jobs total. Slice 11
+  (DONE 2026-08-24) landed the linux/arm64 legs -- `unit-linux-arm64-gcc`/
+  `property-linux-arm64-gcc` on GitHub-hosted `ubuntu-24.04-arm`, no
+  `container:` field (slice 7's manifest verdict: no arm64 image exists) --
+  `scripts/ci-nim-setup.sh`'s checksum-pinned direct Nim toolchain install
+  (nim-lang/nightlies, pinned to the exact source commit the `2.2.10` tag
+  resolves to) plus its own `--expect-arch` platform-identity canary, with
+  a real red-then-green demo (canary inversion) through the actual new
+  check names. Eleven required jobs total. **Taken deliberately out of
+  order**: slice 10 (`--cpu:i386` job) remains blocked on a Corey-owned
+  ghcr `write:packages` credential for the 32-bit `sello-dev` image (see
+  Open forks) and could not land first as the RFC's own slice numbering
+  implies -- slice 11 has no such dependency (nim-lang/nightlies and
+  GitHub-hosted `ubuntu-24.04-arm` are both immediately available), so it
+  was pulled forward rather than blocking the whole matrix phase on one
+  credential. Next up: slice 12 (macOS-arm64 job) or slice 10 once
+  unblocked, whichever Corey prefers.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -756,9 +771,9 @@ Phase 1 — matrix (7 first, then 8–13 independent):
       overflow), revert+doc commit `<this commit>`. See the full slice
       entry below (after slice 8's) for mechanism design, canary evidence,
       and the red-then-green sequence.
-- [ ] 10. --cpu:i386 job (canary: 4-byte pointers)
-- [ ] 11. linux/arm64 job
-- [ ] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT)
+- [ ] 10. --cpu:i386 job (canary: 4-byte pointers) -- BLOCKED on a Corey-owned ghcr write:packages credential for the 32-bit sello-dev image; deliberately skipped past, see slice 11's own entry and Open forks.
+- [x] 11. linux/arm64 job -- DONE 2026-08-24 (taken out of order ahead of slice 10, see that slice's note and CLAUDE.md). Code `4c0de09` (mechanism + jobs), fix `90d285c` (ci-setup.sh wiring gap, found on the first push), red demo `a721ef1`, revert `a122818`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
+- [ ] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT) -- scripts/ci-nim-setup.sh/scripts/lib/nim-pin.txt are already written arch/OS-parametric for this; a verified macosx_arm64 asset (nim-2.2.10-macosx_arm64.tar.xz) + SHA-256 (9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e) from the SAME nim-lang/nightlies release slice 11 pinned (2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef -- the exact v2.2.10 tag commit) were found during slice 11's own research and recorded here for slice 12's convenience -- NOT added as a nim-pin.txt row by slice 11 itself (no dormant substrate: nothing in slice 11 exercises it). Slice 12 should only need: add the `darwin-arm64` row to scripts/lib/nim-pin.txt, confirm scripts/ci-nim-setup.sh's `uname -s`/`uname -m` platform-key derivation resolves correctly on a real macOS runner (Darwin/arm64 -- untested against a real macOS host by slice 11, only reasoned about), and wire the two workflow jobs/gates.txt entries following slice 11's exact pattern (no mechanism changes anticipated).
 - [ ] 13. Windows/MinGW job (shell: bash; MinGW pinned)
 
 Phase 2 — heavy deterministic gates (independent after 7):
@@ -1388,6 +1403,268 @@ Phase 4 — nightly, timing, release:
     future sanitizer leg ever adds `-d:release` to the mix, re-verify
     `-d:useMalloc` still composes cleanly (release-mode allocator paths
     are not identical to debug-mode ones in every Nim version).
+
+- 2026-08-24: slice 11 (linux/arm64 job) DONE end-to-end, taken
+  DELIBERATELY OUT OF ORDER ahead of slice 10 (`--cpu:i386`, blocked on a
+  Corey-owned ghcr `write:packages` credential for the 32-bit `sello-dev`
+  image -- see Open forks; slice 11 has no such dependency, so it was
+  pulled forward rather than stalling the whole matrix phase on one
+  credential). No arm64-specific arithmetic/codegen finding surfaced (the
+  escalation rule was not triggered) -- the one real failure this slice
+  hit (below) was this slice's own CI wiring, not sello's code.
+
+  **Nim-install mechanism, chosen with rationale.** Three options were
+  investigated per the task brief: (a) `nim-lang/nightlies`
+  (`github.com/nim-lang/nightlies`) prebuilt arm64 tarballs, (b)
+  choosenim (source build on unsupported arches), (c) a direct
+  `build_all.sh` source build from the `v2.2.10` tag. Verified live: (a)
+  DOES publish linux_arm64 tarballs for every version-2-2 nightly, and --
+  the load-bearing find -- the `v2.2.10` git tag itself resolves (via `gh
+  api repos/nim-lang/Nim/tags`) to commit
+  `bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef`, and `nim-lang/nightlies`
+  published a release built from that EXACT commit:
+  `2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef`. The
+  binary pinned here (`nim-2.2.10-linux_arm64.tar.xz`) is therefore built
+  from the identical source commit as the `ghcr.io/coreyleavitt/nim:2.2.10`
+  container image tag every other job runs inside -- not merely "a nearby
+  nightly," a genuine same-source-commit pin. Chose (a) over (b)/(c):
+  needs no build step at all, downloaded+extracted (statically linked,
+  ~16 MiB `.tar.xz`) in under 2 seconds in the live CI run below --
+  strictly cheaper than either alternative, with an equally concrete pin
+  (release tag + asset name + checksum). **Pin details:** `scripts/lib/
+  nim-pin.txt`, platform-key `linux-aarch64`, release tag
+  `2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef`, asset
+  `nim-2.2.10-linux_arm64.tar.xz`, SHA-256
+  `cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a`
+  (computed locally via `sha256sum` against a fresh download before being
+  recorded, then re-verified identically inside the live CI run). **Cache
+  strategy: NONE.** `scripts/ci-nim-setup.sh`'s own header has the full
+  reasoning -- a single-digit-second prebuilt-binary fetch doesn't meet
+  the bar RFC-005 Part B's wall-clock-budget paragraph had in mind when
+  it authorized caching the toolchain "if building from source," and
+  skipping `actions/cache` entirely sidesteps opening a second authorized
+  cache scope beyond Part B's existing one (today: fuzz working corpus
+  only, keyed so non-main branches cannot seed main-consumed entries) for
+  a saving this small. The mechanism IS idempotent locally (a marker file
+  keyed on the exact platform/release/asset/checksum tuple skips
+  re-download on a matching re-run -- verified end-to-end on this
+  session's own amd64 host against a temporary `linux-x86_64` pin row,
+  added only for local mechanism validation and removed before commit,
+  never part of the committed `nim-pin.txt`), which is enough for a real
+  arm64 dev host reusing this script across sessions even with no CI
+  cache.
+
+  **Mechanism.** `scripts/ci-nim-setup.sh --expect-arch <name>` (new
+  script, executable bit set via `chmod +x` + picked up automatically by
+  `git add`, confirmed `100755` in the commit -- the standing slice-1 exec-
+  bit trap did not need its explicit `git update-index --chmod=+x` form
+  this time since the real file's mode was already correct before
+  staging). Installs to `$HOME/.sello-nim/nim-<version>-<platform-key>/`,
+  then updates a stable `$HOME/.sello-nim/current` symlink.
+  `scripts/test.sh` gained a small, unconditional top-of-script check --
+  `if [ -x "$HOME/.sello-nim/current/bin/nim" ]; then export
+  PATH="$HOME/.sello-nim/current/bin:$PATH"; fi` -- deliberately NOT
+  `$GITHUB_PATH`: a `$GITHUB_PATH` write only takes effect starting the
+  NEXT workflow step (not the rest of the current step's shell), and
+  `scripts/lib/gates.txt`'s local-command form chains `ci-nim-setup.sh`
+  and `test.sh` via `&&` on ONE command line, where a subprocess's own
+  `export PATH` would not propagate back to the parent shell either way.
+  The on-disk convention sidesteps both problems and needs no GitHub-
+  Actions-specific plumbing, so it works unchanged on a real arm64 host
+  too. `scripts/lib/nim-pin.txt` is the four-column pin table
+  (platform-key / release-tag / asset-name / sha256) that keeps the
+  mechanism arch/OS-parametric, per the task brief's own ask -- slice 12
+  (macOS-arm64) is expected to add one `darwin-arm64` row and reuse
+  everything else unchanged (see that slice's own checklist entry above
+  for the verified macOS asset + checksum already on file).
+
+  **Platform-identity canary.** `ci-nim-setup.sh --expect-arch aarch64`
+  asserts `uname -m` BEFORE installing anything -- proof the runner is
+  genuinely arm64, not merely scheduled with an arm64-sounding
+  `runs-on:` label. This composes with, not replaces,
+  `scripts/lib/toolchain-canary.sh`'s existing compiler-identity canary:
+  `scripts/test.sh` still routes its first file's compile through that
+  check unconditionally (gcc, unchanged), so this leg proves BOTH facts
+  RFC-005 Part B's matrix-leg rule calls for -- runner arch AND C-compiler
+  identity -- from one real CI run, no new gcc-specific logic needed.
+  Live evidence, green run `32751126119` (below): `unit-linux-arm64-gcc`'s
+  arch canary reads `arch canary: expected uname -m = 'aarch64', observed
+  'aarch64'` / `arch canary: PASS -- runner architecture confirmed
+  'aarch64'`, immediately followed by `ci-nim-setup: OK --
+  /home/runner/.sello-nim/current -> /home/runner/.sello-nim/nim-2.2.10-
+  linux-aarch64` and, from the SAME job's `scripts/test.sh` step,
+  `toolchain canary: resolved C compiler invocation: CC:
+  system/exceptions.nim: gcc -c -w -fmax-errors=3 -fno-strict-aliasing
+  -pthread -I/home/runner/.sello-nim/nim-2.2.10-linux-aarch64/lib ... `/
+  `toolchain canary: PASS -- confirmed Nim actually invoked 'gcc'.` --
+  the compiler-invocation line's own `-I` path resolving into the exact
+  arm64-pinned install directory is independent confirmation the compile
+  really used the toolchain this script just installed, not some other
+  `nim`/`gcc` incidentally on the runner's PATH.
+
+  **Two new jobs**, `runs-on: ubuntu-24.04-arm`, NO `container:` field:
+  `unit-linux-arm64-gcc` (checkout, then two run steps --
+  `scripts/ci-nim-setup.sh --expect-arch aarch64`, then
+  `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh`) and
+  `property-linux-arm64-gcc` (checkout, `scripts/ci-nim-setup.sh
+  --expect-arch aarch64`, then `SELLO_IN_CONTAINER=1
+  scripts/ci-property.sh` -- no `ci-setup.sh` needed here, matching
+  `property-linux-amd64-gcc`'s own precedent, since `milpa fetch` writes
+  `nim.cfg` as a side effect). `SELLO_IN_CONTAINER=1` is hardcoded in
+  both `gates.txt` entries and the workflow's own run steps (not left to
+  each script's own dual-mode host branch) since there is no podman
+  wrapping to skip in the first place on this leg -- "in-container mode"
+  (run the commands directly, no host milpa preflight) is simply the
+  only mode this leg ever has, locally or in CI. `scripts/ci-property.sh`
+  needed no code changes at all: its milpa-venv install (python3 + pip,
+  no compiled wheels) is architecture-independent, confirmed by the real
+  green run. Eleven required jobs total.
+
+  **`scripts/ci-property.sh`'s milpa build on arm64 -- confirmed working,
+  not merely assumed.** The property job's log shows `install_milpa`
+  building milpa from its pinned commit into a fresh venv exactly as it
+  does on amd64, `milpa fetch --features proptest --locked` succeeding,
+  and the real property suites (field/scalar/signing/x25519/ristretto/
+  sha512) running to completion -- pure-Python milpa plus proptest's own
+  Nim source carry no architecture dependency, as CLAUDE.md's proptest
+  note anticipated (the only `z3`-importing module, `proptest/symex`, is
+  never imported by the top-level `proptest` module the property suites
+  use).
+
+  **Genuine CI-wiring failure, found and fixed before the real red demo
+  (recorded per the escalation rule's own "infra failures are retried/
+  diagnosed, not escalated as arithmetic bugs" carve-out -- this was
+  neither).** The FIRST push (`32750060424`, commit `4c0de09`) had
+  `unit-linux-arm64-gcc` FAIL with `Error: cannot open file: sello/field`
+  while `property-linux-arm64-gcc` PASSED in the SAME run. Root cause: the
+  workflow's `unit-linux-arm64-gcc` job ran `scripts/ci-nim-setup.sh`
+  then bare `SELLO_IN_CONTAINER=1 scripts/test.sh` -- omitting
+  `scripts/ci-setup.sh` (which writes the zero-dependency
+  `--path:"src"` `nim.cfg` every other unit job chains before
+  `test.sh`). `property-linux-arm64-gcc` passed only incidentally: its
+  `milpa fetch --features proptest --locked` step writes `nim.cfg`
+  itself as a side effect (confirmed directly from that job's own log --
+  `Hint: used config file '/home/runner/work/sello/sello/nim.cfg'`
+  appearing right after the milpa fetch step, with no `ci-setup.sh` in
+  that job's steps at all). This was a plain missing-step bug in this
+  slice's own workflow authoring, not an arm64 codegen/alignment finding
+  -- fixed by adding `scripts/ci-setup.sh &&` to `unit-linux-arm64-gcc`'s
+  run step (commit `90d285c`, matching `unit-linux-amd64-gcc`'s own
+  `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh` shape
+  exactly) and to its `gates.txt` entry, then re-pushed and confirmed
+  green.
+
+  **Ruleset ordering, as executed** (same pattern as slices 8/9, applied
+  before pushing): `scripts/ruleset-apply.sh` (dry run, printed the
+  expected two-line diff adding `property-linux-arm64-gcc`/
+  `unit-linux-arm64-gcc` to `main`'s required-check array) then
+  `scripts/ruleset-apply.sh --apply`, both run LOCALLY on the
+  already-committed branch BEFORE the first push.
+
+  **Runs and evidence.**
+  - Push 1 (mechanism + jobs, commit `4c0de09`): run `32750060424`.
+    `unit-linux-arm64-gcc` FAILED (job `97504643254`, 8s -- the
+    `ci-setup.sh` wiring bug above); `property-linux-arm64-gcc` PASSED
+    (job `97504643190`, 9m31s); all nine other jobs (including
+    `ruleset-sync`) PASSED. Diagnosed and fixed same-session (above).
+  - Push 2 (fix, commit `90d285c`): run `32751126119`, ALL ELEVEN jobs
+    green. Timings: `unit-linux-arm64-gcc` 40s (vs.
+    `unit-linux-amd64-gcc`'s 1m0s in the same run -- the arm64 unit leg
+    ran FASTER than its amd64 sibling, not slower, on this GitHub-hosted
+    4-core arm64 runner), `property-linux-arm64-gcc` 9m31s (vs.
+    `property-linux-amd64-gcc`'s 8m56s and `property-linux-amd64-clang`'s
+    7m27s in the same run -- comparable, within the existing amd64-to-
+    amd64 spread, not a standout outlier). Canary evidence captured above
+    from this run. `ci-property: proptest SKIPPED banner absent, as
+    required -- property suites ran for real.` confirmed in the
+    `property-linux-arm64-gcc` log -- the real property suites ran on
+    arm64, not a silent skip.
+  - Push 3 (red demo, commit `a721ef1`): run `32752103573`. Hardcoded
+    `ci-nim-setup.sh`'s `expect_arch` to the literal `"x86_64"` (was
+    `"$2"`) -- "claims x86_64 always" per the task brief's own suggested
+    cleanest red (canary inversion), a one-line, trivially-revertible
+    change to the ONE script both new legs share. Result:
+    `unit-linux-arm64-gcc` RED (job `97511205175`, 5s) and
+    `property-linux-arm64-gcc` RED (job `97511205285`, 6s) -- both new
+    checks, exactly as the DoD asked for ("RED on both new checks"); all
+    nine other jobs (including `ruleset-sync`) stayed green, confirming
+    the red was scoped exactly to the inverted assertion. Both jobs
+    failed at the canary step itself (5-6s, before any download),
+    confirming the canary runs BEFORE any network/install cost is paid.
+    Captured failure line (both jobs, identical): `arch canary: FAIL --
+    this runner is NOT 'x86_64'. Refusing to install a toolchain for the
+    wrong architecture (the classic silent-wrong-leg matrix failure).` /
+    `arch canary: expected uname -m = 'x86_64', observed 'aarch64'`.
+  - Push 4 (revert `scripts/ci-nim-setup.sh` to `expect_arch="$2"` via
+    `git revert --no-edit a721ef1` -- confirmed byte-identical to
+    pre-demo commit `90d285c` via `git diff` before pushing): run
+    `32753039182`, ALL ELEVEN jobs green again (confirmed via `gh run
+    view --json conclusion,status,jobs`, zero non-success jobs).
+  - Doc commit (this handoff + CLAUDE.md, already landed in commit
+    `4c0de09` for CLAUDE.md's portion per the per-slice doc rule; this
+    paragraph is the handoff-only closeout, mirroring slice 9's
+    fd58c0e pattern): run id and fast-forward result recorded below once
+    landed.
+  - Fast-forward to `main`: run id recorded below once landed.
+
+  **Traps for slices 12–13 (recorded per this slice's own findings, not
+  the RFC's a priori text):**
+  - **The missing-`ci-setup.sh` bug above is the single most likely trap
+    to repeat on slices 12/13.** Any NEW non-container unit job needs
+    `scripts/ci-setup.sh &&` chained before `scripts/test.sh` explicitly
+    -- there is no container image writing `nim.cfg` for you on these
+    legs, and (as this slice's own first-push failure shows) a property
+    job passing is NOT evidence the unit job's wiring is also correct,
+    since `milpa fetch` masks the exact same gap for property jobs only.
+    Write both jobs, then verify EACH ONE'S run step independently rather
+    than inferring from a sibling job's success.
+  - The on-disk `$HOME/.sello-nim/current` PATH convention (not
+    `$GITHUB_PATH`) generalizes directly to macOS/Windows: install to the
+    same tree, update the same symlink name, and `scripts/test.sh`'s
+    existing check needs no change at all (it is not OS-specific --
+    `$HOME` and the `-x`/`export PATH` shapes are already Git-Bash-safe
+    per this script's own OS-portability posture, though this was
+    reasoned about, not tested against a real Windows Git Bash runner by
+    this slice).
+  - `scripts/lib/nim-pin.txt`'s `darwin-arm64` row is ready to add on
+    day one of slice 12: release tag
+    `2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef`
+    (the SAME nightlies release slice 11 pinned -- verified as the exact
+    `v2.2.10` tag commit), asset `nim-2.2.10-macosx_arm64.tar.xz`,
+    SHA-256 `9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e`
+    (computed locally this slice, not yet re-verified against a live
+    macOS runner). `ci-nim-setup.sh`'s `uname -s`/`uname -m` platform-key
+    derivation should resolve to `darwin-arm64` on a real macOS runner
+    (Darwin reports `arm64` for `uname -m` where Linux reports `aarch64`
+    on the identical physical architecture -- reasoned about and
+    documented in `nim-pin.txt`'s own header, but NOT verified against a
+    real macOS host by this slice; confirm on the first real macOS-arm64
+    CI run rather than assuming).
+  - No `actions/cache` was needed or used for the toolchain install (see
+    "cache strategy: NONE" above) -- if slice 12/13 ever needs an
+    actual from-source build (e.g., no nightlies binary exists for some
+    future platform), REVISIT the cache-scope question explicitly rather
+    than silently adding an `actions/cache` step: RFC-005 Part B's
+    committed cache policy today authorizes the fuzz-corpus scope only,
+    and widening it is a real policy decision, not a mechanical follow-on
+    from this slice's own no-cache precedent.
+  - The `--expect-arch <name>` argument style (not an env var) mirrors
+    slice 8/9's `--cc`/`--sanitize` precedent deliberately, for the same
+    reason: `scripts/lib/gates.txt`'s entries read as literal,
+    self-documenting commands with no side-channel lookup needed to see
+    which architecture a gate expects.
+  - Local end-to-end validation of `ci-nim-setup.sh`'s full
+    download/checksum/extract/idempotency/mismatch-rejection path was
+    done on this session's amd64 host by temporarily adding a
+    `linux-x86_64` row to `nim-pin.txt` (real download, real checksum
+    verify against a value computed from the same live asset, real
+    `nim --version` execution confirming the extracted binary runs) --
+    the row was removed before any commit; `nim-pin.txt`'s own "no
+    dormant substrate" header comment is why it was never left in. Worth
+    repeating this exact technique for slice 12: validate the mechanism
+    end-to-end on whatever host is available BEFORE trusting a real
+    macOS runner's first CI run to be the first real test of the
+    download/checksum path.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
