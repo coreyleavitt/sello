@@ -19,7 +19,15 @@
   `scripts/ci-property.sh`, and `scripts/lib/toolchain-canary.sh`'s
   platform-identity canary, with a real red-then-green demo (canary
   inversion) through the actual new check names. Eight required jobs
-  total. Next up: slice 9 (ASan/UBSan job).
+  total. Slice 9 (DONE 2026-08-24) landed the ASan/UBSan matrix leg --
+  `unit-linux-amd64-gcc-asan-ubsan`, the `--sanitize <name>` mechanism in
+  `scripts/test.sh` (composing with `--cc`), and
+  `scripts/lib/sanitizer-canary.sh`'s dual compiler-identity/sanitizer-
+  flag canary, with a real red-then-green demo (a planted heap-buffer-
+  overflow, ASan-detectable only) through the actual new check name; the
+  real unit suite ran clean under ASan/UBSan with no genuine finding
+  (escalation rule not triggered). Nine required jobs total. Next up:
+  slice 10 (`--cpu:i386` job).
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -743,7 +751,11 @@ Phase 1 — matrix (7 first, then 8–13 independent):
       jobs), red demo `cc6e3be`, revert+doc commit `<this commit>`. See
       the full slice entry below (after slice 7's) for mechanism design,
       run ids, canary evidence, and the red-then-green sequence.
-- [ ] 9. ASan/UBSan job (red: planted overflow)
+- [x] 9. ASan/UBSan job (red: planted overflow) -- DONE 2026-08-24. Code
+      `b0620be` (mechanism + job), red demo `f6c7025` (planted heap-buffer-
+      overflow), revert+doc commit `<this commit>`. See the full slice
+      entry below (after slice 8's) for mechanism design, canary evidence,
+      and the red-then-green sequence.
 - [ ] 10. --cpu:i386 job (canary: 4-byte pointers)
 - [ ] 11. linux/arm64 job
 - [ ] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT)
@@ -1193,6 +1205,189 @@ Phase 4 — nightly, timing, release:
     `--exit-status` only when a nonzero run SHOULD stop the calling flow
     (i.e., for the real green-required pushes, not the deliberate red
     one).
+
+- 2026-08-24: slice 9 (ASan/UBSan job) DONE end-to-end, second matrix leg,
+  no core-arithmetic or memory-safety bug surfaced in sello's own code
+  (the escalation rule was not triggered) -- the real unit suite compiled
+  and ran clean under `-fsanitize=address,undefined
+  -fno-sanitize-recover=all` on every one of its ~18 files.
+
+  **Mechanism.** `scripts/test.sh` gained a second optional leading flag,
+  `--sanitize <name>` (today's only value: `asan-ubsan`), parsed by a
+  small `while` loop generalizing slice 8's single-flag `if` -- `--cc` and
+  `--sanitize`, in either order, may lead the argument list; the loop
+  stops at the first argument that is neither. `asan-ubsan` threads
+  `--passC:"-fsanitize=address,undefined -fno-sanitize-recover=all -g"
+  --passL:"-fsanitize=address,undefined" -d:useMalloc` into every `nim c`
+  invocation the script's `cmd` string builds. Each piece, and why:
+  - `-fsanitize=address,undefined` on BOTH `--passC` and `--passL` --
+    compiled in and linked in; the sanitizer runtimes must be pulled into
+    the final binary, not just referenced at compile time.
+  - `-fno-sanitize-recover=all` -- an UBSan finding aborts the run
+    instead of printing and continuing, so a real hit shows up as a
+    failed CI job, not a buried log line a human has to go looking for.
+  - `-g` -- usable source line numbers in ASan/UBSan reports (report
+    readability only, no behavior change, since this whole branch is
+    gated behind `--sanitize`). `--debugger:native` was considered and
+    declined: it changes codegen for a marginal readability gain over
+    plain `-g`, and this leg's job is proving the sanitizer fires, not
+    producing the prettiest possible crash report.
+  - `-d:useMalloc` -- REQUIRED, not cosmetic. Nim's ORC memory manager
+    (this project's standing `--mm:orc`, `config.nims`) normally services
+    allocations from its own arena allocator, which ASan's redzone
+    instrumentation cannot see into; without `-d:useMalloc` routing Nim's
+    allocations through the system `malloc`/`free` ASan actually
+    instruments, real heap-safety bugs in Nim-managed memory would go
+    undetected (or ASan would misread ORC's own internal bookkeeping as
+    corruption) -- a documented Nim+ASan interaction, not a
+    sello-specific guess.
+  - `ASAN_OPTIONS=detect_leaks=0`, exported in `scripts/test.sh`'s `cmd`
+    string ONLY inside the `--sanitize` branch -- LeakSanitizer's
+    ptrace-based detection routinely cannot run in an unprivileged CI
+    container (GitHub Actions' own container jobs included, per the
+    task brief's own documented expectation); this was a proactive,
+    documented call made before pushing, not a reaction to an observed
+    failure -- ASan's and UBSan's own (non-leak) checks are unaffected
+    and stayed fully active through both the green and red runs below.
+
+  **gcc, not clang.** `scripts/lib/gates.txt`'s
+  `unit-linux-amd64-gcc-asan-ubsan` entry passes no `--cc`, so this leg
+  runs on gcc -- a deliberate choice, documented in `scripts/test.sh`'s
+  own header: gcc is this project's default/most-exercised backend, and
+  layering ASan onto it keeps this leg's one variable (does the sanitizer
+  trip) isolated from slice 8's own variable (does clang's codegen
+  differ) rather than compounding both into one leg. Nothing in the
+  mechanism prevents `--sanitize asan-ubsan --cc clang` for local
+  investigation later if a clang-specific sanitizer finding ever needs
+  reproducing. No `sello-dev` image needed: the base
+  `ghcr.io/coreyleavitt/nim:2.2.10` image's gcc toolchain already carries
+  a working `libasan`/`libubsan` (confirmed empirically by the green run
+  below, not assumed in advance -- this was the slice's one real
+  environment unknown, since neither the Containerfile's own package
+  enumeration (slice 7) nor CLAUDE.md's image notes mention ASan/UBSan
+  runtime libraries by name).
+
+  **Platform-identity canary.** New `scripts/lib/sanitizer-canary.sh`, a
+  SIBLING of `scripts/lib/toolchain-canary.sh` (RFC-005 slice 9's own
+  design choice, not an extension of the slice-8 script) -- kept separate
+  so the plain gcc/clang legs' canary call stays byte-identical to slice
+  8, and so this new script's two-assertion shape (compiler identity AND
+  sanitizer-flag presence) has one clear owner. `scripts/test.sh` routes
+  the FIRST unit test file's compile through `sanitizer-canary.sh` instead
+  of `toolchain-canary.sh` whenever `--sanitize` is set (never both --
+  that would mean compiling the same file twice for no extra assurance).
+  Same `--listCmd -f -r` capture-and-grep mechanism as the slice-8 canary,
+  extended with a second assertion: after confirming the expected compiler
+  name appears in the captured C-compile-invocation line (identical check
+  to `toolchain-canary.sh`), it additionally asserts the literal substring
+  `-fsanitize=` appears in that SAME line -- proving Nim's C backend
+  genuinely forwarded the `--passC`-supplied sanitizer flags into the real
+  compiler invocation, not merely that `scripts/test.sh` accepted
+  `--sanitize` and built a flag string nothing downstream ever used. Live
+  evidence, run `32744432242` (below): the canary's captured line reads
+  `CC: system/exceptions.nim: gcc -c -w -fmax-errors=3
+  -fno-strict-aliasing -pthread -fsanitize=address,undefined
+  -fno-sanitize-recover=all -g ... -o
+  .../test_field_d/@psystem@sexceptions.nim.c.o
+  .../test_field_d/@psystem@sexceptions.nim.c`, followed by `sanitizer
+  canary: PASS -- confirmed Nim actually invoked 'gcc'.` and `sanitizer
+  canary: PASS -- confirmed the C compile invocation carries
+  -fsanitize=.` -- both assertions independently verified from one real
+  compile, not asserted from the flag alone.
+
+  **One new job**, same digest-pinned container as its gcc/clang
+  siblings, unit suite only (no property sibling -- RFC-005 Part B's
+  merge-gate paragraph scopes this leg to "ASan/UBSan build of the unit
+  suite" specifically): `unit-linux-amd64-gcc-asan-ubsan`
+  (`scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+  --sanitize asan-ubsan`), plus its `scripts/lib/gates.txt` entry -- nine
+  required jobs total.
+
+  **Ruleset ordering, as executed** (same pattern as slice 8, now the
+  default rather than the exception): `scripts/ruleset-apply.sh` (dry
+  run, printed the expected three-line diff adding
+  `unit-linux-amd64-gcc-asan-ubsan` to `main`'s required-check array and
+  nothing else) then `scripts/ruleset-apply.sh --apply`, both run LOCALLY
+  on the already-committed branch BEFORE the branch was pushed. The
+  branch's own first push therefore compared an already-updated live
+  ruleset against an already-updated committed manifest and `ruleset-sync`
+  passed clean on the very first push.
+
+  **Runs and evidence.**
+  - Push 1 (mechanism + job, commit `b0620be`): run `32744432242`, ALL
+    NINE jobs green on the first push, including `ruleset-sync`.
+    `unit-linux-amd64-gcc-asan-ubsan` completed in 1m46s (vs.
+    `unit-linux-amd64-gcc`'s 54s and `unit-linux-amd64-clang`'s 49s in the
+    same run -- roughly 2x the plain-gcc cost, the sanitizer
+    instrumentation tax, well inside the wall-clock budget). The real unit
+    suite (every file in `scripts/lib/unit-test-files.sh`, including the
+    Wycheproof/CAVP/ristretto/libsodium-skip suites) ran clean under ASan
+    and UBSan -- zero `ERROR: AddressSanitizer`, zero `runtime error:`
+    lines anywhere in the job log -- confirming the escalation rule was
+    not triggered before the red demo was ever attempted. Property jobs
+    (unaffected by this slice, unit-only) completed in their usual
+    ~7-10 minute range (`property-linux-amd64-gcc` 7m18s,
+    `property-linux-amd64-clang` 9m42s).
+  - Push 2 (red demo, commit `f6c7025`): run `32745491988`. Added
+    `tests/unit/test_scratch_asan_probe.nim` (a `malloc(8)` followed by a
+    9-byte `memset` via raw `{.emit.}` C -- one byte past the allocation,
+    small enough that a plain build's allocator padding absorbs it
+    silently) to `scripts/lib/unit-test-files.sh`'s array, per the
+    standing scratch-append convention (slice 6). Result:
+    `unit-linux-amd64-gcc-asan-ubsan` RED (job `97489902158`, 1m47s) and
+    ALL EIGHT other jobs green, including `unit-linux-amd64-gcc` (job
+    `97489902493`, 1m5s) -- the exact gcc-passes/asan-fails contrast the
+    task brief called for, on the real new check name, through a real
+    push. Captured failure (job `97489902158`): `==1442==ERROR:
+    AddressSanitizer: heap-buffer-overflow ... WRITE of size 9 ...
+    0x7b1fc59e0038 is located 0 bytes after 8-byte region
+    [0x7b1fc59e0030,0x7b1fc59e0038) ... SUMMARY: AddressSanitizer:
+    heap-buffer-overflow
+    .../test_scratch_asan_probe.nim.c:268 in
+    scratchAsanHeapOverflowProbe...`, followed by `==1442==ABORTING` and a
+    nonzero process exit -- the sanitizer catching the planted defect
+    unconditionally, with `-g`-backed source line numbers. The contrasting
+    gcc job's log (job `97489902493`) shows the identical test file
+    compiling and passing green: `[Suite] RFC-005 slice 9 red demo
+    (scratch, reverted after the demo push)` / `[OK] planted
+    heap-buffer-overflow, ASan-detectable only` -- same source, same
+    push, opposite verdicts, which is the proof `--passC` reached the real
+    compile rather than being silently dropped.
+  - Push 3 (revert `tests/unit/test_scratch_asan_probe.nim` and its
+    `scripts/lib/unit-test-files.sh` array entry -- confirmed the array
+    file byte-identical to `b0620be` via `git diff` before committing --
+    plus this handoff/CLAUDE.md doc commit): run id and result recorded
+    below once landed.
+  - Fast-forward to `main`: run id recorded below once landed.
+
+  **Traps for slices 10–13 (recorded per this slice's own findings, not
+  the RFC's a priori text):**
+  - The `--cc`/`--sanitize` leading-flag-loop pattern generalizes
+    directly to any future slice needing a third leading flag (e.g. a
+    hypothetical `--cpu` companion) -- extend the `while`/`case`, do not
+    fork a second parser.
+  - `--sanitize`'s canary SUPERSEDES the plain toolchain canary for that
+    one run rather than composing with it (two separate canary calls
+    would mean compiling the first file twice) -- if a future leg needs a
+    THIRD simultaneous identity fact proved from the same `--listCmd`
+    capture, extend `sanitizer-canary.sh`'s existing two-assertion shape
+    rather than writing a third sibling script; the capture-once,
+    assert-many shape is the reusable part, not the specific two checks.
+  - No `ASAN_OPTIONS=detect_leaks=0`-shaped surprise was needed beyond
+    what was pre-decided (the task brief anticipated the ptrace/leak-
+    detection container restriction before this slice ran) -- but it's
+    worth noting the call was made proactively, before any run, rather
+    than discovered by a leak-detector crash; a future sanitizer-adjacent
+    slice (e.g. slice 19's taint CT harness, which explicitly names an
+    MSan fallback) should expect the same class of unprivileged-container
+    restriction and budget for it up front rather than as a surprise.
+  - `-d:useMalloc` was necessary and sufficient here -- the real unit
+    suite (which does allocate via `seq`/`string` in test helper code,
+    though never in the CT-hardened secret-holding paths themselves)
+    surfaced no ASan/ORC-interaction false positive once it was set. If a
+    future sanitizer leg ever adds `-d:release` to the mix, re-verify
+    `-d:useMalloc` still composes cleanly (release-mode allocator paths
+    are not identical to debug-mode ones in every Nim version).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
