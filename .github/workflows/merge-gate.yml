@@ -76,6 +76,32 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang
 
+  # RFC-005 slice 9: the ASan/UBSan leg -- same suite, same digest-pinned
+  # image (no sello-dev needed: this leg needs only gcc plus its bundled
+  # libasan/libubsan runtime, already part of the base image's gcc
+  # toolchain -- same "already present, verify rather than assume" posture
+  # slice 7/8 established for clang), compiled with
+  # `-fsanitize=address,undefined -fno-sanitize-recover=all` via
+  # scripts/test.sh's `--sanitize asan-ubsan` mechanism (that script's own
+  # header comment has the full design, including why `-d:useMalloc` is
+  # required alongside it for Nim's ORC allocator, and why LeakSanitizer is
+  # disabled for this leg specifically). Unit suite only, per RFC-005 Part
+  # B's merge-gate paragraph ("ASan/UBSan build of the unit suite") -- no
+  # property sibling. The first test file's compile is additionally routed
+  # through scripts/lib/sanitizer-canary.sh, which asserts from Nim's own
+  # `--listCmd` output that BOTH gcc was actually invoked AND the
+  # `-fsanitize=` flags genuinely reached that compile line -- not merely
+  # that scripts/test.sh accepted `--sanitize` (RFC-005 Part B's matrix-leg
+  # platform-identity canary requirement).
+  unit-linux-amd64-gcc-asan-ubsan:
+    name: unit-linux-amd64-gcc-asan-ubsan
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --sanitize asan-ubsan
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the

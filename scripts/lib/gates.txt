@@ -77,12 +77,23 @@
 # scripts/gates-manifest-check.sh's own header for the container-vs-
 # plain-runner rationale).
 #
-# check-name                script-invocation
-unit-linux-amd64-gcc         scripts/test.sh
-unit-linux-amd64-clang       scripts/test.sh --cc clang
-property-linux-amd64-gcc     scripts/ci-property.sh
-property-linux-amd64-clang   scripts/ci-property.sh --cc clang
-check-readme                 scripts/check-readme.sh
-gates-manifest-sync          scripts/gates-manifest-check.sh
-ruleset-sync                 scripts/ruleset-sync-check.sh
-policy-lint                  scripts/policy-lint.sh
+# RFC-005 slice 9 (ASan/UBSan job): unit suite only, per Part B's merge-
+# gate paragraph ("ASan/UBSan build of the unit suite") -- there is no
+# property-linux-amd64-*-asan-ubsan sibling the way slice 8 added one for
+# --cc, since the property suites are proptest's own generative harness,
+# not sello's unit KATs, and the RFC scopes this leg to the unit suite
+# deliberately. Runs on gcc (scripts/test.sh's own --sanitize header
+# comment has the gcc-over-clang rationale), via the SAME
+# scripts/test.sh both the gcc/clang legs and this one share (no forked
+# sanitizer-flavored script -- RFC-005 Part B's build-path invariant).
+#
+# check-name                        script-invocation
+unit-linux-amd64-gcc                scripts/test.sh
+unit-linux-amd64-clang              scripts/test.sh --cc clang
+unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan
+property-linux-amd64-gcc            scripts/ci-property.sh
+property-linux-amd64-clang          scripts/ci-property.sh --cc clang
+check-readme                        scripts/check-readme.sh
+gates-manifest-sync                 scripts/gates-manifest-check.sh
+ruleset-sync                        scripts/ruleset-sync-check.sh
+policy-lint                         scripts/policy-lint.sh
