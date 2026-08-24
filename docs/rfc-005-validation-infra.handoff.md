@@ -77,9 +77,46 @@
   documented anti-pattern this handoff's own standing rule ("push early,
   iterate against the real runner") exists to prevent; the second session
   reviewed the diff, pushed within its first cycle, and let the real
-  macOS runner (not further local reasoning) be the actual test. Next up:
-  slice 13 (Windows/MinGW job) or slice 10 once unblocked, whichever
-  Corey prefers.
+  macOS runner (not further local reasoning) be the actual test. Slice 13
+  (DONE 2026-08-24) landed the Windows/MinGW-gcc leg -- `unit-windows-
+  amd64-gcc` on `runs-on: windows-2025`, `defaults: run: shell: bash`
+  (Git Bash, no PowerShell steps), the last hosted-native matrix leg.
+  Reused `scripts/ci-nim-setup.sh`'s arch/OS-parametric toolchain install
+  (a new `windows-x86_64` row in `scripts/lib/nim-pin.txt`, verified
+  compiler-less by inspecting the real zip) plus a NEW pinned MinGW-w64
+  gcc 16.2.0 install (`scripts/lib/mingw-pin.txt`, winlibs, `--with-mingw`)
+  onto its own `$HOME/.sello-nim-mingw` path. Two-part identity canary:
+  the pre-existing `--expect-arch x86_64` PLUS a new `--expect-os
+  <case-glob>` canary against the raw `uname -s` (needed because Git
+  Bash's `uname -m` on Windows reports the same `x86_64` string a Linux
+  amd64 host does, unlike every earlier residual leg's distinct
+  aarch64/arm64 split) and a toolchain-VERSION canary asserting the
+  installed `gcc --version` matches the pinned `16.2.0` exactly. Three
+  real portability bugs found and fixed against the actual hosted runner,
+  none anticipated by local reasoning: (1) a bash `case` pattern-list's
+  `|` alternation is parsed at source time, not after variable
+  substitution -- the OS canary's first real run went red on a
+  genuinely-Windows runner because of this, fixed with extglob's `@(...)`
+  wrapper (itself needing `shopt -s extglob` moved OUTSIDE the `if` block
+  using it, a second syntax error hit while fixing the first, since bash
+  parses a whole compound command as one unit before executing any of
+  it); (2) `scripts/lib/toolchain-canary.sh`'s compiler-invocation regex
+  had no allowance for the `.exe` suffix Nim's `--listCmd` output carries
+  on Windows (`gcc.exe`, not `gcc`) -- the ONLY thing that failed on the
+  run where the real suite otherwise compiled, linked, and passed
+  end-to-end under MinGW gcc; (3) a cosmetic-only `readlink` gap in the
+  MinGW install's own summary line (fixed by echoing the already-known
+  target variable instead, matching the Nim install's own pattern).
+  Real red-then-green demo: the new `--expect-os` canary inverted
+  directly in the WORKFLOW's own job step (not a shared-script hardcode,
+  since no other leg passes `--expect-os` at all -- sidesteps the
+  "which value collides with which other leg's own argument" analysis
+  slice 12's own trap note for this slice anticipated), confirmed red
+  ONLY on `unit-windows-amd64-gcc` (all twelve other jobs stayed green in
+  the same run), reverted, confirmed green again. Thirteen required jobs
+  total -- the last hosted-native matrix leg; slice 10 (`--cpu:i386`)
+  remains the only Phase 1 matrix slice still blocked on a Corey-owned
+  ghcr credential.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -811,7 +848,13 @@ Phase 1 — matrix (7 first, then 8–13 independent):
 - [ ] 10. --cpu:i386 job (canary: 4-byte pointers) -- BLOCKED on a Corey-owned ghcr write:packages credential for the 32-bit sello-dev image; deliberately skipped past, see slice 11's own entry and Open forks.
 - [x] 11. linux/arm64 job -- DONE 2026-08-24 (taken out of order ahead of slice 10, see that slice's note and CLAUDE.md). Code `4c0de09` (mechanism + jobs), fix `90d285c` (ci-setup.sh wiring gap, found on the first push), red demo `a721ef1`, revert `a122818`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
 - [x] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT) -- DONE 2026-08-24. Code `e2ea0d1` (darwin-arm64 pin row, BSD portability fixes, `--expect-proptest-skip` mechanism, toolchain-canary version echo, the `unit-macos-arm64-clang` job + gates.txt entry -- prepared by a first session, reviewed and pushed by a second, see the Process note in this file's header and the full slice entry below), red demo `18ef02b`, revert `ea7f2f0`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
-- [ ] 13. Windows/MinGW job (shell: bash; MinGW pinned)
+- [x] 13. Windows/MinGW job (shell: bash; MinGW pinned) -- DONE 2026-08-24.
+      Code `6ec3eb3` (mechanism + job), fix `6ec6a60` (extglob for the
+      `--expect-os` `|` alternation, hit on the first real run), fix
+      `78f9d32` (toolchain-canary `.exe` allowance + a cosmetic `readlink`
+      gap), red demo `ad32511`, revert `<this commit>`. See the full slice
+      entry below for mechanism design, run ids, canary evidence, and the
+      red-then-green sequence.
 
 Phase 2 — heavy deterministic gates (independent after 7):
 - [ ] 14. libsodium differential job (skip paths fatal under CI env var)
@@ -1795,6 +1838,195 @@ Phase 4 — nightly, timing, release:
   the hardcoded value, the same way this slice reasoned through
   `"aarch64"` colliding harmlessly with the two linux/arm64 legs' own
   arguments while breaking macOS's `"arm64"` one.
+
+### Slice 13 (Windows/MinGW-gcc job) -- full record
+
+  **Scoping trap identified up front, per the required-reading brief
+  (before writing any code):** Git Bash's `uname -m` on 64-bit Windows
+  reports `x86_64` -- the SAME string a plain Linux amd64 host reports for
+  the identical architecture, unlike the aarch64-vs-arm64 Linux/Darwin
+  split every earlier residual leg could rely on. This means arch alone
+  cannot distinguish this leg the way `--expect-arch` alone already
+  distinguished linux/arm64 and macOS from everything else, AND it means
+  slice 12's own "Trap for slice 13" note (hardcode a near-miss arch
+  string that collides harmlessly with other legs) doesn't even apply
+  cleanly here, since there is no single wrong arch STRING that is wrong
+  for Windows but still right for both aarch64 (linux) and arm64 (macOS)
+  simultaneously. Resolved by adding a genuinely NEW, second identity
+  canary instead of trying to force the existing one to do double duty:
+  `scripts/ci-nim-setup.sh` gained `--expect-os <case-glob>`, asserted
+  against the RAW `uname -s` (`MINGW64_NT-10.0-<build>` on Git Bash),
+  BEFORE this script's own windows-normalization step folds that raw
+  string down to a stable `windows` platform-key for the pin-table
+  lookup (the kernel build number would otherwise force a new
+  `nim-pin.txt` row every time GitHub bumps the runner OS build, even
+  though nothing about the pinned Nim binary changed).
+
+  **Two pins, verified before trusting either.** Nim: downloaded and
+  inspected `nim-2.2.10-windows_x64.zip` directly (not assumed from the
+  asset name) -- 5832 file entries, NO `gcc`/`mingw` anywhere in the
+  list, confirming Nim's Windows toolchain ships no C compiler at all;
+  top-level directory `nim-2.2.10`, same convention as every `.tar.xz`
+  row, so the existing `mv "$extract_tmp"/nim-*/* ...` extraction line
+  needed no change, only a `.zip`-vs-`.tar.xz` branch ahead of it.
+  SHA-256 `fe0686a9b298e5b13d0a983df37e002a8c6320f8b16cc45a51d15cf4046a109f`.
+  MinGW: winlibs (`github.com/brechtsanders/winlibs_mingw`), chosen over
+  niXman/mingw-builds-binaries (the other standalone mingw-w64
+  distribution investigated) because winlibs publishes a plain `.zip`
+  PLUS an upstream `.sha256` companion file -- niXman ships `.7z` only.
+  Downloaded fresh, SHA-256 recomputed locally
+  (`c1f52294597c0b73786b2a78eb5d176d89226d2f21875eab75e783a8b1cefcc4`),
+  matched the upstream-published `.sha256` file byte for byte before
+  being pinned. Build: x86_64, POSIX threads, SEH exceptions, UCRT
+  runtime, GCC 16.2.0 -- `scripts/lib/mingw-pin.txt`'s own header has the
+  full rationale for each choice.
+
+  **`ruleset-apply.sh`, done before the first push** (same ordering as
+  slices 8/9/11/12): dry run printed the expected one-line diff adding
+  `unit-windows-amd64-gcc` to `main`'s required-check array (13 checks,
+  up from 12), then `--apply`.
+
+  **Runs and evidence -- four pushes to green, each catching one genuine,
+  previously-undiscoverable-by-local-simulation bug (the Windows leg's
+  own version of slice 12's "the real runner is the actual test," this
+  time with three real findings instead of zero):**
+  - Push 1 (mechanism + job, commit `6ec3eb3`): run `32776557431`.
+    `unit-windows-amd64-gcc` RED at the `ci-nim-setup.sh` step itself (job
+    `97588840557`, 11s) -- arch canary PASSED (`expected uname -m =
+    'x86_64', observed 'x86_64'`), but the OS canary FAILED:
+    `OS canary: expected uname -s to match 'MINGW64_NT*|MSYS*', observed
+    'MINGW64_NT-10.0-26100'` / `OS canary: FAIL -- ... does not match`.
+    Root cause: a bash `case` pattern-list's `|` alternation is parsed as
+    separate literal pattern TOKENS at source-parse time, not re-parsed
+    from a substituted variable's runtime VALUE -- `case x in $var)` where
+    `$var` happens to contain `|` does not split into alternatives; the
+    whole expanded string (including the literal `|` character) is
+    matched as ONE plain glob, which the real observed string (no `|` in
+    it) could never satisfy. All other twelve jobs stayed green in the
+    same run, confirming the failure was isolated to the new mechanism,
+    not a regression.
+  - Push 2 (fix, commit `6ec6a60`): wrapped the pattern in extglob's
+    `@(pattern-list)` construct, which IS evaluated against the expanded
+    pattern text at match time. Hit a SECOND, immediate syntax error
+    fixing the first: `shopt -s extglob` placed inside the same `if`
+    block as the `case` statement using it does not take effect in time,
+    because bash parses a whole compound command (the entire `if...fi`
+    block) as one syntactic unit before executing any part of it --
+    `shopt -s extglob` had to move to the very top of the script,
+    unconditional, before the block is ever reached. Verified locally
+    against the exact real observed string
+    (`MINGW64_NT-10.0-26100`) before pushing again, this time via genuine
+    execution (`bash -n`'s static-only parse can never validate this
+    fix at all, since `-n` never executes a `shopt` and will always
+    report the same syntax error regardless of placement -- a real,
+    if narrow, blind spot in that otherwise-standard sanity check,
+    worth remembering for any future extglob-dependent script). Run
+    `32777669490`: OS canary now PASSED (`OS canary: PASS -- runner OS
+    identity confirmed against pattern 'MINGW64_NT*|MSYS*'`), the full
+    Nim install completed, the full MinGW install completed (checksum
+    verified, toolchain-VERSION canary PASSED: `gcc.exe (MinGW-W64
+    x86_64-ucrt-posix-seh, built by Brecht Sanders, r1) 16.2.0`), but the
+    job still went RED one step later, in `scripts/test.sh` itself:
+    `toolchain canary: FAIL -- expected the C compiler invocation to
+    contain 'gcc', but observed: <none found in --listCmd output>`.
+    Investigating the raw log showed the REAL suite had already compiled,
+    linked, AND RUN successfully under MinGW gcc by this point (every
+    `[OK]` line present) -- the only failure was
+    `scripts/lib/toolchain-canary.sh`'s own regex, which had no allowance
+    for the `.exe` suffix Nim's `--listCmd` output carries on Windows
+    (`gcc.exe -c ...`, not `gcc -c ...`).
+  - Push 3 (fix, commit `78f9d32`): added an optional `(\.exe)?` group to
+    the toolchain-canary regex; also fixed a cosmetic-only finding from
+    the same run (the MinGW install's own "OK" summary line used
+    `readlink` to report its resolved symlink target, which came back
+    EMPTY on this runner even though the symlink itself worked correctly
+    -- the version canary, which depends on that same `ln -s` having
+    succeeded, had already PASSED on the prior run -- switched to echoing
+    the already-known target variable directly, matching the Nim
+    install's own "OK" line, which never used `readlink` in the first
+    place). Run `32778756547`: ALL THIRTEEN jobs green. `unit-windows-
+    amd64-gcc` wall clock: 2m51s (21:18:15Z-21:21:06Z) -- the full unit
+    suite, including the SHA-512 CAVP corpus, ristretto255 (incl. the
+    Pedersen commit/open facade-level scenario), Wycheproof, and X25519,
+    all `[OK]`. Six `SKIPPED (proptest not fetched -- run: milpa fetch
+    --features proptest)` banner lines followed by `test.sh: proptest
+    SKIPPED banner present, as required (--expect-proptest-skip)`.
+    Toolchain canary: `toolchain canary: PASS -- confirmed Nim actually
+    invoked 'gcc'` / `toolchain canary: observed 'gcc --version' (first
+    line): gcc.exe (MinGW-W64 x86_64-ucrt-posix-seh, built by Brecht
+    Sanders, r1) 16.2.0`. `ruleset-sync` green (confirming the applied
+    `main` ruleset already matched the committed 13-check manifest).
+  - Push 4 (red demo, commit `ad32511`): inverted `unit-windows-amd64-gcc`'s
+    OWN `--expect-os` argument directly in `merge-gate.yml`
+    (`'MINGW64_NT*|MSYS*'` -> `'RED-DEMO-NOT-WINDOWS*'`) -- a
+    workflow-level, job-scoped inversion, NOT a shared-script hardcode the
+    way slices 11/12 both used (`ci-nim-setup.sh`'s `expect_arch`
+    hardcoded internally). This sidesteps slice 12's own "Trap for slice
+    13" note entirely (no need to reason about which hardcoded value
+    collides harmlessly with which other leg's own `--expect-arch`
+    argument), since `--expect-os` is a flag ONLY this one job's own
+    workflow step ever passes -- no other leg's invocation contains the
+    string at all, so changing it can only ever affect this one job,
+    by construction, not by a chosen coincidence. Run `32779723424`:
+    `unit-windows-amd64-gcc` RED (11s, failed at the OS canary itself,
+    before any download -- `OS canary: expected uname -s to match
+    'RED-DEMO-NOT-WINDOWS*', observed 'MINGW64_NT-10.0-26100'` / `OS
+    canary: FAIL`), all twelve other jobs GREEN in the same run
+    (`property-linux-amd64-gcc`, `property-linux-arm64-gcc`,
+    `unit-linux-arm64-gcc`, `unit-linux-amd64-gcc`, `ruleset-sync`,
+    `unit-linux-amd64-gcc-asan-ubsan`, `gates-manifest-sync`,
+    `unit-macos-arm64-clang`, `check-readme`, `property-linux-amd64-clang`,
+    `unit-linux-amd64-clang`, `policy-lint`) -- confirmed via `gh run view
+    --json status,conclusion,jobs`, not eyeballed from the streamed
+    watch output.
+  - Push 5 (revert, commit `<this commit>`): reverts the `--expect-os`
+    argument back to `'MINGW64_NT*|MSYS*'` in the same commit as this
+    doc/CLAUDE.md update (matching slices 8/9's "revert+doc commit"
+    precedent, rather than a separate revert-only commit the way
+    slices 11/12 did it) -- run id and fast-forward result recorded
+    below once landed.
+
+  **Trap for future sessions touching Windows/Git-Bash scripts (there is
+  no slice 14+ matrix leg left to hand this to -- slice 13 is the LAST
+  hosted-native leg per the RFC's own Phase 1 list -- so this is recorded
+  for any future maintenance of `ci-nim-setup.sh`/`test.sh`'s Windows
+  branches, not a forward slice pointer):**
+  1. A bash `case` (or `[[ == ]]`) pattern that needs `|`-alternation
+     supplied as ONE dynamic string (not literal source syntax) needs
+     `shopt -s extglob` PLUS the `@(pattern-list)` wrapper -- and the
+     `shopt` must execute strictly BEFORE the parser reaches ANY compound
+     command (`if`/`while`/`case`/function body) that uses the construct,
+     since bash parses a whole compound command as one syntactic unit
+     before executing any part of it. Put `shopt -s extglob` at the very
+     top of a script, unconditionally, not inside the first block that
+     needs it.
+  2. `bash -n` (syntax-check-only) NEVER executes anything, including a
+     `shopt` -- it will report a false-positive syntax error on
+     extglob-dependent syntax REGARDLESS of where `shopt -s extglob`
+     sits in the file, since `-n` mode never runs it. Verify
+     extglob-dependent fixes via real (non-`-n`) execution instead; do
+     not trust `bash -n`'s verdict on this specific class of construct.
+  3. Nim's `--listCmd` output on Windows names the compiler binary with
+     its literal on-disk `.exe` suffix (`gcc.exe`, not `gcc`) -- any
+     future canary/regex that greps `--listCmd` output for a bare
+     compiler name needs to tolerate this (already fixed in
+     `scripts/lib/toolchain-canary.sh`; a hypothetical future
+     `sanitizer-canary.sh`-style Windows leg would need the same
+     allowance).
+  4. Git-for-Windows' `ln -s` DOES create real, working NTFS symlinks
+     here (confirmed: the MinGW toolchain-version canary, which requires
+     the symlink to resolve correctly, passed), but `readlink` reading
+     that same symlink back returned EMPTY on this runner -- prefer
+     echoing an already-known target variable over round-tripping through
+     `readlink` for any future Windows-touching log/diagnostic line.
+  5. `windows-2025` ships its OWN MinGW toolchain out of the box (per the
+     RFC's own text, "the runner-bundled MinGW drifts") -- this leg
+     deliberately installs a second, pinned copy under
+     `$HOME/.sello-nim-mingw` and prepends IT to `PATH` ahead of anything
+     else, rather than relying on or modifying whatever the image
+     happens to ship. Any future script touching this leg's `PATH` must
+     preserve that ordering (pinned copy first) or risk silently
+     resolving the drifting runner-bundled `gcc` instead.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
