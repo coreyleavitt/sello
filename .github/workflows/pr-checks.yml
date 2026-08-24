@@ -1,0 +1,112 @@
+name: pr-checks
+
+# RFC-005 slice 6: the contribution lane. Runs the CHEAP hosted subset of
+# the merge gate against every `pull_request` targeting this repository --
+# the unit suite and check-readme, NOT the property job (its ~9.5 minute
+# wall clock is heavy-tier by this project's own measured numbers) and NOT
+# any of the other four merge-gate.yml jobs (gates-manifest-sync,
+# ruleset-sync, policy-lint -- repo-governance checks with no bearing on a
+# contributor's patch). Per RFC-005 Part B's contribution-lane paragraph:
+# "a pull_request trigger runs the cheap hosted subset ... the full gate
+# runs when the maintainer re-pushes the [contributor's] branch" (a plain
+# `push` to a branch in THIS repository, which is what merge-gate.yml's
+# own `on: push` already covers -- no new plumbing needed for that half).
+# This workflow is the cheap pre-screen only; it is never the thing a
+# change actually merges on.
+#
+# Job-naming decision (deliberate, not an oversight): both job names below
+# are prefixed `pr-` and are DISTINCT from all six merge-gate.yml required
+# check names (unit-linux-amd64-gcc, property-linux-amd64-gcc,
+# check-readme, gates-manifest-sync, ruleset-sync, policy-lint). Required
+# checks are ruleset keys scoped to the push-triggered workflow (see
+# .github/rulesets/main.json's required_status_checks, generated from
+# scripts/lib/gates.txt) -- a same-named `pull_request` job would produce a
+# SECOND check-run under an identical name with a different (cheaper,
+# non-required) meaning, which would muddy that interface: a maintainer or
+# a ruleset reading "unit-linux-amd64-gcc: success" could no longer tell
+# which trigger produced it. Distinct names keep the two lanes legible as
+# what they are -- a required push-time gate and a non-required pre-screen
+# -- from the check-run list alone. See CLAUDE.md's own "Contribution
+# lane" paragraph for the same reasoning recorded alongside the rest of
+# the CI section.
+#
+# Manifest exemption (RFC-005 slice 3's gates-manifest-sync, and slice 4's
+# ruleset-sync, both re-verified when this file was written): both checks'
+# workflow-side scan is HARD-CODED to
+# .github/workflows/merge-gate.yml specifically (scripts/gates-manifest-
+# check.sh's `workflow=` variable and scripts/ruleset-sync-check.sh's own,
+# both feeding the shared scripts/lib/workflow-job-names.sh extractor) --
+# neither scan is a directory-wide glob over .github/workflows/*.yml, so
+# this file's two job names never enter either comparison and correctly
+# require no scripts/lib/gates.txt entry (these are not required-on-main
+# gates; entering the manifest would make ruleset-apply.sh try to require
+# them on `main`, which is backwards for a pull_request-only lane).
+# scripts/policy-lint.sh is the one script that DOES scan
+# `.github/workflows/*.yml` as a glob -- this file is fully in scope for
+# its four content assertions (SHA-pinned uses:, no continue-on-error,
+# a permissions: block, container: digests matching
+# scripts/lib/image-pins.txt) and was verified clean via a local
+# `scripts/policy-lint.sh` run before this workflow was pushed.
+#
+# Self-hosted runner note (forward-looking, RFC-005 slice 28 has not
+# landed yet): both jobs below use `runs-on: ubuntu-latest`, a GitHub-
+# hosted runner. The self-hosted timing-tier runner (RFC-005 Part B,
+# "Timing tier") is scoped to schedule/workflow_dispatch triggers ONLY on
+# its own dedicated workflow and is never registered against any label a
+# pull_request-triggered job could target -- this workflow reinforces that
+# boundary by simply never using a self-hosted runs-on value at all.
+#
+# Approval gating (RFC-005 Part B's contribution-lane paragraph): this
+# repository's fork-PR-workflow-run approval policy is
+# `all_external_contributors` (verified live, RFC-005 slice 5) -- a
+# pull_request run from any account other than the owner/an existing
+# collaborator is held pending a maintainer's manual approval click before
+# either job below executes at all. A same-account PR (opened by the
+# owner against the owner's own repository) is NOT held -- that is
+# expected, not a policy gap; the hold applies to outside contributors.
+on:
+  pull_request:
+
+# Workflow-level least-privilege permissions (RFC-005 Part B, "CI supply
+# chain"): this workflow only needs to read the repository, same as
+# merge-gate.yml.
+permissions:
+  contents: read
+
+# Per-PR concurrency, cancel superseded runs -- a contributor force-
+# pushing or adding commits to the same PR should not queue up stale runs
+# behind the latest one.
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The cheap unit-suite pre-screen -- identical build path to
+  # merge-gate.yml's unit-linux-amd64-gcc (same digest-pinned image, same
+  # scripts/ci-setup.sh + scripts/test.sh invocation), under a distinct
+  # name (see this file's own header comment on the naming decision).
+  # Exactly one scripts/ invocation (the build-path invariant, RFC-005
+  # Part B).
+  pr-unit-linux-amd64-gcc:
+    name: pr-unit-linux-amd64-gcc
+    runs-on: ubuntu-latest
+    # Same digest pin as merge-gate.yml's jobs -- both files are checked
+    # against the same scripts/lib/image-pins.txt by scripts/policy-lint.sh
+    # (slice 7 owns consolidating the repeated per-job pin comments; see
+    # that file's own header).
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+
+  # The cheap README-fence pre-screen -- identical build path to
+  # merge-gate.yml's check-readme, under a distinct name.
+  pr-check-readme:
+    name: pr-check-readme
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/check-readme.sh

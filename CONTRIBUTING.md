@@ -68,19 +68,38 @@ branch, commit, open a pull request against `main`. The maintainer
 rebases or fast-forwards the accepted change through the branch model
 described above; you don't need to.
 
-## Fork PR CI (honest current state)
+## Fork PR CI
 
-The repository's fork-PR-workflow-run approval policy is set to require
-maintainer approval for all outside contributors before their workflow
-runs execute (`all_external_contributors`) -- no fork PR runs CI
-unattended. **The `pull_request`-triggered CI workflow itself does not
-exist yet** (it is a tracked, not-yet-built piece of the project's
-validation-infrastructure work): today, `.github/workflows/merge-gate.yml`
-triggers only on `push` to branches in this repository, so opening a PR
-from a fork does not yet run any automated check at all. Until the
-`pull_request` workflow lands, expect the maintainer to run the relevant
-gates locally against your patch as part of review. This section will be
-updated the day that workflow ships.
+Opening a pull request against `main` runs `.github/workflows/pr-checks.yml`
+(the `pull_request` trigger) -- a cheap hosted subset of the full merge
+gate: the unit suite and the README-fence check (`pr-unit-linux-amd64-gcc`
+and `pr-check-readme` -- named distinctly from the six push-triggered
+required checks on purpose, since they mean something different: a
+non-required pre-screen, not a required gate; see
+`.github/workflows/pr-checks.yml`'s own header comment). It deliberately
+does **not** run the property suite or the repo-governance checks
+(`gates-manifest-sync`, `ruleset-sync`, `policy-lint`) -- those stay on
+the push-triggered `merge-gate.yml` only. Neither `pr-checks.yml` job is a
+GitHub required status check and neither enters
+`scripts/lib/gates.txt` -- they gate nothing on `main` directly; they are
+a fast signal on the PR itself.
+
+The repository's fork-PR-workflow-run approval policy requires maintainer
+approval for all outside contributors before their workflow runs execute
+(`all_external_contributors`) -- if you're not the maintainer or an
+existing collaborator, GitHub holds your PR's checks as "waiting for
+approval" until the maintainer clicks approve; nothing runs unattended.
+Once approved, `pr-unit-linux-amd64-gcc` and `pr-check-readme` run and
+report directly on your PR.
+
+Passing `pr-checks.yml` is a good sign but is not the bar your change
+merges on. The real bar is the full six-job `merge-gate.yml` battery
+(`scripts/merge-gate.sh` above runs the identical set locally) -- the
+maintainer runs that by pushing your accepted branch (or a rebase of it)
+directly to a branch in this repository, which triggers the full gate via
+`push`. That full gate, green, is what actually has to pass before your
+change reaches `main`; the fork PR's cheap checks are a pre-screen, not a
+replacement for it.
 
 ## Crypto contributions specifically
 
