@@ -9,7 +9,13 @@
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
 Phase 0 — bootstrap (private repo):
-- [ ] 1. CI build path, minimal (SELLO_IN_CONTAINER, ci-setup.sh, merge-gate.yml one job; green + red demo)
+- [~] 1. CI build path, minimal — CODE LANDED on main (`c3ca4cc`), local
+      in-container validation green (12 unit files pass, proptest SKIPPED
+      banner confirmed). DoD green-run/red-demo BLOCKED: GitHub Actions
+      refuses all jobs at the account level (billing — "recent account
+      payments have failed or your spending limit needs to be increased").
+      Resume: fix billing, then `gh run rerun 32697367451` (green + banner
+      check), then the scratch-branch red demo.
 - [ ] 2. milpa-in-CI + property/check-readme jobs (proptest SHA pin, skip-banner-ABSENT assert)
 - [ ] 3. Gates manifest + merge-gate.sh local runner + workflow-vs-manifest drift check
 - [ ] 4. Rulesets + branch model (committed JSON, apply script, waiver, policy-lint; red demos)
@@ -51,7 +57,12 @@ Phase 4 — nightly, timing, release:
 - [ ] 32. Registry + close-out audit
 
 ## Open forks (awaiting Corey)
-- (none yet)
+- **GitHub Actions billing gate (2026-08-24):** every Actions job on the
+  coreyleavitt account is refused before provisioning ("recent account
+  payments have failed or your spending limit needs to be increased") —
+  blocks the CI-run DoD of slice 1 and all remaining CI slices. Needs
+  GitHub Settings → Billing & plans. The loop polls hourly via
+  `gh run rerun` and resumes automatically once a run starts.
 
 ## Key decisions (this session)
 - 2026-08-24: stage 3 opened; RFC status → ACCEPTED. Stage-2 amendments
@@ -65,3 +76,10 @@ Phase 4 — nightly, timing, release:
   git@github.com:coreyleavitt/sello.git (private).
 - Slice-N DoDs include red-path demos through the real entry point (real
   push, real red check) — budget scratch branches for them.
+- Trap (slice 1): this host's /tmp is a small shared tmpfs holding podman's
+  default storage and was 100% full — local podman validation needed
+  `podman --root <dir-under-/home> --runroot <dir-under-/home>
+  --storage-driver overlay --storage-opt overlay.mount_program=/usr/bin/fuse-overlayfs`,
+  torn down with `podman unshare rm -rf`. Expect the same in slices 3/7+.
+- Note: pushing slice 1 also pushed 8 previously-unpushed local commits
+  (RFC-006 slices + stage-3 open) to origin/main — expected, recorded.
