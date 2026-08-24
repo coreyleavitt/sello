@@ -89,3 +89,19 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/check-readme.sh
+
+  # RFC-005 slice 3: the gates-manifest-sync drift check -- asserts this
+  # workflow's job name set equals scripts/lib/gates.txt's check-name
+  # set, in both directions (scripts/gates-manifest-check.sh's own header
+  # comment has the full parse-method and self-reference writeup). Pure
+  # text scan over two committed files, no Nim/podman/milpa needed -- runs
+  # on a plain runner rather than the digest-pinned container (RFC-005
+  # Part B's container rule targets BUILD jobs; this job builds nothing).
+  # Still exactly one scripts/ invocation (the build-path invariant holds
+  # regardless of container vs. plain runner).
+  gates-manifest-sync:
+    name: gates-manifest-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/gates-manifest-check.sh

@@ -1,13 +1,25 @@
 #!/usr/bin/env bash
 # scripts/ci-property.sh — RFC-005 slice 2: the property-suite CI job's
 # one script invocation (Part B's build-path invariant: every job's run
-# step is exactly one scripts/ invocation). Runs inside the digest-pinned
-# Nim toolchain image (the workflow's own `container:`), so this assumes
-# SELLO_IN_CONTAINER semantics throughout -- there is no host to
-# preflight-check and no podman wrapper to skip (see scripts/test.sh's own
-# header comment on the same split).
+# step is exactly one scripts/ invocation). In CI this runs inside the
+# digest-pinned Nim toolchain image (the workflow's own `container:`),
+# under SELLO_IN_CONTAINER=1.
 #
-# Three things this script does that the plain core unit job
+# RFC-005 slice 3 retrofit: gained the same SELLO_IN_CONTAINER dual-mode
+# split scripts/test.sh and scripts/check-readme.sh already had, so this
+# script can appear as a literal, host-runnable entry in
+# scripts/lib/gates.txt (merge-gate.sh's manifest) instead of needing
+# merge-gate.sh-side podman-wrapping logic of its own. Host mode (no
+# SELLO_IN_CONTAINER set) does NOT reimplement the in-container logic
+# below against host-side milpa state -- that would test a different
+# thing from what CI's required check actually runs. Instead it wraps
+# THIS SCRIPT, unmodified, inside the pinned image and recurses with
+# SELLO_IN_CONTAINER=1 -- byte-identical logic to the CI job, including
+# building milpa fresh from the pinned commit every time (deliberate: the
+# whole point of this job, locally or in CI, is exercising that exact
+# pin). See the bottom of this file for the host-mode branch.
+#
+# Three things the in-container body does that the plain core unit job
 # (scripts/ci-setup.sh + scripts/test.sh) does not need:
 #
 #   1. Builds milpa from the commit pinned in scripts/lib/milpa-pin.txt
@@ -38,31 +50,63 @@
 #      (RFC-005 Part B).
 #
 # Usage:  scripts/ci-property.sh
+#         SELLO_IN_CONTAINER=1 scripts/ci-property.sh   # already inside
+#                                                          # the pinned image (CI)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-source "$(dirname "$0")/lib/milpa-install.sh"
-install_milpa "build/milpa-venv"
+if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
+  source "$(dirname "$0")/lib/milpa-install.sh"
+  install_milpa "build/milpa-venv"
 
-echo "ci-property: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
-"$MILPA_BIN" fetch --features proptest --locked
+  echo "ci-property: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features proptest --locked
 
-echo "ci-property: running the unit+property suite" >&2
-log="build/ci-property-test.log"
-mkdir -p "$(dirname "$log")"
-# Propagate test.sh's own exit status past the `tee` pipeline (a bare
-# `cmd | tee log` reports tee's exit status under `set -o pipefail`,
-# which is what we want here -- pipefail is already on via set -euo
-# pipefail above, so this is exactly right rather than incidental).
-SELLO_IN_CONTAINER=1 scripts/test.sh 2>&1 | tee "$log"
+  echo "ci-property: running the unit+property suite" >&2
+  log="build/ci-property-test.log"
+  mkdir -p "$(dirname "$log")"
+  # Propagate test.sh's own exit status past the `tee` pipeline (a bare
+  # `cmd | tee log` reports tee's exit status under `set -o pipefail`,
+  # which is what we want here -- pipefail is already on via set -euo
+  # pipefail above, so this is exactly right rather than incidental).
+  SELLO_IN_CONTAINER=1 scripts/test.sh 2>&1 | tee "$log"
 
-if grep -q 'SKIPPED (proptest not fetched' "$log"; then
-  echo "" >&2
-  echo "ci-property: FAIL -- the proptest SKIPPED banner appears in this run's log." >&2
-  echo "ci-property: this job exists to run the property suites for real; a skip here" >&2
-  echo "ci-property: means _deps/proptest did not end up populated despite the fetch" >&2
-  echo "ci-property: step above reporting success -- investigate, do not silence." >&2
-  exit 1
+  if grep -q 'SKIPPED (proptest not fetched' "$log"; then
+    echo "" >&2
+    echo "ci-property: FAIL -- the proptest SKIPPED banner appears in this run's log." >&2
+    echo "ci-property: this job exists to run the property suites for real; a skip here" >&2
+    echo "ci-property: means _deps/proptest did not end up populated despite the fetch" >&2
+    echo "ci-property: step above reporting success -- investigate, do not silence." >&2
+    exit 1
+  fi
+
+  echo "ci-property: proptest SKIPPED banner absent, as required -- property suites ran for real." >&2
+else
+  # Host mode (RFC-005 slice 3): not already inside the pinned image --
+  # wrap this exact script inside it via podman and recurse with
+  # SELLO_IN_CONTAINER=1, mirroring CI's own `container:` field + `run:
+  # scripts/ci-property.sh` step exactly, rather than a parallel
+  # host-side reimplementation that could drift from what the required
+  # check actually does.
+  #
+  # Lockfile-conformance preflight (RFC-001 ledger finding 30), same
+  # courtesy staleness check scripts/test.sh's own host branch runs
+  # before its podman invocation -- host-only, since _deps/milpa.lock are
+  # host-side state, meaningless to check from inside the container this
+  # preflight gates entry to. Note this job's OWN milpa/proptest fetch
+  # (inside the container, from the commit pinned in
+  # scripts/lib/milpa-pin.txt) is independent of and does not consult
+  # this host-side state -- it is deliberately a from-scratch mirror of
+  # the CI job, not a shortcut through whatever the host already fetched.
+  source "$(dirname "$0")/lib/milpa-preflight.sh"
+  milpa_preflight
+
+  img=ghcr.io/coreyleavitt/nim:2.2.10
+  podman run --rm \
+    -v "$PWD:/workspace" \
+    -v "$HOME/.cache/milpa:/.cache/milpa" \
+    -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+    -w /workspace \
+    "$img" \
+    bash -c "SELLO_IN_CONTAINER=1 scripts/ci-property.sh"
 fi
-
-echo "ci-property: proptest SKIPPED banner absent, as required -- property suites ran for real." >&2

@@ -1,0 +1,69 @@
+# scripts/lib/gates.txt -- RFC-005 slice 3: the gates manifest, the single
+# source of truth binding CI check names to the local command each gate
+# runs. Three consumers read this file, per RFC-005 Part B's "the gates
+# manifest is a data file" paragraph:
+#   (i)   scripts/merge-gate.sh -- runs the required set locally (full,
+#         or a named subset), reading BOTH columns.
+#   (ii)  scripts/gates-manifest-check.sh (the "gates-manifest-sync" CI
+#         job) -- asserts this file's check-name column (i) equals
+#         .github/workflows/merge-gate.yml's job name set, in both
+#         directions.
+#   (iii) scripts/ruleset-apply.sh (RFC-005 slice 4, not landed yet) --
+#         will generate the ruleset's required-check array from column
+#         (i) alone.
+#
+# This file is DATA, not executable (no shebang, no +x bit -- same
+# convention as scripts/lib/milpa-pin.txt).
+#
+# Format: two whitespace-separated columns per line.
+#   column 1 (check-name):        the CI check-run name -- MUST equal
+#                                  the corresponding merge-gate.yml job's
+#                                  `name:` field exactly (checked by
+#                                  gates-manifest-check.sh), and becomes a
+#                                  ruleset required-check key + a README
+#                                  evidence-table row once those exist.
+#   column 2 (script-invocation): the exact command scripts/merge-gate.sh
+#                                  runs locally for that gate, handed to
+#                                  `bash -c`.
+# Comments start with `#` as the first non-whitespace character of the
+# line (whole-line only -- no inline trailing comments, so the parser
+# stays a single pass with no quoting rules to get wrong). Blank lines
+# are ignored. Column 2 runs to the end of the line (so a future entry
+# may carry arguments, e.g. `scripts/mutation.sh --full`); today every
+# entry is a single bare script path.
+#
+# Script-invocation column, decided (RFC-005 slice 3): every entry here
+# is the PLAIN script invocation -- NOT the `SELLO_IN_CONTAINER=1`-
+# prefixed form merge-gate.yml's own `run:` steps use, and NOT prefixed
+# with scripts/ci-setup.sh either. This works because every script named
+# below is dual-mode (RFC-005 slices 1-3's standing convention): run with
+# no SELLO_IN_CONTAINER set, each one wraps ITSELF in the pinned podman
+# image automatically (host preflight + `podman run` against
+# ghcr.io/coreyleavitt/nim:2.2.10) exactly like a maintainer's existing
+# `scripts/test.sh` invocation always has; run with SELLO_IN_CONTAINER=1,
+# each one assumes it is already inside that image (CI's own `container:`
+# field) and skips the wrap. scripts/test.sh and scripts/check-readme.sh
+# had this split as of RFC-005 slices 1-2; scripts/ci-property.sh gained
+# it in THIS slice specifically so it could appear in this manifest as a
+# literal, host-runnable command too (see its own header comment for the
+# retrofit). scripts/ci-setup.sh (writes a bare zero-dep nim.cfg) is
+# intentionally NOT part of any entry below: it exists for a bare CI
+# checkout that has never run milpa at all, and every entry's own
+# dual-mode host branch already assumes the documented prerequisite
+# (`milpa fetch` run at least once -- see scripts/test.sh's own header)
+# instead -- ci-setup.sh would be a harmless no-op locally (it only writes
+# nim.cfg if absent) but is deliberately left off the column so this file
+# states what actually runs, not an over-inclusive superset.
+#
+# gates-manifest-sync (this file's own drift check) needs neither a
+# container nor milpa -- it is a pure text scan over this file and the
+# workflow YAML, so its script-invocation column entry runs unwrapped on
+# a plain runner in CI and equally plain on a maintainer's host (see
+# scripts/gates-manifest-check.sh's own header for the container-vs-
+# plain-runner rationale).
+#
+# check-name                script-invocation
+unit-linux-amd64-gcc         scripts/test.sh
+property-linux-amd64-gcc     scripts/ci-property.sh
+check-readme                 scripts/check-readme.sh
+gates-manifest-sync          scripts/gates-manifest-check.sh
