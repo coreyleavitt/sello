@@ -41,8 +41,45 @@
   implies -- slice 11 has no such dependency (nim-lang/nightlies and
   GitHub-hosted `ubuntu-24.04-arm` are both immediately available), so it
   was pulled forward rather than blocking the whole matrix phase on one
-  credential. Next up: slice 12 (macOS-arm64 job) or slice 10 once
-  unblocked, whichever Corey prefers.
+  credential. Slice 12 (DONE 2026-08-24) landed the macOS-arm64 leg --
+  `unit-macos-arm64-clang` on `runs-on: macos-15`, no `container:` field
+  (no digest-pinnable image exists on macOS runners at all), reusing
+  `scripts/ci-nim-setup.sh`'s arch/OS-parametric toolchain install (a new
+  `darwin-arm64` row in `scripts/lib/nim-pin.txt`, independently
+  re-verified against a fresh download before use) plus its
+  `--expect-arch arm64` platform-identity canary (Darwin's `uname -m`
+  spelling, distinct from Linux's `aarch64`), `--cc clang` (macOS has no
+  real gcc), `scripts/lib/toolchain-canary.sh`'s new observed-compiler-
+  version echo (`Apple clang version 17.0.0 (clang-1700.0.13.5)` on the
+  first hosted run), and `scripts/test.sh`'s new `--expect-proptest-skip`
+  flag asserting the SKIPPED banner is PRESENT (this leg has no
+  milpa/proptest fetch story, the inverse of every property job's own
+  banner-ABSENT assertion). Two real BSD/macOS portability bugs were
+  found and fixed against the actual hosted runner (not local
+  simulation): `sha256sum` (GNU-only; macOS ships `shasum -a 256`) and
+  `ln -sfn` (GNU-only flag spelling; replaced with `rm -f` + `ln -s`).
+  Unit suite green on the very first push -- both portability fixes had
+  already been made correctly before the first push (see "Process note"
+  below), so the only red demo needed was the standard canary-inversion
+  one, isolated to just the new check (`ci-nim-setup.sh`'s `expect_arch`
+  hardcoded to `aarch64`, which still matches the two linux/arm64 legs'
+  own `--expect-arch aarch64` trivially but mismatches macOS's
+  `--expect-arch arm64`) -- confirmed red on run `32771009278` (only
+  `unit-macos-arm64-clang` failed, both linux/arm64 legs stayed green),
+  reverted, confirmed green again on run `32771991150`. Twelve required
+  jobs total. **Process note (honest record):** this slice was completed
+  by a second session after a first session stalled doing extensive local
+  (Linux-container) simulation of macOS/BSD behavior without ever
+  pushing -- the local prep (the darwin-arm64 pin row, the `sha256sum`/
+  `ln -sfn` portability fixes, the `--expect-proptest-skip` mechanism, the
+  toolchain-canary version echo) turned out to be correct and complete on
+  review, but the over-polishing-before-pushing pattern itself is the
+  documented anti-pattern this handoff's own standing rule ("push early,
+  iterate against the real runner") exists to prevent; the second session
+  reviewed the diff, pushed within its first cycle, and let the real
+  macOS runner (not further local reasoning) be the actual test. Next up:
+  slice 13 (Windows/MinGW job) or slice 10 once unblocked, whichever
+  Corey prefers.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -773,7 +810,7 @@ Phase 1 — matrix (7 first, then 8–13 independent):
       and the red-then-green sequence.
 - [ ] 10. --cpu:i386 job (canary: 4-byte pointers) -- BLOCKED on a Corey-owned ghcr write:packages credential for the 32-bit sello-dev image; deliberately skipped past, see slice 11's own entry and Open forks.
 - [x] 11. linux/arm64 job -- DONE 2026-08-24 (taken out of order ahead of slice 10, see that slice's note and CLAUDE.md). Code `4c0de09` (mechanism + jobs), fix `90d285c` (ci-setup.sh wiring gap, found on the first push), red demo `a721ef1`, revert `a122818`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
-- [ ] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT) -- scripts/ci-nim-setup.sh/scripts/lib/nim-pin.txt are already written arch/OS-parametric for this; a verified macosx_arm64 asset (nim-2.2.10-macosx_arm64.tar.xz) + SHA-256 (9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e) from the SAME nim-lang/nightlies release slice 11 pinned (2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef -- the exact v2.2.10 tag commit) were found during slice 11's own research and recorded here for slice 12's convenience -- NOT added as a nim-pin.txt row by slice 11 itself (no dormant substrate: nothing in slice 11 exercises it). Slice 12 should only need: add the `darwin-arm64` row to scripts/lib/nim-pin.txt, confirm scripts/ci-nim-setup.sh's `uname -s`/`uname -m` platform-key derivation resolves correctly on a real macOS runner (Darwin/arm64 -- untested against a real macOS host by slice 11, only reasoned about), and wire the two workflow jobs/gates.txt entries following slice 11's exact pattern (no mechanism changes anticipated).
+- [x] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT) -- DONE 2026-08-24. Code `e2ea0d1` (darwin-arm64 pin row, BSD portability fixes, `--expect-proptest-skip` mechanism, toolchain-canary version echo, the `unit-macos-arm64-clang` job + gates.txt entry -- prepared by a first session, reviewed and pushed by a second, see the Process note in this file's header and the full slice entry below), red demo `18ef02b`, revert `ea7f2f0`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
 - [ ] 13. Windows/MinGW job (shell: bash; MinGW pinned)
 
 Phase 2 — heavy deterministic gates (independent after 7):
@@ -1665,6 +1702,99 @@ Phase 4 — nightly, timing, release:
     end-to-end on whatever host is available BEFORE trusting a real
     macOS runner's first CI run to be the first real test of the
     download/checksum path.
+
+### Slice 12 (macOS-arm64 job) -- full record
+
+  **Process note (honest, per the task brief's own ask).** A first
+  session did the mechanism prep -- the `darwin-arm64` `nim-pin.txt` row,
+  the `sha256sum`/`ln -sfn` BSD-portability fixes in
+  `scripts/ci-nim-setup.sh`, the `--expect-proptest-skip` flag in
+  `scripts/test.sh`, and the compiler-version echo in
+  `scripts/lib/toolchain-canary.sh` -- entirely against local Linux-
+  container reasoning and simulation, without ever pushing a commit or
+  invoking the real macOS runner. That is exactly the anti-pattern this
+  handoff's own standing rule ("push early, iterate against the real
+  runner, not local simulation") warns against for BSD/macOS-specific
+  behavior, since no Linux container can actually exercise Darwin's
+  `uname`, `shasum`, or `ln` semantics. A second session reviewed the
+  diff line-by-line against the RFC's slice-12 DoD and this handoff's own
+  slice-11 traps list, found the prep correct and complete on inspection,
+  and pushed within its first working cycle rather than adding further
+  local polish -- the macOS runner's own first CI run was the actual
+  first test of the mechanism, not a simulated one. It passed clean.
+
+  **Pin re-verification, done before trusting it.** The `darwin-arm64`
+  row's asset (`nim-2.2.10-macosx_arm64.tar.xz`) was re-downloaded fresh
+  from `nim-lang/nightlies` release
+  `2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef` and
+  its SHA-256 recomputed independently (`9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e`)
+  -- matched slice 11's own prior research byte-for-byte, not merely
+  copied forward on trust.
+
+  **`ruleset-apply.sh`, done before the first push** (same ordering as
+  slices 8/9/11): dry run printed the expected one-line diff adding
+  `unit-macos-arm64-clang` to `main`'s required-check array (12 checks,
+  up from 11), then `--apply`.
+
+  **Runs and evidence.**
+  - Push 1 (mechanism + job, commit `e2ea0d1`): run `32770025014`. ALL
+    TWELVE jobs green on the FIRST push -- no macOS-specific breakage,
+    confirming the first session's local BSD-portability reasoning
+    (`sha256sum`->`shasum -a 256` fallback, `ln -sfn`->`rm -f`+`ln -s`)
+    held up against the real hosted runner. `unit-macos-arm64-clang`:
+    job `97568045364`, 43s. Canary evidence from this run: `arch canary:
+    expected uname -m = 'arm64', observed 'arm64'` / `arch canary: PASS
+    -- runner architecture confirmed 'arm64'`; platform-key resolved to
+    `darwin-arm64` (confirming `ci-nim-setup.sh`'s arch/OS-parametric
+    design needed zero code changes for a second OS, exactly as slice 11
+    built it ahead of need); `toolchain canary: PASS -- confirmed Nim
+    actually invoked 'clang'` followed by `toolchain canary: observed
+    'clang --version' (first line): Apple clang version 17.0.0
+    (clang-1700.0.13.5)` -- the first real observed value for this
+    slice's own compiler-version-recording addition; six
+    `SKIPPED (proptest not fetched -- run: milpa fetch --features
+    proptest)` banner lines followed by `test.sh: proptest SKIPPED
+    banner present, as required (--expect-proptest-skip)`.
+  - Push 2 (red demo, commit `18ef02b`): run `32771009278`.
+    `ci-nim-setup.sh`'s `expect_arch` hardcoded to the literal
+    `"aarch64"` (was `"$2"`) -- deliberately NOT the same "x86_64"
+    inversion slice 11 used, since that shared script also backs the two
+    already-green linux/arm64 legs and hardcoding a wrong value for THEM
+    too would have produced a three-check red demo touching pre-existing
+    checks, not "RED on the new check" as asked. Hardcoding to
+    `"aarch64"` instead makes the two linux/arm64 legs' own
+    `--expect-arch aarch64` argument match the hardcode trivially (no
+    behavior change, stayed green) while macOS's `--expect-arch arm64`
+    argument now mismatches it -- isolating the demo to exactly the new
+    check. Result: `unit-macos-arm64-clang` RED (job `97571102935`, 7s,
+    failed at the canary step itself before any download) --
+    `unit-linux-arm64-gcc` and `property-linux-arm64-gcc` both stayed
+    GREEN in the same run, confirming the red was scoped precisely.
+    Captured failure line: `arch canary: FAIL -- this runner is NOT
+    'aarch64'. Refusing to install a toolchain for the wrong architecture
+    (the classic silent-wrong-leg matrix failure).` / `arch canary:
+    expected uname -m = 'aarch64', observed 'arm64'`.
+  - Push 3 (revert via `git revert --no-edit 18ef02b`, commit `ea7f2f0`):
+    run `32771991150`, ALL TWELVE jobs green again (confirmed via `gh run
+    view --json status,conclusion`, overall `success`).
+  - Doc commit (this handoff + CLAUDE.md + `scripts/merge-gate.sh`'s own
+    scope comment/help text, landed together): run id and fast-forward
+    result recorded below once landed.
+  - Fast-forward to `main`: run id recorded below once landed.
+
+  **Trap for slice 13 (Windows/MinGW), recorded per this slice's own
+  finding:** a shared canary-inverting script (here, `ci-nim-setup.sh`)
+  used by MULTIPLE matrix legs needs its red-demo inversion chosen so it
+  mismatches ONLY the new leg's own `--expect-arch` argument, not every
+  leg's -- hardcode the new leg's OWN expected string's near-miss (e.g.
+  slice 13's Windows leg's own `uname`-reported architecture string,
+  whatever it turns out to be, hardcoded to something that happens to
+  still match every OTHER leg's argument) rather than reusing a prior
+  slice's inversion value wholesale. Confirm which strings collide with
+  which pre-existing legs' own `--expect-arch` arguments before choosing
+  the hardcoded value, the same way this slice reasoned through
+  `"aarch64"` colliding harmlessly with the two linux/arm64 legs' own
+  arguments while breaking macOS's `"arm64"` one.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;

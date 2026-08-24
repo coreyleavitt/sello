@@ -26,12 +26,12 @@
 # manifest's script-invocation column can stay a literal, host-runnable
 # command).
 #
-# THIS RUNS THE LINUX SET ONLY. macOS-arm64 and Windows/MinGW legs
-# (RFC-005 slices 12-13) do not exist yet, and when they land they run
-# NATIVELY on their own hosts (Windows via Git Bash) -- there is no
-# "run the macOS leg locally" mode on a Linux workstation, and this
-# script does not pretend otherwise. Update this comment and the help
-# text below in the same slice that adds those legs, not before.
+# THIS RUNS THE LINUX SET, PLUS THE ONE HOSTED MACOS RESIDUAL BELOW.
+# Windows/MinGW (RFC-005 slice 13) does not exist yet, and when it lands
+# it runs NATIVELY on its own host (Git Bash) -- there is no "run the
+# Windows leg locally" mode on a Linux workstation, and this script does
+# not pretend otherwise. Update this comment and the help text below in
+# the same slice that adds that leg, not before.
 #
 # Within "the Linux set," the two `*-arm64-*` gates (RFC-005 slice 11)
 # are themselves host-arch-dependent: their script-invocation column
@@ -42,10 +42,19 @@
 # run outright on a non-aarch64 host. Running `scripts/merge-gate.sh` (no
 # arguments, or naming an arm64 gate explicitly) on a typical amd64
 # workstation therefore reports those two gates FAIL by design, not a
-# bug in this script -- exactly the same "hosted-only residual" category
-# macOS/Windows will join, just arriving one slice earlier since arm64's
-# gates.txt entries exist starting now. Run them for real only on an
-# actual arm64 Linux host, or rely on the CI job.
+# bug in this script. Run them for real only on an actual arm64 Linux
+# host, or rely on the CI job.
+#
+# unit-macos-arm64-clang (RFC-005 slice 12) is the same "hosted residual"
+# category, one leg further out: its gates.txt entry also hardcodes
+# SELLO_IN_CONTAINER=1 (no container story on macOS at all) and installs
+# a native darwin-arm64 Nim toolchain, whose own arch canary rejects the
+# run on any non-arm64-Darwin host -- including a real arm64 LINUX host,
+# since Darwin's `uname -m` (`arm64`) and Linux's (`aarch64`) genuinely
+# differ for the same physical architecture. On a typical Linux
+# workstation this gate FAILS by design at the arch-canary step, same as
+# the two arm64 gates above; run it for real only on an actual macOS-
+# arm64 host, or rely on the CI job.
 #
 # Fail-fast per gate, full summary at the end: every gate script already
 # runs under its own `set -euo pipefail` (fails fast internally, at its
@@ -80,22 +89,29 @@ EOF
   done
   cat <<'EOF'
 
-THIS RUNS THE LINUX SET ONLY. macOS-arm64 and Windows/MinGW legs are
-hosted-only residuals: none exist in the manifest yet (RFC-005 slices
-12-13), and when they land they run natively on their own hosts, not
-through this script on a Linux workstation.
+THIS RUNS THE LINUX SET, PLUS THE ONE HOSTED MACOS RESIDUAL BELOW.
+Windows/MinGW (RFC-005 slice 13) is not in the manifest yet, and when it
+lands it runs natively on its own host, not through this script on a
+Linux workstation.
 
 The unit-linux-arm64-gcc / property-linux-arm64-gcc gates (RFC-005 slice
-11) are themselves a hosted-only residual WITHIN the Linux set: they have
-no container/podman story at all and install a native aarch64 Nim
-toolchain directly, so running them on a non-aarch64 host fails loud via
+11) are a hosted-only residual WITHIN the Linux set: they have no
+container/podman story at all and install a native aarch64 Nim toolchain
+directly, so running them on a non-aarch64 host fails loud via
 scripts/ci-nim-setup.sh's own platform-identity canary -- expected, not a
 bug in this script.
+
+unit-macos-arm64-clang (RFC-005 slice 12) is the same category one leg
+further out: no container/podman story, installs a native darwin-arm64
+Nim toolchain, and fails loud via the same canary on any non-arm64-Darwin
+host -- including a real arm64 Linux host, since Darwin's `uname -m`
+(`arm64`) differs from Linux's (`aarch64`) for the identical physical
+architecture.
 
 Prerequisites: podman on PATH, and `milpa fetch` run at least once in
 this checkout (same prerequisite scripts/test.sh's own header documents)
 -- each gate script wraps itself in the pinned podman image automatically
-(except the arm64 gates above, which never use podman).
+(except the three hosted-residual gates above, which never use podman).
 
 Exit status: nonzero if any run gate fails.
 EOF
