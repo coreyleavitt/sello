@@ -52,6 +52,19 @@
 # Usage:  scripts/ci-property.sh
 #         SELLO_IN_CONTAINER=1 scripts/ci-property.sh   # already inside
 #                                                          # the pinned image (CI)
+#         scripts/ci-property.sh --cc clang               # clang-backend leg
+#                                                          # (RFC-005 slice 8)
+#
+# --cc <name> (RFC-005 slice 8): forwarded verbatim to scripts/test.sh
+# below, in BOTH the in-container body (the "$@" appended to the
+# `scripts/test.sh` call) and the host-mode recursion (appended to the
+# recursive `SELLO_IN_CONTAINER=1 scripts/ci-property.sh` invocation) --
+# this script does no parsing or validation of its own, since
+# scripts/test.sh already owns --cc's meaning, error-checking, and its
+# platform-identity canary; this script is purely a pass-through so
+# `property-linux-amd64-clang` in scripts/lib/gates.txt/merge-gate.yml can
+# read as literally `scripts/ci-property.sh --cc clang`, matching
+# `unit-linux-amd64-clang`'s `scripts/test.sh --cc clang` sibling.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -69,7 +82,9 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   # `cmd | tee log` reports tee's exit status under `set -o pipefail`,
   # which is what we want here -- pipefail is already on via set -euo
   # pipefail above, so this is exactly right rather than incidental).
-  SELLO_IN_CONTAINER=1 scripts/test.sh 2>&1 | tee "$log"
+  # "$@" forwards this script's own arguments (e.g. --cc clang) straight
+  # through to scripts/test.sh, unmodified (RFC-005 slice 8).
+  SELLO_IN_CONTAINER=1 scripts/test.sh "$@" 2>&1 | tee "$log"
 
   if grep -q 'SKIPPED (proptest not fetched' "$log"; then
     echo "" >&2
@@ -101,6 +116,16 @@ else
   source "$(dirname "$0")/lib/milpa-preflight.sh"
   milpa_preflight
 
+  # Forward this script's own arguments (e.g. --cc clang, RFC-005 slice 8)
+  # into the recursive in-container invocation, each shell-quoted via
+  # printf %q so the reconstructed command line is byte-identical to "$@"
+  # regardless of its contents -- same recursion shape as before this
+  # slice, just no longer argument-less.
+  inner_cmd="SELLO_IN_CONTAINER=1 scripts/ci-property.sh"
+  for a in "$@"; do
+    inner_cmd+=" $(printf '%q' "$a")"
+  done
+
   img=ghcr.io/coreyleavitt/nim:2.2.10
   podman run --rm \
     -v "$PWD:/workspace" \
@@ -108,5 +133,5 @@ else
     -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
     -w /workspace \
     "$img" \
-    bash -c "SELLO_IN_CONTAINER=1 scripts/ci-property.sh"
+    bash -c "$inner_cmd"
 fi

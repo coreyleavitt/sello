@@ -57,6 +57,19 @@
 # nim.cfg if absent) but is deliberately left off the column so this file
 # states what actually runs, not an over-inclusive superset.
 #
+# RFC-005 slice 8 (clang-backend job): the first entries below to actually
+# use column 2's documented "column 2 runs to the end of the line ... a
+# future entry may carry arguments" allowance (see the paragraph above
+# this one) -- `scripts/test.sh --cc clang` / `scripts/ci-property.sh
+# --cc clang` thread Nim's `--cc:clang` into every compile in that run
+# instead of the gcc default, via the SAME script both the gcc and clang
+# checks share (no forked clang-flavored script -- RFC-005 Part B's
+# build-path invariant). Both scripts' own header comments have the full
+# --cc mechanics and the accompanying platform-identity canary
+# (scripts/lib/toolchain-canary.sh) that proves, via Nim's own `--listCmd`
+# output, which compiler actually got invoked -- not just which flag was
+# passed.
+#
 # gates-manifest-sync (this file's own drift check) needs neither a
 # container nor milpa -- it is a pure text scan over this file and the
 # workflow YAML, so its script-invocation column entry runs unwrapped on
@@ -66,7 +79,9 @@
 #
 # check-name                script-invocation
 unit-linux-amd64-gcc         scripts/test.sh
+unit-linux-amd64-clang       scripts/test.sh --cc clang
 property-linux-amd64-gcc     scripts/ci-property.sh
+property-linux-amd64-clang   scripts/ci-property.sh --cc clang
 check-readme                 scripts/check-readme.sh
 gates-manifest-sync          scripts/gates-manifest-check.sh
 ruleset-sync                 scripts/ruleset-sync-check.sh

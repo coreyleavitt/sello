@@ -6,8 +6,31 @@
 # core library -- _deps/ is empty unless proptest has been fetched (see
 # below).
 #
-# Usage:  scripts/test.sh              # plain pure-Nim backend
+# Usage:  scripts/test.sh              # plain pure-Nim backend, default C compiler (gcc)
 #         scripts/test.sh -d:release   # extra defines forwarded to each nim c
+#         scripts/test.sh --cc clang   # compile with clang instead of gcc (RFC-005 slice 8)
+#         scripts/test.sh --cc clang -d:release   # --cc composes with defines; must come first
+#
+# --cc <name> (RFC-005 slice 8, the clang-backend matrix leg): threads
+# `--cc:<name>` into every `nim c` invocation below, so this ONE script
+# serves both the unit-linux-amd64-gcc and unit-linux-amd64-clang required
+# checks (scripts/lib/gates.txt: `scripts/test.sh` vs `scripts/test.sh
+# --cc clang`) -- no forked clang-flavored script, per RFC-005 Part B's
+# build-path invariant. Must be the FIRST argument if present (a simple
+# `read -r` of "$1"/"$2", not a general getopts parser -- this script has
+# exactly one optional flag with a value, and every other argument stays
+# an opaque pass-through define as before). Left unset, `nim c` resolves
+# its own default backend (gcc on this project's pinned Linux image,
+# unchanged from every prior slice). The FIRST unit test file's compile
+# is additionally run through scripts/lib/toolchain-canary.sh, which
+# proves via Nim's own `--listCmd` output that the compiler actually
+# invoked matches what was requested (or the gcc default) -- not merely
+# that the flag was accepted -- see that script's own header for why a
+# `clang --version` sanity check alone would not be enough. One code
+# path: `cc_flag`/`cc_name` are plain bash variables consumed while
+# building the `cmd` string below, so both entrypoints (SELLO_IN_CONTAINER=1
+# and the podman-wrapped host branch) get identical --cc/canary behavior
+# with no branch-specific handling of either.
 #
 # Mounts: the project + the milpa CAS (at both the canonical path and its
 # host-absolute path, so milpa's absolute dep symlinks under _deps/
@@ -65,6 +88,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# --cc <name> (RFC-005 slice 8) -- see the header comment above. Must be
+# the leading argument if present; everything else (including anything
+# after a consumed --cc pair) is forwarded verbatim as before.
+cc_name="gcc"
+cc_flag=""
+if [[ "${1:-}" == "--cc" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "scripts/test.sh: --cc requires a compiler name, e.g. --cc clang" >&2
+    exit 2
+  fi
+  cc_name="$2"
+  cc_flag="--cc:$cc_name"
+  shift 2
+fi
+
 extra_defines=("$@")
 
 # unit_test_files ("which unit test files make up the suite") is defined in
@@ -83,9 +121,20 @@ source "$(dirname "$0")/lib/tier-summary.sh"
 img=ghcr.io/coreyleavitt/nim:2.2.10
 
 cmd="set -e"
+canary_done=0
 for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
-  cmd+=$'\n'"nim c ${extra_defines[*]:-} -r $f"
+  if [[ "$canary_done" -eq 0 ]]; then
+    # Platform-identity canary (RFC-005 slice 8): the first file's compile
+    # is routed through scripts/lib/toolchain-canary.sh instead of a bare
+    # `nim c`, proving Nim actually invoked the requested compiler (or the
+    # gcc default) rather than merely accepting the flag. This IS this
+    # file's real compile+run (`-r`), not an extra throwaway build.
+    cmd+=$'\n'"scripts/lib/toolchain-canary.sh $cc_name nim c $cc_flag ${extra_defines[*]:-} --listCmd -f -r $f"
+    canary_done=1
+  else
+    cmd+=$'\n'"nim c $cc_flag ${extra_defines[*]:-} -r $f"
+  fi
 done
 # Property suites skipped because _deps/proptest is absent (RFC-003 slice 2
 # item 4) -- same loud self-skip register as test_libsodium_interop's
