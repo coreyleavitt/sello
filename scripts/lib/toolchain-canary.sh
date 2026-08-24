@@ -61,9 +61,16 @@ fi
 
 # Matches a C-compiler-invocation line --listCmd prints: the compiler
 # binary name (bare or path-prefixed, optionally version-suffixed like
-# "gcc-13" or "clang-17") followed by whitespace, at the start of the
-# line or after a path separator/whitespace.
-line="$(printf '%s\n' "$out" | grep -m1 -E '(^|[ /\t])(gcc|clang)(-[0-9.]+)?([ \t]|$)')"
+# "gcc-13" or "clang-17", and -- RFC-005 slice 13 -- optionally
+# `.exe`-suffixed, since Nim on Windows invokes the MinGW binary by its
+# literal on-disk name, "gcc.exe"; confirmed empirically against the real
+# hosted Windows runner, not assumed: the FIRST real run of
+# unit-windows-amd64-gcc compiled and ran the actual suite successfully
+# under MinGW gcc -- every real test passed -- and this canary was the
+# ONLY thing that went red, on exactly this `.exe` gap) followed by
+# whitespace, at the start of the line or after a path separator/
+# whitespace.
+line="$(printf '%s\n' "$out" | grep -m1 -E '(^|[ /\t])(gcc|clang)(\.exe)?(-[0-9.]+)?([ \t]|$)')"
 echo "toolchain canary: resolved C compiler invocation: ${line:-<none found in --listCmd output>}"
 
 case "$line" in

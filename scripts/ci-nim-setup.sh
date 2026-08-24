@@ -453,8 +453,9 @@ if [[ "$with_mingw" -eq 1 ]]; then
     echo "$mingw_expected_marker" > "$mingw_marker"
   fi
 
+  mingw_current_target="$(dirname "$(dirname "$mingw_gcc_path")")"
   rm -f "$mingw_install_root/current"
-  ln -s "$(dirname "$(dirname "$mingw_gcc_path")")" "$mingw_install_root/current"
+  ln -s "$mingw_current_target" "$mingw_install_root/current"
 
   # Toolchain-version canary (this slice's own DoD: "assert the gcc
   # version string matches the pin's recorded version, which also
@@ -478,5 +479,18 @@ if [[ "$with_mingw" -eq 1 ]]; then
       ;;
   esac
 
-  echo "ci-nim-setup: OK -- $mingw_install_root/current -> $(readlink "$mingw_install_root/current")"
+  # Echoes the known target variable directly, not `readlink` (RFC-005
+  # slice 13 finding): the first real hosted Windows run printed an EMPTY
+  # resolved target here via `readlink`, even though the symlink itself
+  # worked correctly in every functional sense (the version canary above,
+  # which depends on the same `ln -s` having succeeded, PASSED on that
+  # same run) -- Git-for-Windows' `ln -s`/`readlink` pairing over MSYS's
+  # NTFS-reparse-point-backed symlinks apparently doesn't round-trip
+  # through `readlink` the way it does on Linux/macOS. Cosmetic only (this
+  # is a log line, not a control-flow dependency), fixed by printing the
+  # variable this script already computed instead of re-deriving it via a
+  # tool that turned out unreliable here -- the same pattern the Nim
+  # install's own "OK" line above already uses ($install_dir, not
+  # readlink).
+  echo "ci-nim-setup: OK -- $mingw_install_root/current -> $mingw_current_target"
 fi
