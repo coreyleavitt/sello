@@ -56,4 +56,3 @@
 # no +x bit -- same convention as gates.txt/milpa-pin.txt/image-pins.txt).
 #
 # check-name                expiry            reason
-policy-lint                  2026-09-15        RFC-005 slice 4 DoD: waiver mechanism end-to-end demonstration -- policy-lint deliberately removed from the live main ruleset via gh api to simulate an infra outage; see docs/rfc-005-validation-infra.handoff.md's slice-4 entry for the full record
