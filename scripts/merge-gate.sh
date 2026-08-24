@@ -12,7 +12,22 @@
 #   scripts/merge-gate.sh                          # run every gate
 #   scripts/merge-gate.sh <gate-name> [<gate-name> ...]
 #                                                    # run a named subset
+#   scripts/merge-gate.sh --update-baselines        # regenerate every
+#                                                    # baseline-consuming
+#                                                    # gate's committed pin
 #   scripts/merge-gate.sh -h | --help
+#
+# --update-baselines (RFC-005 slice 18, the regenerable-baseline idiom's
+# own "merge-gate.sh --update-baselines convenience," Part B): appends
+# `--update` to each baseline-consuming gate's OWN scripts/lib/gates.txt
+# invocation and runs it (scripts/lib/baseline.sh's own `--update` verb,
+# which hard-fails under $CI -- see that file's header). NOT every gate
+# understands `--update` (most would just choke on it as a stray
+# argument), so this is a small, explicitly maintained list
+# (baseline_gate_names below) rather than blindly appending the flag to
+# every gate in the manifest -- add a gate's name to that list when it
+# grows its own baseline (e.g. the slice-17 coverage ratchet, when it
+# lands).
 #
 # Each gate is one scripts/ invocation (RFC-005 Part B's build-path
 # invariant). Every gate script in the manifest is dual-mode: it wraps
@@ -88,6 +103,9 @@ ruleset's required-check array will be generated from (RFC-005 slice 4).
 
   scripts/merge-gate.sh                      run every gate in the manifest
   scripts/merge-gate.sh <gate-name> ...      run only the named gate(s)
+  scripts/merge-gate.sh --update-baselines   regenerate every baseline-
+                                              consuming gate's committed
+                                              pin (RFC-005 slice 18)
   scripts/merge-gate.sh -h | --help          this text
 
 Known gate names (from scripts/lib/gates.txt):
@@ -148,6 +166,37 @@ load_gates
 if [[ "${#gate_check_names[@]}" -eq 0 ]]; then
   echo "merge-gate.sh: scripts/lib/gates.txt parsed to zero gates -- refusing to run an empty battery (check the manifest for a parse problem)." >&2
   exit 1
+fi
+
+if [[ "${1:-}" == "--update-baselines" ]]; then
+  # RFC-005 slice 18 -- see the header comment above. Every consuming
+  # gate's OWN manifest invocation, with --update appended (each such
+  # script accepts --update as its own trailing flag, per
+  # scripts/api-surface-check.sh's own usage).
+  baseline_gate_names=(api-surface api-surface-libsodium)
+  update_rc=0
+  for name in "${baseline_gate_names[@]}"; do
+    invocation=""
+    for i in "${!gate_check_names[@]}"; do
+      if [[ "${gate_check_names[$i]}" == "$name" ]]; then
+        invocation="${gate_invocations[$i]}"
+        break
+      fi
+    done
+    if [[ -z "$invocation" ]]; then
+      echo "merge-gate.sh: --update-baselines: gate '$name' not found in scripts/lib/gates.txt -- skipping." >&2
+      update_rc=1
+      continue
+    fi
+    echo ""
+    echo "======================================================================="
+    echo "merge-gate: updating baseline for '$name' -- $invocation --update"
+    echo "======================================================================="
+    if ! bash -c "$invocation --update"; then
+      update_rc=1
+    fi
+  done
+  exit "$update_rc"
 fi
 
 selected_names=()

@@ -1,0 +1,96 @@
+# kind: regenerable
+# generator: tests/api/api_surface_gen.py via scripts/api-surface-dump.sh (selloLibsodium config; nim jsondoc-based facade surface dump -- see that Python module's own doc comment for the mechanism and its recorded blind spots)
+# regeneration command: scripts/api-surface-check.sh selloLibsodium --update
+# compiler: Nim Compiler Version 2.2.10 [Linux: amd64]
+# image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+#
+# DO NOT HAND-EDIT the body below this line -- run the regeneration
+# command above (never under CI -- see this file's own header comment).
+
+ed25519.verify :: skProc :: func verify(pk: PublicKey; msg: openArray[byte]; sig: Signature): bool {. raises: [], gcsafe, tags: [], forbids: [].}
+ed25519.verify :: skProc :: func verify(pk: PublicKey; msg: string; sig: Signature): bool {.raises: [], gcsafe, tags: [], forbids: [].}
+private/backend_sodium.SodiumInitError :: skType :: SodiumInitError = object of CatchableError
+ristretto.RistrettoBasePoint :: skConst :: RistrettoBasePoint = (p: (x: (limbs: [-14297830'i32, -7645148, 16144683, -16471763, 27570974, -2696100, -26142465, 8378389, 20764389, 8758491]), y: (limbs: [ -26843541'i32, -6710886, 13421773, -13421773, 26843546, 6710886, -13421773, 13421773, -26843546, -6710886]), z: (limbs: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), t: (limbs: [ 28827062, -6116119, -27349572, 244363, 8635006, 11264893, 19351346, 13413597, 16611511, -6414980])))
+ristretto.RistrettoEncoded :: skType :: RistrettoEncoded = distinct array[32, byte]
+ristretto.RistrettoEphemeralSecret :: skType :: RistrettoEphemeralSecret = object
+ristretto.RistrettoIdentity :: skConst :: RistrettoIdentity = (p: (x: (limbs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), y: (limbs: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), z: (limbs: [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), t: (limbs: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0])))
+ristretto.RistrettoPoint :: skType :: RistrettoPoint = object
+ristretto.RistrettoShared :: skType :: RistrettoShared = object
+ristretto.RistrettoStaticSecret :: skType :: RistrettoStaticSecret = object
+ristretto.`$` :: skProc :: func `$`(e: RistrettoEncoded): string {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`+` :: skProc :: func `+`(a, b: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`-` :: skProc :: func `-`(a, b: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`-` :: skProc :: func `-`(p: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`==` :: skProc :: func `==`(a, b: RistrettoEncoded): bool {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`==` :: skProc :: func `==`(a, b: RistrettoPoint): bool {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.hash :: skProc :: func hash(e: RistrettoEncoded): Hash {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoDecode :: skProc :: func ristrettoDecode(e: RistrettoEncoded): Option[RistrettoPoint] {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoEncode :: skProc :: func ristrettoEncode(pt: RistrettoPoint): RistrettoEncoded {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoEphemeralPair :: skProc :: proc ristrettoEphemeralPair(): tuple[secret: RistrettoEphemeralSecret, public: RistrettoPoint] {. raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoEphemeralSecret :: skProc :: proc ristrettoEphemeralSecret(): RistrettoEphemeralSecret {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoFromUniformBytes :: skProc :: func ristrettoFromUniformBytes(b: array[64, byte]): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoScalarmult :: skProc :: func ristrettoScalarmult(secret: RistrettoStaticSecret; p: RistrettoPoint): RistrettoPoint {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoScalarmult :: skProc :: func ristrettoScalarmult(secret: sink RistrettoEphemeralSecret; p: RistrettoPoint): Option[RistrettoShared] {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoScalarmultBase :: skProc :: func ristrettoScalarmultBase(secret: RistrettoEphemeralSecret): RistrettoPoint {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoScalarmultBase :: skProc :: func ristrettoScalarmultBase(secret: RistrettoStaticSecret): RistrettoPoint {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoScalarmultVartime :: skProc :: func ristrettoScalarmultVartime(s: array[32, byte]; p: RistrettoPoint): RistrettoPoint {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoStaticPair :: skProc :: proc ristrettoStaticPair(): tuple[secret: RistrettoStaticSecret, public: RistrettoPoint] {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoStaticSecret :: skProc :: proc ristrettoStaticSecret(): RistrettoStaticSecret {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toBytes :: skProc :: func toBytes(e: RistrettoEncoded): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toBytes :: skProc :: func toBytes(s: RistrettoStaticSecret): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toBytes :: skProc :: func toBytes(sh: RistrettoShared): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toRistrettoEncoded :: skProc :: func toRistrettoEncoded(bytes: array[32, byte]): RistrettoEncoded {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toRistrettoStaticSecret :: skProc :: func toRistrettoStaticSecret(bytes: array[32, byte]): Option[ RistrettoStaticSecret] {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.toRistrettoStaticSecretWide :: skProc :: func toRistrettoStaticSecretWide(bytes: array[64, byte]): RistrettoStaticSecret {. raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.wipe :: skProc :: proc wipe(s: sink RistrettoEphemeralSecret) {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.wipe :: skProc :: proc wipe(s: var RistrettoStaticSecret) {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.wipe :: skProc :: proc wipe(sh: var RistrettoShared) {.raises: [], gcsafe, tags: [], forbids: [].}
+signing.Keypair :: skType :: Keypair = object
+signing.Seed :: skType :: Seed = object
+signing.keypair :: skProc :: proc keypair(): Keypair {.raises: [OSError, SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.keypair :: skProc :: proc keypair(seed: sink Seed): Keypair {.raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.keypair :: skProc :: proc keypair(seed: sink Seed; expectedPublic: PublicKey): Option[Keypair] {. raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.public :: skProc :: func public(kp: Keypair): PublicKey {.raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.sign :: skProc :: proc sign(kp: Keypair; msg: openArray[byte]): Signature {. raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.sign :: skProc :: proc sign(kp: Keypair; msg: string): Signature {.raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.toSeed :: skProc :: func toSeed(bytes: array[32, byte]): Seed {.inline, raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.toSeedBytes :: skProc :: func toSeedBytes(kp: Keypair): array[32, byte] {.inline, raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.wipe :: skProc :: proc wipe(kp: var Keypair) {.raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+signing.wipe :: skProc :: proc wipe(s: sink Seed) {.raises: [SodiumInitError], gcsafe, tags: [], forbids: [].}
+wipe.wipe :: skProc :: proc wipe(bytes: var array[32, byte]) {.raises: [], gcsafe, tags: [], forbids: [].}
+wire.PublicKey :: skType :: PublicKey = distinct array[32, byte]
+wire.Signature :: skType :: Signature = distinct array[64, byte]
+wire.`$` :: skProc :: func `$`(pk: PublicKey): string {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+wire.`$` :: skProc :: func `$`(sig: Signature): string {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+wire.`==` :: skProc :: func `==`(a, b: PublicKey): bool {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+wire.`==` :: skProc :: func `==`(a, b: Signature): bool {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+wire.hash :: skProc :: func hash(pk: PublicKey): Hash {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+wire.hash :: skProc :: func hash(sig: Signature): Hash {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+wire.toBytes :: skProc :: func toBytes(pk: PublicKey): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+wire.toBytes :: skProc :: func toBytes(sig: Signature): array[64, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+wire.toPublicKey :: skProc :: func toPublicKey(bytes: array[32, byte]): PublicKey {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+wire.toSignature :: skProc :: func toSignature(bytes: array[64, byte]): Signature {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.X25519BasePoint :: skConst :: X25519BasePoint: X25519Public = [9'u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+x25519.X25519EphemeralSecret :: skType :: X25519EphemeralSecret = object
+x25519.X25519Public :: skType :: X25519Public = distinct array[32, byte]
+x25519.X25519Shared :: skType :: X25519Shared = object
+x25519.X25519StaticSecret :: skType :: X25519StaticSecret = object
+x25519.`$` :: skProc :: func `$`(p: X25519Public): string {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.`==` :: skProc :: func `==`(a, b: X25519Public): bool {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.hash :: skProc :: func hash(p: X25519Public): Hash {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.toBytes :: skProc :: func toBytes(p: X25519Public): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.toBytes :: skProc :: func toBytes(s: X25519StaticSecret): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.toBytes :: skProc :: func toBytes(sh: X25519Shared): array[32, byte] {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.toX25519Public :: skProc :: func toX25519Public(bytes: array[32, byte]): X25519Public {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.toX25519StaticSecret :: skProc :: func toX25519StaticSecret(bytes: array[32, byte]): X25519StaticSecret {.inline, raises: [], gcsafe, tags: [], forbids: [].}
+x25519.wipe :: skProc :: proc wipe(s: sink X25519EphemeralSecret) {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.wipe :: skProc :: proc wipe(s: var X25519StaticSecret) {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.wipe :: skProc :: proc wipe(sh: var X25519Shared) {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519 :: skProc :: func x25519(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Shared] {. raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519 :: skProc :: func x25519(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[ X25519Shared] {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519Base :: skProc :: func x25519Base(secret: X25519EphemeralSecret): X25519Public {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519Base :: skProc :: func x25519Base(secret: X25519StaticSecret): X25519Public {.raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519EphemeralPair :: skProc :: proc x25519EphemeralPair(): tuple[secret: X25519EphemeralSecret, public: X25519Public] {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519EphemeralSecret :: skProc :: proc x25519EphemeralSecret(): X25519EphemeralSecret {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519StaticPair :: skProc :: proc x25519StaticPair(): tuple[secret: X25519StaticSecret, public: X25519Public] {. raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
+x25519.x25519StaticSecret :: skProc :: proc x25519StaticSecret(): X25519StaticSecret {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}

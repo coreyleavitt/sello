@@ -160,7 +160,28 @@
 # ct_main (RFC-005 Part B: hosted CI runs the dudect harness in
 # compile-smoke mode only).
 #
+# RFC-005 slice 18 (API-surface gate, A8): two entries, one per build
+# config the facade legitimately differs under (plain vs
+# -d:selloLibsodium -- SodiumInitError, widened raises effects on the
+# sign/keygen path). Both run scripts/api-surface-check.sh, which
+# regenerates tests/api/api_surface_gen.py's facade-surface dump for its
+# own config and diffs it against the committed baseline at
+# tests/api-surface/expected/<config>.txt via the shared
+# scripts/lib/baseline.sh idiom -- that generator's own module doc
+# comment has the full spike writeup (mechanism chosen, recorded blind
+# spots) and scripts/api-surface-check.sh's own header has the gate
+# -level rationale. Both entries needed only the always-available base
+# ghcr.io/coreyleavitt/nim image (verified empirically during this
+# slice's own spike that the facade-surface generator never invokes a C
+# compiler/linker -- `nim jsondoc` is a Nim-semantic-pass-only tool, so it
+# resolves selloLibsodium's FFI `{.importc, header.}` declarations without
+# ever needing libsodium-devel installed) -- landed as a full dual-config
+# gate this slice, not deferred to the sello-dev credential fork the way
+# slices 10/14/15/17 are.
+#
 # check-name                        script-invocation
+api-surface                         scripts/api-surface-check.sh plain
+api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
 unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan

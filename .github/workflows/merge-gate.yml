@@ -27,6 +27,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # RFC-005 slice 18: the API-surface gate (A8). Regenerates
+  # tests/api/api_surface_gen.py's facade-surface dump (a `nim
+  # jsondoc`-driven, deterministic pass over src/sello.nim's own `export`
+  # statements -- see that Python module's own doc comment for the full
+  # verify-first-spike writeup: mechanism chosen and its recorded blind
+  # spots) and diffs it against the committed baseline at
+  # tests/api-surface/expected/plain.txt via scripts/lib/baseline.sh (the
+  # shared regenerable-baseline idiom, landed in THIS slice rather than
+  # slice 17 as Part B originally assigned -- slice 17 remains blocked on
+  # the same Corey-owned ghcr credential as slices 10/14/15, so this
+  # slice, needing only the base image, lands the shared library first;
+  # see CLAUDE.md's own placement-swap note). Same digest-pinned image as
+  # every other amd64 build job -- no milpa/proptest needed (the
+  # generator only needs `nim jsondoc` and python3, both already in the
+  # base image), same "zero-dependency" category as check-readme below.
+  api-surface:
+    name: api-surface
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: SELLO_IN_CONTAINER=1 scripts/api-surface-check.sh plain
+
+  # RFC-005 slice 18: the `-d:selloLibsodium` config leg of api-surface
+  # above -- the facade legitimately WIDENS under this define
+  # (SodiumInitError, widened {.raises.} on the sign/keygen path), so this
+  # gate pins a SEPARATE baseline
+  # (tests/api-surface/expected/selloLibsodium.txt) rather than reusing
+  # the plain one, per RFC-005 Part B's own "the surface is build-config
+  # -dependent" correction -- the delta between the two baselines is
+  # itself a pinned, reviewed fact (see CLAUDE.md's A8 entry for the
+  # exact delta recorded this slice: SodiumInitError plus widened raises
+  # only, nothing else). Runs on the SAME base image as every other job
+  # here, with no libsodium-devel installed at all -- verified empirically
+  # during this slice's spike that `nim jsondoc -d:selloLibsodium` never
+  # needs the real libsodium headers/library (it is a Nim-semantic-pass
+  # -only tool; FFI `{.importc, header.}` declarations resolve as plain
+  # name bindings, with no C compile/link step), so this leg needed no
+  # sello-dev image and landed alongside its plain sibling in the same
+  # slice rather than waiting on the Corey-owned ghcr credential fork
+  # blocking slices 10/14/15/17.
+  api-surface-libsodium:
+    name: api-surface-libsodium
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: SELLO_IN_CONTAINER=1 scripts/api-surface-check.sh selloLibsodium
+
   # Check name is a stable public interface (RFC-005 Part B) -- do not
   # rename without the documented two-step (add new, retire old, manifest
   # + ruleset regenerated in the same commit pair, once the gates manifest
