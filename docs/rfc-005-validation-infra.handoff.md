@@ -116,7 +116,18 @@
   the same run), reverted, confirmed green again. Thirteen required jobs
   total -- the last hosted-native matrix leg; slice 10 (`--cpu:i386`)
   remains the only Phase 1 matrix slice still blocked on a Corey-owned
-  ghcr credential.
+  ghcr credential. Slice 16 (DONE 2026-08-24, taken deliberately out of
+  order -- slices 10/14/15 remain blocked on that same Corey-owned ghcr
+  `write:packages` credential for the `sello-dev` image; slice 16 needed
+  only the always-available base `ghcr.io/coreyleavitt/nim` image, so it
+  was pulled forward rather than blocking the whole Phase 2 sequence on
+  one credential) landed the `build-smoke` required check: compiles the
+  fuzz external target (real SanitizerCoverage instrumentation) + driver
+  and runs one deterministic input directly through the built target,
+  plus compiles (never runs) `tests/ct/ct_main.nim`. Fourteen required
+  jobs total. See the full slice entry below for the build-sharing
+  design (`--build-only` retrofit on `scripts/fuzz.sh`/`scripts/ct.sh`),
+  run ids, and the red-then-green sequence.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -859,7 +870,7 @@ Phase 1 — matrix (7 first, then 8–13 independent):
 Phase 2 — heavy deterministic gates (independent after 7):
 - [ ] 14. libsodium differential job (skip paths fatal under CI env var)
 - [ ] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision)
-- [ ] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error)
+- [x] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error) -- DONE 2026-08-24, taken out of order (see slice 11's precedent and CLAUDE.md). Code `defa505` (mechanism + job), red demo `41a8e2d`, revert `2b3747a`. See the full slice entry below for mechanism design, run ids, and the red-then-green sequence.
 - [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs)
 - [ ] 18. API-surface gate A8 (generator verify-first spike; dual baselines)
 
@@ -2027,6 +2038,153 @@ Phase 4 — nightly, timing, release:
      happens to ship. Any future script touching this leg's `PATH` must
      preserve that ordering (pinned copy first) or risk silently
      resolving the drifting runner-bundled `gcc` instead.
+
+- [x] 16. Build-smoke check -- DONE 2026-08-24, taken deliberately out of
+      order. Branch `rfc-005-slice16`, code `defa505`.
+
+      **Reordering rationale (recorded per the task's own instruction, so
+      a future session doesn't rediscover this):** slices 10, 14, and 15
+      all remain blocked on the same Corey-owned ghcr `write:packages`
+      credential for the `sello-dev` image (slice 7's own finding --
+      `libsodium differential`/`mutation+bmc` both need `sello-dev` by
+      digest, and it is not yet live at ghcr.io). Slice 16 needed only
+      the always-available base `ghcr.io/coreyleavitt/nim` image (the
+      fuzz/ct harnesses build against the same plain toolchain image
+      every unit/property job already uses), so it was pulled forward
+      past 14/15 rather than blocking the entire Phase 2 sequence on one
+      credential -- the identical judgment call slice 11 made pulling
+      itself ahead of slice 10.
+
+      **Required reading done first, per the task's own instruction:**
+      the RFC's slice 16 text and Part B's build-smoke definition (both
+      cited in CLAUDE.md's own new "Build-smoke check" paragraph),
+      `scripts/fuzz.sh`/`scripts/ct.sh`'s exact build commands, and
+      `scripts/ci-property.sh`'s milpa-install-then-fetch pattern (the
+      fuzz driver imports proptest; `ct_main.nim` does not -- confirmed
+      by reading its own import list, not assumed).
+
+      **Build-sharing design decision (single-source, not duplicated):**
+      rather than re-typing either harness's build recipe into a third
+      script, `scripts/fuzz.sh` and `scripts/ct.sh` both gained a
+      `--build-only` flag AND the same `SELLO_IN_CONTAINER` dual-mode
+      split `scripts/test.sh`/`scripts/ci-property.sh` already had --
+      both scripts previously had exactly ONE mode (always wrap
+      themselves in podman), since neither had ever been called from
+      inside a CI container before this slice. `scripts/build-smoke.sh`
+      is a thin conductor: installs milpa, fetches proptest (`--locked`),
+      then calls `SELLO_IN_CONTAINER=1 scripts/fuzz.sh --build-only` and
+      `SELLO_IN_CONTAINER=1 scripts/ct.sh --build-only` -- one audited
+      copy of each build recipe, living exactly where a maintainer would
+      already run it for real, not a second copy in the new script.
+
+      **"Runs one iteration" -- resolved as a direct single-input run,
+      not a driven campaign (a documented, confident call, not a fork):**
+      the task's own phrasing ("a single input through the external
+      target ... a 1-iteration or minimal-seconds run") was ambiguous
+      between (a) driving the real `fuzz_main.nim` campaign loop for a
+      minimal time budget, or (b) piping one known-valid input directly
+      into the built `fuzz_external_target` binary via stdin. Chose (b):
+      `fuzz_common.nim`'s `MinEdgesGate` (50 coverage edges) is
+      calibrated against real multi-second campaigns (observed 291-350
+      edges at 20s/target) and the campaign loop has NO iteration-count
+      knob, only a time budget -- a required merge-gate check has no
+      tolerance for that class of flakiness at a deliberately minimal
+      smoke budget. `scripts/build-smoke.sh` therefore pipes ONE
+      deterministic input (mode byte 0 + RFC 8032 sec7.1 TEST 1's public
+      key, the same `tv1Pk` constant `fuzz_common.nim`'s own corpus
+      seeding uses) directly into `build/fuzz_external_target` and
+      asserts exit 0 -- exercising the real accept path (the
+      `pointEncode` identity-roundtrip `doAssert` included), a strictly
+      stronger proof the compiled, linked, instrumented binary executes
+      end-to-end than watching a possibly-too-short campaign attempt to
+      clear a coverage floor it wasn't sized for. `fuzz_main.nim` (the
+      driver) is still compiled by `scripts/fuzz.sh --build-only` --
+      satisfying Part B's literal "compiles ... driver" -- just not
+      RUN by this check.
+
+      **`ct_main` no-verdict-authority statement:** `scripts/ct.sh
+      --build-only` compiles `tests/ct/ct_main.nim` (`-d:release`,
+      identical flags) and stops; the binary is never invoked, so this
+      produces no timing samples and no verdict of any kind, matching
+      RFC-005 Part B verbatim. Part B asks this be "stated in the
+      workflow name" -- satisfied in spirit via an explicit, unmissable
+      run-log statement (see the log excerpt below) rather than a
+      job-name qualifier, since `build-smoke` already covers the fuzz
+      target/driver too, not `ct_main` alone, and a rename to fit one of
+      its three sub-checks would misname the other two.
+
+      **Scope, stated honestly (not silently left open):** the taint
+      (slice 19) and disasm (slice 23) binaries do not exist in this
+      repository yet (no `private/taint.nim`, no `tests/ct_disasm/`) --
+      `scripts/build-smoke.sh`'s own header comment and CLAUDE.md both
+      say so explicitly; those slices are expected to extend this exact
+      script/job in place when they land, not fork a new one.
+
+      **Ruleset flow (per the task's explicit instruction -- apply
+      BEFORE push, not push-then-apply the way slice 4 first had to,
+      since the ruleset infrastructure already exists and this push
+      targets a scratch branch, not `main`, so applying early carries no
+      risk):** `scripts/ruleset-apply.sh --apply` run first, updating the
+      live `main` ruleset's required-check array to the 14-check set
+      generated from `scripts/lib/gates.txt` (diff showed exactly one
+      addition, `build-smoke`) -- confirmed via the dry-run diff before
+      applying. Then the code push.
+
+      **Green run (first push, all 14 jobs, no fix cycle needed):**
+      branch `rfc-005-slice16`, run `32783491633` -- ALL FOURTEEN jobs
+      green on the first push, including `build-smoke` itself (1m6s).
+      `build-smoke`'s own log confirmed every phase ran as designed:
+      milpa install + `fetch --features proptest --locked` (~23s), PHASE
+      1/3 (`fuzz.sh --build-only`: `proptest_cov.o` + instrumented target
+      + driver compile, ~7s), PHASE 2/3 (the one-input smoke run: "one
+      input ran through build/fuzz_external_target cleanly (exit 0)"),
+      PHASE 3/3 (`ct.sh --build-only`: "ct_main compiled -- COMPILE-SMOKE
+      ONLY, not run... no timing samples were collected... the real
+      >= 1e6-samples/class dudect battery runs only via a plain,
+      maintainer-invoked scripts/ct.sh"), and the final scope statement
+      (taint/disasm not yet covered). Fast-forwarded to `main`
+      (`58cb790..defa505`); post-fast-forward `main` run `32784312046`
+      also green, all 14 jobs. Branch `rfc-005-slice16` deleted (locally
+      and on `origin`), confirmed 404.
+
+      **Red demo, isolated scratch branch (`rfc-005-slice16-red-demo`,
+      never merged to `main`):** confirmed first (per the task's own
+      instruction) that `tests/fuzz/fuzz_external_target.nim` is NOT in
+      `scripts/lib/unit-test-files.sh`'s array, so no other required job
+      compiles it -- the plant is isolated to `build-smoke` by
+      construction. Planted an undeclared-identifier call in
+      `when isMainModule` (commit `41a8e2d`); pushed; run `32785147631`:
+      `build-smoke` RED in 1m3s (job `97615440528`, log: `Error:
+      undeclared identifier: 'thisIdentifierDoesNotExistRfc005Slice16RedDemo'`,
+      `Process completed with exit code 1`) while ALL THIRTEEN other jobs
+      stayed green in the same run (confirmed via `gh run view --json
+      conclusion,jobs`: `{"failed":["build-smoke"],"total":14}`, not
+      eyeballed from streamed output). Reverted (`git revert --no-edit`,
+      commit `2b3747a`); pushed; run `32785956700`: all FOURTEEN jobs
+      green again, including `build-smoke` (1m5s). Scratch branch deleted
+      (locally and on `origin`) without ever touching `main` -- the
+      planted error existed only on this now-deleted branch/commit
+      history, confirmed 404.
+
+      **Escalation check (per the task's own rule):** the fuzz target
+      and `ct_main` both compiled and ran cleanly against TODAY'S `main`
+      on the very first push -- no pre-existing rot found, no escalation
+      needed. This is itself a mildly notable finding worth recording:
+      this slice's whole purpose is catching exactly that class of decay,
+      and on this pass there was none to catch.
+
+      **Wall-clock note:** `build-smoke`'s own job time (~1m5s-1m6s
+      across all three runs) is small relative to the run's overall
+      critical path, which stays dominated by the ~9-9.5-minute property
+      jobs as before -- no wall-clock-budget concern raised by this slice.
+
+      **CLAUDE.md** updated in the same commit as the code (`defa505`):
+      job count thirteen -> fourteen (three occurrences), a new
+      "Build-smoke check" paragraph in the CI section (scope-today vs.
+      slices 19/23, the `--build-only`/dual-mode single-source design,
+      the `ct_main` no-verdict-authority statement, the reordering note),
+      and short cross-references added to the existing `tests/fuzz/`/
+      `tests/ct/` bullets plus the `scripts/*.sh` usage block.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
