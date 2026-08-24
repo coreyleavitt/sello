@@ -1,0 +1,70 @@
+# scripts/lib/nim-pin.txt -- RFC-005 slice 11: the pin table for
+# scripts/ci-nim-setup.sh's direct (non-container) Nim toolchain install,
+# used by hosted matrix legs that have no digest-pinnable container image
+# to run inside (linux/arm64 today; macOS-arm64/Windows-MinGW, RFC-005
+# slices 12-13, are expected to extend this same table rather than invent
+# a second install mechanism -- see ci-nim-setup.sh's own header).
+#
+# Why this exists instead of reusing the pinned
+# ghcr.io/coreyleavitt/nim:2.2.10 container image every other job runs
+# inside: RFC-005 slice 7 queried that image's manifest list and found
+# TWO platforms only (linux/amd64, windows/amd64 -- the Windows entry is
+# itself still amd64) -- no arm64 variant exists, and growing one is
+# explicitly out of scope for this repo (the image's build source lives
+# in a separate repo slice 7 only documents). The recorded decision
+# (slice 7's handoff entry, restated in slice 11's own) is a direct,
+# checksum-pinned toolchain install on the hosted runner instead of a
+# multi-arch image build -- the same non-container pin story slice 12's
+# macOS leg needs anyway (no digest-pinnable container exists on macOS
+# runners at all), so one mechanism serves both rather than two invented
+# independently.
+#
+# Source: nim-lang/nightlies (github.com/nim-lang/nightlies), the OFFICIAL
+# Nim project's own daily-build release repo -- the canonical route
+# nim-lang.org's own install docs point to for platforms the main
+# installer script doesn't cover (nim-lang.org's installer is
+# linux/macos/windows-on-x86_64 plus a source-build fallback; it does not
+# publish prebuilt arm64 binaries of its own). Nightlies releases are
+# tagged by BUILD DATE against a branch (e.g.
+# "<date>-version-2-2-<commit>"), not by exact patch-release tag -- most
+# such tags are therefore a few commits ahead of any specific vX.Y.Z tag.
+# The row below is the one exception that matters: verified (2026-08-24,
+# via `gh api repos/nim-lang/Nim/tags`) that the v2.2.10 git tag itself
+# resolves to commit bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef, and that
+# nim-lang/nightlies published a release built from that EXACT commit
+# (tag 2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef) --
+# so the binary pinned here is built from the identical source commit as
+# the `2.2.10` tag the project's own container image
+# (ghcr.io/coreyleavitt/nim:2.2.10) is pinned to elsewhere, not merely "a
+# nearby nightly." Each asset's SHA-256 was computed locally
+# (`sha256sum`) against a fresh download from the URL below before being
+# recorded here, per this project's standing "verify empirically, pin the
+# real hash" convention (scripts/policy-lint.sh's actionlint pin, RFC-005
+# Part B's milpa-in-CI paragraph).
+#
+# Format: four whitespace-separated columns per line --
+#   platform-key   release-tag   asset-name   sha256
+# platform-key is `<uname -s, lowercased>-<uname -m>` (e.g. "linux-
+# aarch64"; macOS reports "arm64" for the same physical architecture where
+# Linux reports "aarch64" on the identical CPU family -- a genuine
+# uname(1) divergence between the two kernels, not a typo -- so a future
+# macOS row is "darwin-arm64", never "darwin-aarch64"). release-tag is the
+# nim-lang/nightlies release tag; asset-name is the exact
+# `.tar.xz` filename inside that release; download URL is constructed by
+# ci-nim-setup.sh as
+# https://github.com/nim-lang/nightlies/releases/download/<release-tag>/<asset-name>.
+# Comments start with `#` as the first non-whitespace character of the
+# line (whole-line only); blank lines ignored -- same convention as
+# gates.txt/milpa-pin.txt/image-pins.txt.
+#
+# Only the row this slice's own jobs actually exercise is recorded below
+# (RFC-005's standing "no dormant substrate" discipline -- a table row
+# with no consumer is exactly the deferral-relabeled-as-scaffolding this
+# project's own review process rejects). A verified macosx_arm64 asset +
+# checksum for this identical release/commit was also found during this
+# slice's research and is recorded for slice 12's convenience in that
+# slice's own handoff entry, NOT added as a row here, since nothing in
+# this slice reads or exercises it.
+#
+# platform-key      release-tag                                                       asset-name                      sha256
+linux-aarch64        2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_arm64.tar.xz   cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a

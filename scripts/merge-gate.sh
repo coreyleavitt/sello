@@ -33,6 +33,20 @@
 # script does not pretend otherwise. Update this comment and the help
 # text below in the same slice that adds those legs, not before.
 #
+# Within "the Linux set," the two `*-arm64-*` gates (RFC-005 slice 11)
+# are themselves host-arch-dependent: their script-invocation column
+# hardcodes SELLO_IN_CONTAINER=1 (no podman wrap exists for them at all --
+# scripts/lib/gates.txt's own header comment on this slice's entries has
+# the full reasoning) and installs a native aarch64 Nim toolchain via
+# scripts/ci-nim-setup.sh, whose own platform-identity canary REJECTS the
+# run outright on a non-aarch64 host. Running `scripts/merge-gate.sh` (no
+# arguments, or naming an arm64 gate explicitly) on a typical amd64
+# workstation therefore reports those two gates FAIL by design, not a
+# bug in this script -- exactly the same "hosted-only residual" category
+# macOS/Windows will join, just arriving one slice earlier since arm64's
+# gates.txt entries exist starting now. Run them for real only on an
+# actual arm64 Linux host, or rely on the CI job.
+#
 # Fail-fast per gate, full summary at the end: every gate script already
 # runs under its own `set -euo pipefail` (fails fast internally, at its
 # first error), but this script does NOT stop at the first FAILING gate
@@ -71,9 +85,17 @@ hosted-only residuals: none exist in the manifest yet (RFC-005 slices
 12-13), and when they land they run natively on their own hosts, not
 through this script on a Linux workstation.
 
+The unit-linux-arm64-gcc / property-linux-arm64-gcc gates (RFC-005 slice
+11) are themselves a hosted-only residual WITHIN the Linux set: they have
+no container/podman story at all and install a native aarch64 Nim
+toolchain directly, so running them on a non-aarch64 host fails loud via
+scripts/ci-nim-setup.sh's own platform-identity canary -- expected, not a
+bug in this script.
+
 Prerequisites: podman on PATH, and `milpa fetch` run at least once in
 this checkout (same prerequisite scripts/test.sh's own header documents)
--- each gate script wraps itself in the pinned podman image automatically.
+-- each gate script wraps itself in the pinned podman image automatically
+(except the arm64 gates above, which never use podman).
 
 Exit status: nonzero if any run gate fails.
 EOF

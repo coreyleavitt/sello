@@ -13,6 +13,20 @@
 #         scripts/test.sh --cc clang -d:release   # leading flags compose with defines
 #         scripts/test.sh --sanitize asan-ubsan --cc clang   # leading flags compose with each other too
 #
+# Pinned-toolchain convention (RFC-005 slice 11): if
+# $HOME/.sello-nim/current/bin/nim exists, its directory is prepended to
+# PATH before anything below runs. This is how hosted matrix legs with no
+# digest-pinnable container image (linux/arm64 today; macOS-arm64/
+# Windows-MinGW later, RFC-005 slices 12-13) get a pinned Nim onto PATH:
+# scripts/ci-nim-setup.sh installs there (its own header has the full pin
+# story) and this script picks it up automatically -- no $GITHUB_PATH
+# plumbing, no sourcing gymnastics, and no branch-specific handling, since
+# a plain on-disk check works identically whether ci-nim-setup.sh ran as a
+# separate earlier workflow step or was chained via `&&` on the same
+# command line (scripts/lib/gates.txt's convention for this leg). A no-op
+# everywhere else -- container jobs never populate this directory, so
+# `nim`/`gcc` keep resolving from the image's own PATH exactly as before.
+#
 # --cc <name> (RFC-005 slice 8, the clang-backend matrix leg): threads
 # `--cc:<name>` into every `nim c` invocation below, so this ONE script
 # serves both the unit-linux-amd64-gcc and unit-linux-amd64-clang required
@@ -129,6 +143,13 @@
 # module never imports (confirmed empirically).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# Pinned-toolchain convention (RFC-005 slice 11) -- see the header comment
+# above. Prepend, not overwrite: on hosted-runner legs this is the only
+# nim/gcc on PATH; harmless no-op everywhere else.
+if [ -x "$HOME/.sello-nim/current/bin/nim" ]; then
+  export PATH="$HOME/.sello-nim/current/bin:$PATH"
+fi
 
 # --cc <name> / --sanitize <name> (RFC-005 slices 8/9) -- see the header
 # comment above. Either flag, in either order, may lead the argument list;

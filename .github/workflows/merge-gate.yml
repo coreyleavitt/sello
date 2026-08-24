@@ -102,6 +102,37 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --sanitize asan-ubsan
 
+  # RFC-005 slice 11: the linux/arm64 leg of unit-linux-amd64-gcc above.
+  # No `container:` field -- slice 7's manifest query found the pinned
+  # ghcr.io/coreyleavitt/nim image has no arm64 variant (linux/amd64 and
+  # windows/amd64 only), and growing one is out of scope for this repo
+  # (the image's build source lives in a separate, undocumented-here
+  # repo). The recorded decision is a direct, checksum-pinned Nim
+  # toolchain install on the hosted `ubuntu-24.04-arm` runner instead of a
+  # multi-arch image build (scripts/ci-nim-setup.sh's own header has the
+  # full pin story: nim-lang/nightlies, the official Nim project's own
+  # release repo, pinned to the exact source commit the `2.2.10` tag
+  # resolves to, checksum-verified before extraction). That script's
+  # `--expect-arch aarch64` argument IS this leg's platform-identity
+  # canary (RFC-005 Part B's matrix-leg rule) -- it asserts `uname -m`
+  # before installing anything, so a mislabeled/reverted runner image
+  # fails loud rather than silently running the wrong architecture.
+  # scripts/test.sh's own toolchain-canary.sh call still runs
+  # unconditionally underneath (gcc, unchanged), so this leg also proves
+  # the C compiler identity for free, same as every other leg.
+  # SELLO_IN_CONTAINER=1 is hardcoded here (not left to scripts/test.sh's
+  # own dual-mode host branch) because there is no podman wrapping to
+  # skip in the first place on this runner -- "in-container mode" (run
+  # the commands directly, no host milpa preflight) is simply the only
+  # mode this leg ever has.
+  unit-linux-arm64-gcc:
+    name: unit-linux-arm64-gcc
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-nim-setup.sh --expect-arch aarch64
+      - run: SELLO_IN_CONTAINER=1 scripts/test.sh
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the
@@ -138,6 +169,25 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/ci-property.sh --cc clang
+
+  # RFC-005 slice 11: the linux/arm64 leg of property-linux-amd64-gcc
+  # above. Same no-container, direct-install rationale as
+  # unit-linux-arm64-gcc above (see that job's own comment) --
+  # scripts/ci-property.sh needs no changes of its own: it already builds
+  # milpa from a pinned commit into an isolated venv via python3+pip
+  # (present on GitHub-hosted ubuntu-24.04-arm the same as on
+  # ubuntu-latest) and forwards straight through to scripts/test.sh, which
+  # picks up the toolchain scripts/ci-nim-setup.sh just installed via the
+  # $HOME/.sello-nim/current on-disk convention (scripts/test.sh's own
+  # header). Same proptest-skip-banner-ABSENT assertion as every other
+  # property leg.
+  property-linux-arm64-gcc:
+    name: property-linux-arm64-gcc
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-nim-setup.sh --expect-arch aarch64
+      - run: SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode

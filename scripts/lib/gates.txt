@@ -87,12 +87,32 @@
 # scripts/test.sh both the gcc/clang legs and this one share (no forked
 # sanitizer-flavored script -- RFC-005 Part B's build-path invariant).
 #
+# RFC-005 slice 11 (linux/arm64 legs): the first entries in this manifest
+# whose script-invocation column hardcodes `SELLO_IN_CONTAINER=1` rather
+# than relying on each script's own dual-mode host branch to auto-wrap in
+# podman -- these two legs have NO container story at all (slice 7's
+# manifest query found no arm64 variant of the pinned image; the
+# recorded decision is a direct, checksum-pinned toolchain install
+# instead, scripts/ci-nim-setup.sh's own header has the full writeup), so
+# "in-container mode" (skip the podman wrapper, run the same commands
+# directly) is the ONLY mode this leg ever runs in, locally or in CI --
+# there is nothing to dual-mode against. scripts/ci-nim-setup.sh
+# --expect-arch aarch64 is this leg's platform-identity canary (asserts
+# `uname -m` before installing anything) AND the mechanism that puts a
+# pinned `nim` on PATH (scripts/test.sh's own header documents the
+# $HOME/.sello-nim/current on-disk convention it then picks up
+# automatically) -- scripts/test.sh's existing toolchain-canary.sh call
+# still runs unconditionally underneath, so this leg additionally proves
+# gcc was really invoked, for free, exactly like every other leg.
+#
 # check-name                        script-invocation
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
 unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan
+unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/test.sh
 property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
+property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh
