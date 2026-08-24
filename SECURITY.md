@@ -2,11 +2,16 @@
 
 ## Reporting a vulnerability
 
-Open a GitHub issue on this repository, or email the author directly
-(Corey Leavitt, `corey@leavitt.dev`) if you would rather not disclose
-details in public first. There is no dedicated security-report address or
-PGP key at this time -- for a solo, pre-1.0 project, a plain issue or
-email is the whole intake process.
+Use GitHub's **private vulnerability reporting** on this repository
+(Security tab -> "Report a vulnerability") -- it is enabled and is the
+preferred intake path: the report stays private between you and the
+maintainer until a fix and coordinated disclosure. If you cannot use it,
+email the author directly (Corey Leavitt, `corey@leavitt.dev`). Please do
+NOT open a public issue for a suspected vulnerability in the
+signing/keygen/DH paths (the secret-holding half of the library);
+`verify`-path correctness issues carry no secrecy concern and a public
+issue is fine there. There is no dedicated security-report address or PGP
+key at this time.
 
 ## What to expect
 

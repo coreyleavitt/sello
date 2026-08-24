@@ -57,12 +57,21 @@ Phase 4 — nightly, timing, release:
 - [ ] 32. Registry + close-out audit
 
 ## Open forks (awaiting Corey)
-- **GitHub Actions billing gate (2026-08-24):** every Actions job on the
-  coreyleavitt account is refused before provisioning ("recent account
-  payments have failed or your spending limit needs to be increased") —
-  blocks the CI-run DoD of slice 1 and all remaining CI slices. Needs
-  GitHub Settings → Billing & plans. The loop polls hourly via
-  `gh run rerun` and resumes automatically once a run starts.
+- (none)
+
+## Resolved forks
+- **GitHub Actions billing gate (2026-08-24):** resolved by Corey's
+  direction to make the repo public (public repos get free hosted
+  minutes). Flip executed 2026-08-24 with the RFC's pre-flip safety
+  items: gitleaks full-history scan (5 findings, all false positives —
+  Nim identifiers containing "Secret" + the published RFC 8032 TEST-1024
+  vector), private vulnerability reporting enabled, fork-PR approval
+  policy set to all_external_contributors, SECURITY.md intake rewritten.
+  NOTE: this front-runs slice 5 out of RFC order (rulesets in slice 4 do
+  not exist yet — checks are advisory-only while public). Remaining
+  slice-5 items still due in order: CONTRIBUTING, README validation
+  section, trust-root paragraph, ghcr anonymous-pull verification,
+  re-run-green-under-public-conditions.
 
 ## Key decisions (this session)
 - 2026-08-24: stage 3 opened; RFC status → ACCEPTED. Stage-2 amendments
