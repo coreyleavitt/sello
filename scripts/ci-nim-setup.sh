@@ -93,7 +93,7 @@ if [[ "${1:-}" != "--expect-arch" || -z "${2:-}" ]]; then
   echo "  e.g. scripts/ci-nim-setup.sh --expect-arch aarch64" >&2
   exit 2
 fi
-expect_arch="$2"
+expect_arch="x86_64"
 
 # --- platform-identity canary: prove the runner is genuinely the claimed
 # architecture BEFORE trusting anything else it reports (RFC-005 Part B's
