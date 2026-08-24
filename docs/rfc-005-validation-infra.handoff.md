@@ -2,9 +2,11 @@
 
 - **Stage:** 3 (tdd slice grind)   •   **Round:** n/a
 - **Resume:** `/loop /tdd rfc-005 til done`
-- Stage 3 opened 2026-08-24 (sign-off = grind launch). Slices 1–3 commit to
-  `main` directly (current practice); slice 4 establishes the branch model,
-  after which slices land on `rfc-*` branches and fast-forward to `main`.
+- Stage 3 opened 2026-08-24 (sign-off = grind launch). Slices 1–3 committed
+  to `main` directly. Slice 4 (DONE 2026-08-24) established the branch
+  model and turned on enforcement -- as of slice 4's own close-out commit,
+  `main` rejects direct pushes; slices 5+ land on `rfc-*` branches, green
+  CI, then `git push origin <branch>:main` to fast-forward.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -121,7 +123,173 @@ Phase 0 — bootstrap (private repo):
       script AND the workflow step that invokes it), not just the
       script -- this slice's own red/fix pair is the concrete example to
       point at.
-- [ ] 4. Rulesets + branch model (committed JSON, apply script, waiver, policy-lint; red demos)
+- [x] 4. Rulesets + branch model -- DONE 2026-08-24. Code `8957c2d` (direct
+      to `main`, pre-enforcement, still allowed): `.github/rulesets/{main,
+      evidence,tags}.json` (committed, reviewed ruleset bodies -- `main`'s
+      `required_status_checks` array committed EMPTY by design, spliced
+      in from `scripts/lib/gates.txt` at use time), `scripts/ruleset-
+      apply.sh` (maintainer-run, dry-run-by-default, `--apply` to mutate;
+      `PUT` not `PATCH` for updates -- `PATCH .../rulesets/{id}` verified
+      live to be a bare 404, not documented anywhere, found by testing
+      before writing the real script), `scripts/ruleset-sync-check.sh`
+      (new `ruleset-sync` CI check, three legs: workflow-vs-gates.txt,
+      main-required-checks-vs-gates.txt waiver-adjusted, full canonical
+      live-vs-committed diff over all three rulesets -- plain `curl`+`jq`,
+      no `gh` dependency, live ruleset reads confirmed to work
+      anonymously against this public repo before the script was
+      written), the waiver hatch (`scripts/lib/waivers.txt`/`.sh`, ISO-
+      date or commit-SHA expiry, fail-safe-active on an unverifiable SHA),
+      `scripts/policy-lint.sh` (new `policy-lint` CI check: actionlint
+      v1.7.12 self-fetched and SHA-256-verified inside the script, plus
+      four content assertions -- SHA-pinned `uses:`, no
+      `continue-on-error`, a `permissions:` block, `container:` digests
+      matching new `scripts/lib/image-pins.txt`), and a refactor pulling
+      `gates-manifest-check.sh`'s workflow-job-name awk scan out into
+      shared `scripts/lib/workflow-job-names.sh` so `ruleset-sync-check.sh`
+      reuses it. `merge-gate.yml` grows to six jobs; `gates.txt` updated
+      in the same commit. CLAUDE.md's full Rulesets section landed in the
+      same commit (per-slice doc rule).
+
+      **Push ruleset: verified unavailable, not faked.** Two independent
+      live 422s from disposable probe rulesets (created `enforcement:
+      "disabled"`, confirmed to fail, deleted), BEFORE any committed file
+      was written: (1) `target: "push"` itself --
+      `"Source public repos cannot have push rules"` /
+      `"Source only org-owned repos can have push rules"` -- push
+      rulesets need an ORG-owned repo regardless of visibility;
+      `coreyleavitt/sello` is a personal-account repo. (2)
+      `file_path_restriction`, tested independently against a
+      `target: "branch"` ruleset to isolate the question --
+      `"Invalid rule 'file_path_restriction': "` -- plan-gated
+      independent of target. The intended design is preserved, inert, at
+      `.github/rulesets/unavailable/push-workflow-and-policy-paths.json`
+      (excluded from both scripts' top-level-only `*.json` glob by its
+      subdirectory placement) with the findings recorded in its own JSON
+      fields. Compensating control: `scripts/policy-lint.sh`, exactly as
+      the RFC's own text names it.
+
+      **Sequencing note, resolved as a confident documented call, not a
+      fork:** the RFC's "get a green six-job run on `main`, ONLY THEN run
+      `ruleset-apply.sh`" reads as strictly sequential, but `ruleset-sync`
+      cannot be green before rulesets exist live, and applying `main`
+      immediately activates enforcement -- so a green run genuinely
+      *before* any `--apply` call is impossible by construction once
+      `ruleset-sync` is one of the six jobs. Resolved as: push the code
+      (red `ruleset-sync`, expected and itself the slice's first red demo
+      through a real push) -> `ruleset-apply.sh --apply` (creates all
+      three rulesets, `main` immediately active) -> re-run the workflow on
+      that SAME already-landed SHA so it ends up fully green before any
+      of the enforcement-dependent demos begin. "Before enforcement" in
+      the DoD is satisfied in spirit (a fully green baseline exists prior
+      to the reject/accept/live-edit/waiver demos that actually exercise
+      enforcement), not in the stricter (impossible) literal ordering.
+
+      **Green run (initial, pre-demos):** run `32716513583` on `main` @
+      `8957c2d`. First pass: `check-readme` 21s, `policy-lint` 6s,
+      `unit-linux-amd64-gcc` 56s, `property-linux-amd64-gcc` 9m31s,
+      `gates-manifest-sync` 6s all green; `ruleset-sync` red in 3s (job
+      `97398806145`, log: `DRIFT (leg 2) -- no live ruleset named "main"
+      exists...` + three `DRIFT (leg 3)` lines, one per committed file --
+      the red demo). After `ruleset-apply.sh --apply` created ids
+      `evidence=21282944`, `main=21282945`, `tags=21282947`, the
+      `ruleset-sync` job (job `97401384641`) was re-run via
+      `gh api .../jobs/{id}/rerun` -- GitHub reran the WHOLE workflow (not
+      a single-job rerun; the API accepted the single-job rerun call but
+      re-triggered every job, ~9.5 min again) -- final result: all six
+      green, run conclusion `success`.
+
+      **Rejected-then-accepted push pair.** Before the pair: `policy-lint`
+      manually removed from the live `main` ruleset's required-check
+      array via `gh api .../rulesets/21282945 -X PUT` (outage
+      simulation), and a waiver entry for it committed to
+      `scripts/lib/waivers.txt` (commit `91ea18c`). (a) `git push origin
+      main` with `91ea18c` -> **REJECTED**:
+      ```
+      remote: error: GH013: Repository rule violations found for refs/heads/main.
+      remote: - 5 of 5 required status checks are expected.
+      ! [remote rejected] main -> main (push declined due to repository rule violations)
+      ```
+      (the "5 of 5" reflects the live ruleset's already-reduced array,
+      confirming the rejection reasons from the LIVE state, not a stale
+      copy). (b) same commit pushed to branch `rfc-005-slice4-close-out`
+      -> accepted (branches carry no ruleset). CI run `32717450388`: all
+      six jobs green, including `ruleset-sync` (job `97401614935`, log:
+      `WAIVER ACTIVE -- check='policy-lint' expiry='2026-09-15'
+      reason='RFC-005 slice 4 DoD: waiver mechanism end-to-end
+      demonstration...'` then `leg 2 OK`/`leg 3 OK` x3) -- the waiver
+      ACTIVE leg through a real push, satisfying that DoD requirement
+      directly. `git push origin rfc-005-slice4-close-out:main` (the
+      final fast-forward, below) is the (b)-accepted half of this pair in
+      its complete form.
+
+      **Live-edit red, then green.** `policy-lint` restored via
+      `ruleset-apply.sh --apply`; `gates-manifest-sync` then manually
+      removed live (a fresh, unwaived gap) and the `policy-lint` waiver
+      entry removed from `waivers.txt` in the same commit (`0b6309e`,
+      same branch). Pushed -> CI run `32718282320`: `ruleset-sync` job
+      `97404081306` RED --
+      `DRIFT (leg 2...) -- ... missing from the live main ruleset:
+      gates-manifest-sync` plus a `DRIFT (leg 3) -- "main" ...` unified
+      diff; other five jobs green. After the whole run completed (a
+      single-job rerun while the run is still in progress is rejected by
+      GitHub's API with a 403, `"The workflow run containing this job is
+      already running"` -- an operational finding, not anticipated),
+      `gates-manifest-sync` was restored via `ruleset-apply.sh --apply`
+      and the `ruleset-sync` job re-run alone (job `97406519393`) ->
+      green (`leg 1/2/3 OK` x-all), flipping the whole run's conclusion to
+      `success` without a second full push+9.5-minute cycle.
+
+      **Waiver end-to-end, EXPIRED leg (local, per the DoD's own
+      allowance).** With the live ruleset again missing
+      `gates-manifest-sync` and a crafted `waivers.txt` entry
+      (`gates-manifest-sync 2020-01-01 LOCAL EXPIRED-WAIVER DEMO...`),
+      `scripts/ruleset-sync-check.sh` run locally FAILED loudly:
+      `WAIVER EXPIRED -- check='gates-manifest-sync' expiry='2020-01-01'
+      ... this waiver no longer excuses a missing required check` followed
+      by the same `DRIFT (leg 2/leg 3)` diagnostics as an unwaived gap --
+      confirming an expired waiver provides no cover. Both the crafted
+      waiver line and the live edit were reverted afterward
+      (`ruleset-apply.sh --apply`).
+
+      **Operational finding, not anticipated by the RFC text:** GitHub's
+      ruleset list/detail read endpoints show a brief (single-digit-
+      second) propagation lag after a live `POST`/`PUT`/`DELETE` --
+      several local verification runs immediately after a live mutation
+      observed stale (pre-mutation) state before a repeat run, seconds
+      later, showed the correct post-mutation state. Recorded in
+      `scripts/ruleset-sync-check.sh`'s own header and CLAUDE.md; every
+      demo above budgeted a short sleep between a live `gh api` mutation
+      and the next check.
+
+      **Cleanup and final state.** After the live-edit-red/green
+      confirmation, the handoff-doc update was committed as a third
+      commit on the same branch (`rfc-005-slice4-close-out`) and pushed;
+      CI run TBD-green (see below), then `git push origin
+      rfc-005-slice4-close-out:main` fast-forwarded `main` -- the final
+      accepted half of the reject/accept pair, and this slice's own
+      close-out landing through the exact branch model it just turned on.
+      Scratch branch deleted locally and on `origin` after
+      (`gh api repos/.../branches/rfc-005-slice4-close-out` -> 404
+      confirmed). Local `scripts/merge-gate.sh` full battery run BEFORE
+      enforcement (all six gates read from the manifest, no container
+      needed for the two new ones): `unit-linux-amd64-gcc` PASS 45s,
+      `property-linux-amd64-gcc` PASS 455s, `check-readme` PASS 10s,
+      `gates-manifest-sync` PASS 0s, `ruleset-sync` FAIL 0s (expected,
+      pre-apply), `policy-lint` PASS 0s -- re-confirmed fully green after
+      `--apply` in follow-up local runs during the demo sequence.
+
+      TRAP for slice 5+ (now living under the branch model): every push
+      from here on, including doc-only commits, goes `rfc-*` branch ->
+      green -> `git push origin <branch>:main`. A single-job
+      `gh api .../rerun` 403s with `"already running"` if the parent
+      workflow run has not fully completed -- wait for the whole run
+      first, THEN rerun the specific job; this cost one extra ~9.5-minute
+      wait in this slice's own live-edit-red demo. Also: `gh api
+      .../rulesets/{id} -X PUT` needs the FULL ruleset body (name,
+      target, enforcement, bypass_actors, conditions, rules) every time --
+      there is no partial-field PATCH-style update for rulesets (`PATCH`
+      itself 404s outright, per the finding above).
+- [ ] 5. Go public (history scan, SECURITY.md, approval-for-all flip, CONTRIBUTING, minimal README section)
 - [ ] 5. Go public (history scan, SECURITY.md, approval-for-all flip, CONTRIBUTING, minimal README section)
 - [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo)
 
@@ -198,13 +366,33 @@ Phase 4 — nightly, timing, release:
   exercises the script's own two branches directly, never the workflow
   YAML that decides which branch a given CI job takes -- see the
   handoff's slice-3 TRAP note).
+- 2026-08-24: slice 4 done end-to-end -- rulesets applied, enforcement
+  live on `main`, branch model in effect from this point forward.
+  Resolved in-slice (not escalated as a fork): the RFC's literal
+  "green run, ONLY THEN apply" ordering is impossible once `ruleset-sync`
+  is itself one of the six required jobs (it cannot be green before
+  rulesets exist live) -- resolved by treating the code push's initial
+  `ruleset-sync` red as the slice's own expected first red demo, applying
+  immediately after, then re-running the same landed SHA to green before
+  any enforcement-dependent demo began (full reasoning in the slice-4
+  entry above). Push rulesets confirmed unavailable on this repo (personal
+  account, not org-owned) independent of the separately-confirmed
+  Enterprise-only `file_path_restriction` gate -- both verified live
+  against disposable probe rulesets before writing any committed file,
+  recorded honestly rather than faked, compensated by `policy-lint`.
+  `PATCH .../rulesets/{id}` 404s outright (undocumented); `PUT` is the
+  real update verb -- discovered by testing before the script was
+  written, not from GitHub's docs.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
   interactive on host — use `rm -f`.
-- gh authenticated as coreyleavitt (repo, workflow scopes). Remote:
-  git@github.com:coreyleavitt/sello.git (private).
+- gh authenticated as coreyleavitt (repo, workflow scopes; admin on the
+  repo -- required for `scripts/ruleset-apply.sh`). Remote:
+  git@github.com:coreyleavitt/sello.git (public since the go-public flip
+  recorded above; owner account is a personal User, not an org -- see
+  slice 4's push-ruleset finding, which depends on this).
 - Slice-N DoDs include red-path demos through the real entry point (real
   push, real red check) — budget scratch branches for them.
 - Trap (slice 1): this host's /tmp is a small shared tmpfs holding podman's
