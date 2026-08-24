@@ -9,13 +9,12 @@
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
 Phase 0 — bootstrap (private repo):
-- [~] 1. CI build path, minimal — CODE LANDED on main (`c3ca4cc`), local
-      in-container validation green (12 unit files pass, proptest SKIPPED
-      banner confirmed). DoD green-run/red-demo BLOCKED: GitHub Actions
-      refuses all jobs at the account level (billing — "recent account
-      payments have failed or your spending limit needs to be increased").
-      Resume: fix billing, then `gh run rerun 32697367451` (green + banner
-      check), then the scratch-branch red demo.
+- [x] 1. CI build path, minimal — DONE 2026-08-24. Code `c3ca4cc` + exec-bit
+      fix `a07a1ae`; green run 32703201531 (SKIPPED banner confirmed in CI
+      log); red demo run 32703306363 (planted test_field failure), scratch
+      branch deleted. TRAP for all future slices: `core.filemode=false` on
+      this working copy (FS reports 777) — new scripts MUST get
+      `git update-index --chmod=+x` explicitly or CI fails with exit 126.
 - [ ] 2. milpa-in-CI + property/check-readme jobs (proptest SHA pin, skip-banner-ABSENT assert)
 - [ ] 3. Gates manifest + merge-gate.sh local runner + workflow-vs-manifest drift check
 - [ ] 4. Rulesets + branch model (committed JSON, apply script, waiver, policy-lint; red demos)
@@ -76,6 +75,9 @@ Phase 4 — nightly, timing, release:
 ## Key decisions (this session)
 - 2026-08-24: stage 3 opened; RFC status → ACCEPTED. Stage-2 amendments
   committed together with this doc's creation.
+- 2026-08-24: repo made PUBLIC on Corey's direction (resolves the Actions
+  billing blocker; front-runs part of slice 5 — see Resolved forks).
+- 2026-08-24: slice 1 done end-to-end (green + red through real pushes).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
