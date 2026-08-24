@@ -10,7 +10,10 @@
   2026-08-24) closed out the remaining go-public deliverables (see the
   Slices list and Open forks below). Slice 6 (DONE 2026-08-24 except one
   Corey-owned leg, see Open forks) landed the `pull_request` contribution
-  lane. Next up: slice 7 (image consolidation, Phase 1).
+  lane. Slice 7 (DONE 2026-08-24 except the ghcr push itself, see Open
+  forks -- everything credential-independent is complete, including a
+  real red-then-green demo of the new drift check) closed out image
+  consolidation. Next up: slice 8 (clang-backend job).
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -483,9 +486,253 @@ Phase 0 — bootstrap (private repo):
         filed Corey-owned.** See Open forks below for the full
         investigation and the exact instructions filed for Corey to run
         the demo from a genuine second account.
+- [x] 7. Image consolidation -- DONE 2026-08-24 except the real ghcr push
+      (blocked on credentials, filed Corey-owned; see Open forks). Branch
+      `rfc-005-slice7`.
+
+      **Fail-fast checks (done first, per the task's own instruction).**
+      Network: ghcr.io and download.opensuse.org both reachable. Credentials:
+      `gh auth status` shows scopes `delete_repo, gist, read:org, repo,
+      workflow` -- no `write:packages`; `curl -sI -H "Authorization: token
+      $(gh auth token)" .../user` confirmed the same scope list from the
+      live token itself, not just the cached CLI state; `podman login
+      --get-login ghcr.io` -> "not logged into ghcr.io". No push-capable
+      credential exists in this session -- per the task's own escalation
+      rule, did all credential-independent work and filed the push as an
+      open fork rather than parking.
+
+      **Package enumeration (verified via `zypper search -s`/dry-run
+      install/real install inside the pinned base image, alt-root podman,
+      not assumed):**
+      | need | package | status |
+      |---|---|---|
+      | libsodium adapter | `libsodium-devel` | already present (pre-slice-7) |
+      | Z3 symex | `z3-devel` | already present (pre-slice-7) |
+      | 32-bit multilib (`--cpu:i386`, slice 10) | `gcc-32bit` + `glibc-devel-32bit` + `libstdc++6-32bit` | added -- pulls `gcc16-32bit`/`glibc-32bit` transitively |
+      | Valgrind (slice 19) | `valgrind` | added |
+      | coverage (slice 17) | `lcov` | added -- drags in a large perl (DateTime et al.) dependency chain, ~82 new packages transitively; accepted, no lighter substitute exists on this base |
+      | s390x cross-gcc (slice 25) | `cross-s390x-gcc16` | added -- version-numbered per openSUSE's per-major naming; `gcc16` picked to match the base image's own native `gcc16`; binary name is `s390x-suse-linux-gcc`, verified via `--version` |
+      | qemu-user (slice 25) | `qemu-linux-user` | added -- **substitution finding**: `qemu-user-static` (Debian/Ubuntu naming, what the RFC text names) does not exist under that name on this zypper base; `qemu-linux-user` is openSUSE's package, confirmed via `zypper search` and a working `qemu-s390x --version` inside the built image |
+      | disasm gate (slice 23) | `binutils`/`objdump` | **already present in the base image** -- NOT added; would have been a no-op duplicate |
+      | clang (slices 8/9/19/22, round-2 finding "missing from the list") | `clang`/`clang22` | **already present in the base image** -- the round-2 finding does not hold empirically as of this slice's verification (`which clang` / `rpm -qa | grep clang` both confirm); recorded rather than silently dropped, since a future base-image change could reintroduce the real gap |
+
+      Verified functionally, not just "installed": `gcc -m32 -x c -o ...`
+      compiled and ran; `valgrind --version`; `lcov --version`;
+      `s390x-suse-linux-gcc --version`; `qemu-s390x --version`; `clang
+      --version`; `objdump --version` -- all run inside the built
+      `sello-dev` image via direct `podman run ... bash -c` (no volume
+      mounts involved -- see the local-run-validation finding below for
+      why that distinction matters).
+
+      **Containerfile.** Extended with the enumerated packages (one
+      `zypper install` line, `gcc-32bit glibc-devel-32bit
+      libstdc++6-32bit valgrind lcov cross-s390x-gcc16 qemu-linux-user`
+      added to the existing `libsodium-devel z3-devel`), plus a fully
+      rewritten header comment enumerating what's added/why per package
+      and what's deliberately NOT added (binutils, clang) with the
+      empirical-verification note. **`FROM` is now digest-pinned**
+      (`ghcr.io/coreyleavitt/nim@sha256:cd4708fb...`, matching
+      `scripts/lib/image-pins.txt`'s base-image section) -- it was still
+      on the `2.2.10` tag before this slice, which the task's own
+      instructions flagged as a gap against the RFC's digest-pin
+      requirement. Fixing it turned out to matter immediately, not just
+      procedurally -- see the mutable-tag finding below.
+
+      **Live finding: the base image tag genuinely moved mid-session.**
+      While iterating on this Containerfile, `ghcr.io/coreyleavitt/nim`'s
+      `2.2.10` TAG's own linux/amd64 sub-manifest digest was observed to
+      change (`sha256:1cad5bad8a47...` -> `sha256:a24f7590e660...`, both
+      confirmed via anonymous-token `curl` against the real ghcr.io API,
+      real GitHub IP resolution, at two different points in the same
+      session) with no action taken by this session against that repo --
+      an unplanned, live demonstration of exactly the risk RFC-005 Part
+      B's digest-pinning rule exists to close ("a mutable tag is 'trust
+      our transcripts' one layer down"). The manifest-LIST digest already
+      recorded in `scripts/lib/image-pins.txt`
+      (`sha256:cd4708fb29d16ec...`) stayed stable and resolvable to the
+      correct, original content throughout, confirmed by re-pulling it
+      directly after the tag had already moved. This directly motivated
+      digest-pinning the Containerfile's own `FROM` line in this same
+      slice (see above) rather than treating it as a separate future
+      cleanup.
+
+      **Local build + verification.** Built `sello-dev` locally
+      (alt-root podman, see the environment findings below) three times
+      across the session as the Containerfile/pin evolved; final image:
+      Containerfile hash `806abfce49ffbbe88798043770b2698fc8ca1b7e88558946bc8c077d07ede932`,
+      uncompressed size ~1.98 GB (`podman image inspect --format
+      '{{.Size}}'` -> 2078946545 bytes), compressed (manifest layer sizes
+      summed) ~709.6 MiB. The compressed size is larger than an earlier
+      (superseded) build against the then-current `2.2.10` tag (~605 MiB)
+      because the digest-pinned base is a 2026-08-09 snapshot and the
+      live zypper repos have moved since -- more packages upgrade to
+      satisfy today's dependency graph. Accepted as the honest cost of
+      digest-pinning against a rolling-release (Tumbleweed) upstream; not
+      large enough to justify the RFC's pre-authorized lean-core/heavy-
+      gates image split (that stays available if a future slice's
+      pull-cost measurement changes this call).
+
+      **Publish attempt and the credential-independent digest.** Real
+      `podman push` to `ghcr.io/coreyleavitt/sello-dev` was not
+      attempted given the confirmed absence of push credentials (see
+      fail-fast above). Instead: pushed the built image to a disposable,
+      throwaway local registry (`docker.io/library/registry:2`,
+      `--tls-verify=false`, deleted after) to compute the REAL manifest
+      digest the same way a real ghcr push would (digest computation is
+      destination-independent -- it's a property of the manifest/layer
+      content, not the registry). Final digest:
+      `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`.
+      Confirmed stable across `podman save`/`load` (re-pushing a
+      loaded-from-tar copy reproduced the identical layer digests) --
+      the exact built image, not the Containerfile alone, is what
+      reproduces this digest; a fresh `podman build` might not (container
+      builds are not reproducible, per the RFC's own stated assumption).
+      Preserved as a portable artifact for the eventual real push:
+      `/home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar`
+      (710 MB, OCI archive format, untracked -- outside the repo, not
+      committed). `scripts/lib/image-pins.txt`'s new `sello-dev` section
+      records the pair (Containerfile hash, this digest) and documents
+      this provenance directly in its own comment, including the
+      not-yet-live status.
+
+      **Consumer conversion.** New `scripts/lib/sello-dev-image.sh`
+      (`resolve_sello_dev_image`): default path pulls
+      `ghcr.io/coreyleavitt/sello-dev@sha256:...` per the pin file (fails
+      loudly with a pointer to the escape hatch on pull failure -- e.g.
+      not-yet-published, as is true right now); `SELLO_DEV_LOCAL_BUILD=1`
+      escape hatch builds fresh from the committed Containerfile (for
+      iterating on the Containerfile itself before a new pin is
+      published); `SELLO_DEV_IMAGE_REF=<ref>` escape hatch pulls an
+      arbitrary reference instead, bypassing the pin file (used during
+      this slice's own testing to point at the scratch registry above --
+      a real network pull-by-digest, 605 MiB over loopback in 11.2s,
+      confirmed working end to end before the base-image-tag/registry
+      confusion below). `scripts/test-libsodium.sh` and `scripts/bmc.sh`
+      both replace their old `podman image exists "$img" || podman build
+      ...` with `source scripts/lib/sello-dev-image.sh &&
+      resolve_sello_dev_image` (`bmc.sh` doesn't `set -e`, so its call
+      site checks the return explicitly, matching its existing preflight
+      pattern).
+
+      **Drift check: extended `scripts/policy-lint.sh` (the RFC's own
+      recommended placement, chosen over a new required check -- avoids
+      the slice-4 check-name machinery for a content-drift check with no
+      natural CI trigger of its own).** New fifth assertion: `sha256sum
+      Containerfile` must match the hash recorded on
+      `image-pins.txt`'s `sello-dev` line -- "rebuild and compare
+      digests" is explicitly infeasible per the RFC's own text (builds
+      aren't reproducible), so this checks the cheap, exact, checkable
+      proxy instead (has the Containerfile changed since the pinned
+      image was actually built). **Red-then-green demo, done locally
+      (per the DoD's own allowance -- policy-lint's CI wiring was already
+      proven in slice 4):** appended a comment to `Containerfile`
+      without updating the pin -> `scripts/policy-lint.sh` FAILED with
+      the expected message and exit code 1 (verified via `$?` directly,
+      not through a pipe that would mask it); reverted; re-ran ->
+      green, hash match confirmed. `scripts/gates-manifest-check.sh`
+      re-verified green (no required-check surface changed).
+
+      **arm64 manifest verdict.** Queried
+      `ghcr.io/coreyleavitt/nim`'s manifest LIST via anonymous
+      token+curl (the slice-5 method): two platform entries only --
+      `linux/amd64` and `windows/amd64` (the Windows entry is itself
+      still amd64). **No arm64 variant exists.** Decision for slice 11
+      (linux/arm64 job), recorded now per the task's own instruction so
+      slice 11 doesn't rediscover this: **recommend direct Nim toolchain
+      install on a GitHub-hosted `ubuntu-24.04-arm` runner, not a
+      multi-arch extension of the base image.** Rationale: the base
+      image's build source is explicitly OUT OF SCOPE for this repo (the
+      RFC's own slice-7 title parenthetical: "the base image is untouched
+      -- ... since the base image's build source lives outside this repo
+      and is only documented here") -- asking that separate repo to grow
+      an arm64 leg is not this slice's or this repo's call to make.
+      Direct-install also mirrors the ALREADY-PLANNED macOS-arm64 job's
+      own pattern (slice 12: "Nim install mechanism named and
+      version-pinned (no digest-pinnable container on macOS runners)")
+      -- one consistent non-container-pin story for both non-amd64-Linux
+      hosted-runner legs, not two different mechanisms invented
+      independently in later slices.
+
+      **Local-run-validation finding: a NEW, distinct environment
+      blocker (not the pre-existing /tmp trap), blocking the DoD's
+      "run scripts/test-libsodium.sh / scripts/bmc.sh green locally"
+      legs.** Isolated via a long sequence of controlled tests, down to
+      the exact root cause: the base image ships `/home` at mode `555`
+      (`dr-xr-xr-x`, root:root -- no write bit for anyone, confirmed via
+      `stat` inside a working no-mount container). Every one of
+      `test.sh`/`test-libsodium.sh`/`ct.sh`/`fuzz.sh`/`bmc.sh`'s shared
+      `-v "$HOME/.cache/milpa:$HOME/.cache/milpa"` mount (pre-existing
+      design since RFC-001, unrelated to this slice's own changes) needs
+      `crun` to auto-`mkdir` the nonexistent `$HOME` (`/home/corey`)
+      inside the container's overlay view to serve as the mount target --
+      under THIS session's ROOTLESS podman + `fuse-overlayfs` stack (no
+      real root, no `CAP_DAC_OVERRIDE`), that `mkdir` fails outright
+      (`crun: mkdir \`/home/corey\`: Permission denied`), 100%
+      reproducibly, isolated down to the single mount flag alone on a
+      pristine store (confirmed: a no-mount run succeeds; adding back
+      just this one `-v` breaks it; other top-level dirs the same image
+      ships writable, e.g. `/tmp` and `/var/tmp` at `1777`, mount fine).
+      Also confirmed NOT fixable by pre-creating the directory via an
+      extra `Containerfile` `RUN mkdir /home/corey` layer -- `buildah`'s
+      `RUN` step hits the identical rootless permission wall building on
+      this exact base image. **This does not affect CI**: every CI job
+      runs `SELLO_IN_CONTAINER=1`, which skips the whole podman-wrapper
+      and mount-construction branch entirely (see `scripts/test.sh`'s own
+      header comment) -- CI never evaluates this code path. It also does
+      not indicate any defect in this slice's own Containerfile/script
+      changes: every added package was independently verified functional
+      via direct (no-mount) `podman run ... bash -c` execution (see the
+      package-enumeration table above). The DoD's two "runs green
+      locally" legs are therefore NOT demonstrated in this session and
+      are filed Corey-owned below, alongside the credential blocker --
+      Corey's own host may not share this exact rootless/fuse-overlayfs
+      combination (a privileged Docker daemon, or a different podman
+      storage configuration with real root, would not hit this).
+      Multiple scratch `/home/corey/.podman-alt*` storage roots were
+      created and torn down chasing this diagnosis (via `podman unshare
+      rm -rf`, per the standing TRAP, with several needing an extra
+      `podman unshare chmod -R u+w` first to clear permission-broken
+      whiteout markers this same bug leaves behind) -- all cleaned up by
+      the end of the session; `df -h /home` confirmed no lasting
+      space impact (981G free throughout).
+
+      **Image size + cold-pull time.** Uncompressed 1.98 GB, compressed
+      ~709.6 MiB (see above). Real cold-pull rate measured against actual
+      ghcr.io earlier in this same session (pulling the BASE image, not
+      sello-dev, before any credential/mount issues arose):
+      ~370 MiB in 20.1s (~18.5 MiB/s). Extrapolated sello-dev cold-pull
+      estimate from ghcr: ~38s (709.6 MiB / 18.5 MiB/s) -- an ESTIMATE,
+      not a measurement, since the image isn't live yet. A loopback pull
+      of the full image against the scratch registry (real bytes
+      transferred, blobs removed first) measured 66.8s on a busy shared
+      host mid-session -- noted as a rough sanity bound only (loopback +
+      contention makes it a poor proxy for a real network number), not
+      cited as the headline figure. **Two-image split: NOT adopted.**
+      ~40s estimated cold pull is well inside any reasonable per-job
+      budget for the heavy gates this image serves (libsodium interop,
+      bmc/symex, and later the `-m32`/valgrind/lcov/s390x/qemu-user
+      matrices) -- the RFC's pre-authorization for a lean-core/heavy-gates
+      split is recorded as available but not exercised this slice.
+
+      **CLAUDE.md.** Updated in the same commits: the Containerfile/
+      sello-dev paragraph rewritten (full package list, what's NOT
+      added and why, the pull-by-digest + two-escape-hatch story, the
+      digest-pinned `FROM` + live mutable-tag finding), and
+      `policy-lint.sh`'s paragraph updated from "four assertions" to
+      "five," naming the new sello-dev drift check.
+
+      **Not done / filed Corey-owned (see Open forks below):** the real
+      `ghcr.io/coreyleavitt/sello-dev` push (blocked on `write:packages`
+      credentials); the two DoD "runs green locally" legs for
+      `scripts/test-libsodium.sh`/`scripts/bmc.sh` (blocked on the
+      rootless-podman `/home`-mode-555 finding above, on THIS host/
+      session specifically). Everything else in the slice -- package
+      enumeration, Containerfile, drift check + real red/green demo,
+      arm64 verdict + decision, image size/pull-time record, CLAUDE.md --
+      is complete and committed via the branch model.
 
 Phase 1 — matrix (7 first, then 8–13 independent):
-- [ ] 7. Image consolidation (sello-dev to ghcr by digest; package enumeration; arm64 manifest check)
+- [x] 7. Image consolidation (sello-dev to ghcr by digest; package enumeration; arm64 manifest check) -- DONE 2026-08-24 except the real ghcr push (blocked on credentials, filed Corey-owned; see Open forks and the full slice entry below).
 - [ ] 8. clang-backend job
 - [ ] 9. ASan/UBSan job (red: planted overflow)
 - [ ] 10. --cpu:i386 job (canary: 4-byte pointers)
@@ -624,6 +871,76 @@ Phase 4 — nightly, timing, release:
   mechanics are identical and worth recording once — slice 28 should
   reuse this playbook, not rediscover it.
 
+- **`ghcr.io/coreyleavitt/sello-dev` push (filed 2026-08-24, slice 7).**
+  No push-capable credential exists in this session: `gh auth status`
+  scopes are `delete_repo, gist, read:org, repo, workflow` -- no
+  `write:packages`; no `podman login ghcr.io` session either. The image
+  is fully built, verified, and its real publish digest already computed
+  (via a disposable scratch registry, not a placeholder --
+  `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`,
+  recorded in `scripts/lib/image-pins.txt`), and preserved EXACTLY (not
+  just its Containerfile) as a portable artifact so the eventual real
+  push reproduces this same digest byte-for-byte rather than depending on
+  a fresh rebuild (builds aren't reproducible):
+  `/home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar`
+  (710 MB, untracked, outside the repo).
+
+  **To unblock, either:**
+  1. `gh auth refresh -h github.com -s write:packages` (interactive --
+     needs a browser/device-code approval only Corey can complete), then
+     `echo "$(gh auth token)" | podman login ghcr.io -u coreyleavitt
+     --password-stdin`, or
+  2. Create a classic PAT (or fine-grained token) scoped to
+     `write:packages` only and `podman login ghcr.io` with it directly
+     (per SECURITY.md's existing trust-root guidance: minimally scoped,
+     periodically rotated -- this would be the FIRST credential of this
+     specific kind on record; flag it for the trust-root list alongside
+     the existing open ghcr-PAT-custody confirmation request from slice
+     5, since it's the same category of secret that entry already
+     covers, not a new one).
+
+  **Once either exists, the exact unblock command (do not rebuild):**
+  ```sh
+  podman load -i /home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar
+  podman tag localhost/sello-dev:latest ghcr.io/coreyleavitt/sello-dev:latest
+  podman push ghcr.io/coreyleavitt/sello-dev:latest
+  ```
+  Then confirm the pushed digest matches the pin file's recorded
+  `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`
+  exactly (`podman image inspect
+  ghcr.io/coreyleavitt/sello-dev:latest --format '{{.Digest}}'` after the
+  push, or read `docker-content-digest` off a manifest `GET`) -- if it
+  does not match, something about the push path altered the manifest
+  (e.g. a registry-side re-tag/re-manifest step) and `image-pins.txt`
+  needs the ACTUAL resulting digest, not the one recorded here.
+
+- **`scripts/test-libsodium.sh`/`scripts/bmc.sh` "runs green locally" DoD
+  legs (filed 2026-08-24, slice 7).** Blocked by a newly-discovered,
+  thoroughly-isolated environment limitation distinct from the
+  pre-existing /tmp-podman trap: the base image ships `/home` at mode
+  `555` (no write bit for anyone), and this session's ROOTLESS podman +
+  `fuse-overlayfs` stack cannot auto-`mkdir` the nonexistent
+  `$HOME`(`/home/corey`) these scripts' shared `-v
+  "$HOME/.cache/milpa:$HOME/.cache/milpa"` mount needs as its target --
+  confirmed down to the single flag on a pristine store, and confirmed
+  NOT fixable via an extra `Containerfile` layer (buildah's own `RUN`
+  hits the identical wall). Full diagnosis in the slice 7 entry above.
+  Does not affect CI (`SELLO_IN_CONTAINER=1` skips this code path
+  entirely) and does not indicate a defect in this slice's own changes
+  (every added package verified functional via direct, no-mount
+  execution). **Ask:** on a host without this specific rootless/
+  fuse-overlayfs limitation (a privileged Docker daemon, a different
+  podman storage/idmap configuration, or simply a host where `/home` is
+  writable or `$HOME` is not under `/home`), run
+  `scripts/test-libsodium.sh` and `scripts/bmc.sh` once each and confirm
+  green -- both already default to pull-by-digest per this slice's own
+  code; once the push above lands, no further change is needed for
+  either script to exercise the real path. If the SAME `/home`-mode-555
+  wall reproduces on Corey's own machine too, that's a finding worth its
+  own follow-up (e.g. patching the base image to ship a writable `/home`,
+  or moving these scripts' mount target off `$HOME` entirely) rather than
+  a one-session fluke -- report back either way.
+
 ## Resolved forks
 - **GitHub Actions billing gate (2026-08-24):** resolved by Corey's
   direction to make the repo public (public repos get free hosted
@@ -715,6 +1032,27 @@ Phase 4 — nightly, timing, release:
   looking runner-targeting-workflow variant for the eventual slice 28),
   not worked around by creating a new account (explicitly out of scope
   per the task's own instruction).
+- 2026-08-24: slice 7 done end-to-end except the real ghcr push (blocked
+  on `write:packages` credentials, filed Corey-owned with the exact
+  unblock artifact/commands) and the two "runs green locally" DoD legs
+  for `scripts/test-libsodium.sh`/`scripts/bmc.sh` (blocked by a
+  newly-diagnosed rootless-podman `/home`-mode-555 limitation, also filed
+  Corey-owned). Two significant discoveries made and resolved/documented
+  in-slice rather than silently worked around: (1) `clang`/`binutils`
+  turned out to already be present in the base image, contrary to the
+  RFC's round-2 finding -- verified empirically rather than assumed, and
+  recorded as a finding rather than silently adding a redundant package;
+  (2) the `ghcr.io/coreyleavitt/nim:2.2.10` TAG was observed to genuinely
+  move mid-session (its linux/amd64 sub-manifest digest changed, no
+  action by this session against that repo) while the already-pinned
+  manifest-list digest stayed stable throughout -- a live, unplanned
+  vindication of the RFC's own digest-pinning rationale, which directly
+  motivated digest-pinning the Containerfile's own `FROM` line in the
+  same slice rather than leaving it on the tag as found. arm64: no
+  variant exists for the base image; recommended (not yet built)
+  direct-Nim-install on a hosted `ubuntu-24.04-arm` runner for slice 11,
+  mirroring the already-planned macOS-arm64 pattern, since the base
+  image's build source is explicitly out of this repo's scope.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
@@ -746,3 +1084,30 @@ Phase 4 — nightly, timing, release:
   torn down with `podman unshare rm -rf`. Expect the same in slices 3/7+.
 - Note: pushing slice 1 also pushed 8 previously-unpushed local commits
   (RFC-006 slices + stage-3 open) to origin/main — expected, recorded.
+- Trap (slice 7, NEW — distinct from the slice-1 /tmp trap above): actually
+  RUNNING a container (`podman run`) with the project's standard `-v
+  "$HOME/.cache/milpa:$HOME/.cache/milpa"` mount fails on this host with
+  `crun: mkdir \`/home/corey\`: Permission denied` — the base image ships
+  `/home` at mode 555 (no write bit for anyone), and this host's rootless
+  podman + fuse-overlayfs cannot auto-mkdir a bind-mount target under it
+  (confirmed: `--userns=keep-id`, `--mount` instead of `-v`, and an extra
+  `Containerfile` `RUN mkdir` layer were all tried and all hit the same
+  wall; other top-level dirs the image ships writable, e.g. `/tmp` at
+  1777, mount fine). `podman build` is UNAFFECTED (only `run` hits this) —
+  building/verifying tools via direct no-mount `podman run ... bash -c`
+  also works fine; only the exact `$HOME`-path-mount pattern breaks. Also
+  discovered: once this bug fires once on a given alt-root store, it
+  leaves a permission-broken fuse-overlayfs whiteout marker
+  (`.wh..wh..opq`) that poisons that blob's cached extraction for every
+  future container on that SAME store (even unrelated images sharing the
+  tainted blob) until manually fixed (`podman unshare chmod -R u+w
+  <root>` before `podman unshare rm -rf`, or just abandon the store and
+  use a fresh `--root`/`--runroot` pair — cheaper given /home's 981G
+  free). Full diagnosis + the exact isolation sequence in slice 7's own
+  handoff entry and its Open forks ask to Corey. Unknown yet whether this
+  reproduces on Corey's own machine — treat as session-specific until
+  confirmed otherwise, but do NOT assume `-v "$HOME/...":"$HOME/..."`
+  mounts "just work" on this host without testing first in future
+  slices (8+ don't need this mount pattern themselves, but any future
+  local validation of test.sh/test-libsodium.sh/ct.sh/fuzz.sh/bmc.sh on
+  THIS host should expect it).
