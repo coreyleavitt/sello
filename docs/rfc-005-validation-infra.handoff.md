@@ -8,8 +8,9 @@
   `main` rejects direct pushes; slices 5+ land on `rfc-*` branches, green
   CI, then `git push origin <branch>:main` to fast-forward. Slice 5 (DONE
   2026-08-24) closed out the remaining go-public deliverables (see the
-  Slices list and Open forks below). Next up: slice 6 (contribution
-  lane).
+  Slices list and Open forks below). Slice 6 (DONE 2026-08-24 except one
+  Corey-owned leg, see Open forks) landed the `pull_request` contribution
+  lane. Next up: slice 7 (image consolidation, Phase 1).
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -388,12 +389,100 @@ Phase 0 — bootstrap (private repo):
         (matching slice 4's own precedent of a final record-keeping
         commit whose own CI run isn't further self-cited); branch deleted
         after landing (locally and on `origin`).
-- [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo).
-      Note: the fork-PR approval POLICY was live-verified as part of
-      slice 5 above (`all_external_contributors`, via the corrected
-      `fork-pr-contributor-approval` endpoint) -- but the `pull_request`
-      workflow itself and its held-for-approval end-to-end demo remain
-      entirely unstarted; slice 5 does not advance this slice.
+- [x] 6. Contribution lane -- DONE 2026-08-24 except the fork-PR
+      held-for-approval demo itself, which is filed Corey-owned (see Open
+      forks below; everything else in the slice completed). Code `cabc161`
+      (branch `rfc-005-slice6`):
+      - **`.github/workflows/pr-checks.yml`** (new): a second,
+        `pull_request`-triggered workflow, deliberately separate from
+        `merge-gate.yml` (RFC-005 Part B's own build-path-invariant
+        wording is scoped to "every CI job's run step," not "one workflow
+        file total," and a `pull_request` lane with non-required checks
+        under the six required check names would be exactly the name
+        collision Part B's "check names are a stable public interface"
+        line warns against). Two jobs, `pr-unit-linux-amd64-gcc` and
+        `pr-check-readme` -- the cheap subset only (unit suite +
+        check-readme; NOT the ~9.5-minute property job, NOT the three
+        repo-governance checks). Same supply-chain posture as
+        `merge-gate.yml`: SHA-pinned `uses:`, workflow-level
+        `permissions: {contents: read}`, per-PR `concurrency` with
+        `cancel-in-progress`, `container:` digest identical to
+        `scripts/lib/image-pins.txt`, hosted `ubuntu-latest` runners only
+        (the self-hosted timing-tier runner, not yet built, is never
+        targeted by `pull_request` events). Verified locally before
+        pushing: `scripts/policy-lint.sh` clean (it globs
+        `.github/workflows/*.yml`, so this file is in scope), and both
+        `scripts/gates-manifest-check.sh` and
+        `scripts/ruleset-sync-check.sh` clean -- confirmed by reading
+        both scripts (and their shared
+        `scripts/lib/workflow-job-names.sh`) that each hard-codes its
+        workflow scan to `.github/workflows/merge-gate.yml` specifically,
+        not a directory-wide glob, so `pr-checks.yml`'s two job names
+        never enter either drift comparison and correctly need no
+        `scripts/lib/gates.txt` entry -- the TRAP note's premise
+        ("verify the scan isn't directory-wide") held, no design change
+        needed.
+      - **`CONTRIBUTING.md`** cross-checked: the "Fork PR CI (honest
+        current state)" section rewritten to describe the real workflow
+        (what the two jobs are, that neither is a required check, the
+        approval-hold behavior for outside contributors, and that the
+        full six-job `merge-gate.yml` battery -- not this lane -- is what
+        a change actually merges on, triggered by the maintainer pushing
+        the accepted branch).
+      - **`CLAUDE.md`** gains a "Contribution lane" paragraph in the CI
+        section (naming decision, manifest-exemption mechanics, approval-
+        gate story) plus a one-sentence amendment to the preceding
+        paragraph noting `pr-checks.yml` as the one deliberate exception
+        to "widen `merge-gate.yml`, never fork a second workflow."
+      - **Branch flow.** Branch `rfc-005-slice6` push -> run `32726115419`
+        green (all six jobs; `property-linux-amd64-gcc` 9m36s) ->
+        `git push origin rfc-005-slice6:main` fast-forward
+        (`102b5b9..cabc161`) -> post-fast-forward `main` run `32726991976`
+        green (all six jobs) -> branch deleted, `.../branches/
+        rfc-005-slice6` confirmed 404.
+      - **Same-account PR smoke test (DoD item 3).** Scratch branch
+        `pr-lane-smoke` (one commit, a new inert
+        `.github/PR_LANE_SMOKE_TEST.md` scratch file, never intended to
+        land), PR #1 opened same-account against `main`. Both the
+        `pull_request`-triggered run (`32727886569`) and the
+        simultaneously-triggered `push`-triggered `merge-gate.yml` run
+        (`32727878225`, since a same-repo branch push satisfies both
+        workflows' own triggers) appeared on the PR's checks list as
+        eight independent check-runs -- `pr-unit-linux-amd64-gcc` and
+        `pr-check-readme` distinct from `unit-linux-amd64-gcc` and
+        `check-readme`, confirming the naming decision holds in practice,
+        not just on paper. Neither PR-lane check was held for approval
+        (same-account -- expected, not a gap). `pr-check-readme` green in
+        24s, `pr-unit-linux-amd64-gcc` green in 53s, both job IDs
+        `97433198669`/`97433199046`. PR #1 closed unmerged, branch deleted
+        via `gh pr close --delete-branch`, `.../branches/pr-lane-smoke`
+        confirmed 404.
+      - **Red demo (DoD's red-path requirement).** Investigated both
+        candidate targets first, per the TRAP note: the unit suite's file
+        list (`scripts/lib/unit-test-files.sh`) is a fixed, hand-written
+        bash array, not a directory glob -- a new scratch test file placed
+        under `tests/unit/` would NOT be "picked up" by
+        `pr-unit-linux-amd64-gcc` without also editing that shared array
+        (infrastructure also used by the real required
+        `unit-linux-amd64-gcc` gate), which is more invasive than
+        necessary for a demo confined to the PR lane. Chose the README-
+        fence target instead: scratch branch `pr-lane-red-demo`, one
+        commit appending a deliberately-broken ` ```nim ` fence (an
+        undefined-identifier call) to `README.md`, PR #2 opened
+        same-account. `pr-check-readme` (job `97433648961`) failed in 22s
+        with the expected Nim compiler error
+        (`Error: undeclared identifier: 'thisIdentifierDoesNotExist'`,
+        confirmed via `gh run view --job ... --log`); `pr-unit-linux-amd64-gcc`
+        (job `97433649121`, same run `32728034097`) stayed green on the
+        same push, confirming the red is targeted, not incidental. PR #2
+        closed unmerged, branch deleted via `gh pr close --delete-branch`,
+        `.../branches/pr-lane-red-demo` confirmed 404 -- the broken fence
+        never reached `main` (it existed only on the deleted scratch
+        branch/commit).
+      - **Fork-PR held-for-approval demo (DoD item 4) -- NOT demonstrated,
+        filed Corey-owned.** See Open forks below for the full
+        investigation and the exact instructions filed for Corey to run
+        the demo from a genuine second account.
 
 Phase 1 — matrix (7 first, then 8–13 independent):
 - [ ] 7. Image consolidation (sello-dev to ghcr by digest; package enumeration; arm64 manifest check)
@@ -445,6 +534,95 @@ Phase 4 — nightly, timing, release:
   in `SECURITY.md` directly (or reply here for the next session to make
   the edit) — not a blocker for this slice's own close-out, per the RFC's
   escalation rule for owner-attested items.
+
+- **Fork-PR held-for-approval demo (filed 2026-08-24, slice 6).** Slice
+  6's DoD calls for demonstrating that a PR from a genuine outside
+  contributor gets its `pull_request` checks held pending maintainer
+  approval (`all_external_contributors`, live-verified in slice 5) rather
+  than running unattended. This requires a SECOND GitHub account with no
+  write access to `coreyleavitt/sello` opening the PR -- investigated and
+  confirmed NOT satisfiable from this session:
+  - `gh auth status` shows exactly one authenticated account,
+    `coreyleavitt` (the repo owner).
+  - `gh api user/orgs` shows two orgs Corey belongs to (`knurlsoft`,
+    `Ulysses-Power`). Investigated whether forking into one of these
+    (rather than a personal fork) would count as "external" for the
+    approval policy -- it would NOT: GitHub's approval-policy check keys
+    off the identity of the PR's author/triggering actor (specifically,
+    whether that GitHub user account has write access to the upstream
+    repo), not the namespace the fork lives in. A PR opened by the
+    `coreyleavitt` account from a `knurlsoft`-owned fork is still opened
+    by an account with admin access to `coreyleavitt/sello` -- it would
+    NOT be held, and so would not demonstrate anything (confirmed against
+    GitHub's own documentation on repository Actions settings; see
+    "Managing GitHub Actions settings for a repository" at
+    docs.github.com and community discussion #49048, both consulted
+    2026-08-24 -- not literally re-tested live, since doing so would
+    require the very second account this fork is about, but the
+    documented mechanism is unambiguous on this point). Creating a new
+    personal GitHub account to serve as the "outside" tester is
+    explicitly out of scope (ToS; the credentials would not be Corey's
+    own) -- per the task's own instruction, this is filed rather than
+    worked around.
+  - **Everything else in slice 6 is done regardless** (see the slice 6
+    entry above) -- this is the one DoD leg that stays open.
+
+  **Instructions for Corey to run this demo from any second GitHub
+  account** (a personal account with no collaborator/owner relationship
+  to `coreyleavitt/sello` -- a throwaway free account is fine, it never
+  needs to push anything real):
+  1. Sign in to GitHub as the second account (a private/incognito browser
+     window avoids session collision with your primary `coreyleavitt`
+     session).
+  2. Go to `https://github.com/coreyleavitt/sello` and click **Fork**
+     (top right) -- fork it into the second account's own namespace, not
+     an org. Default settings are fine.
+  3. In the fork, create a new branch (e.g. `external-pr-checks-demo`)
+     and make a trivial change -- editing `README.md` directly in the
+     GitHub web UI (e.g. append one harmless sentence) is enough; no
+     local clone needed.
+  4. Commit directly to the new branch (the GitHub web editor's "Commit
+     directly to the `external-pr-checks-demo` branch" option), then open
+     a pull request from `<second-account>/sello:external-pr-checks-demo`
+     into `coreyleavitt/sello:main`.
+  5. **Observe, on the PR's checks list:** both `pr-checks.yml` jobs
+     (`pr-unit-linux-amd64-gcc`, `pr-check-readme`) should show as
+     **"workflow awaiting approval"** (GitHub's own status text for a
+     held run) rather than queued/running -- confirm no run for either
+     job has started (no log content, no "in progress" state; the
+     workflow run is created but paused before its first job). A yellow
+     "First-time contributors need a maintainer to approve running
+     workflows" (or "outside collaborator") banner should appear near the
+     top of the PR's checks section for the `coreyleavitt` account viewing
+     it, with an **Approve and run** button.
+  6. Take a screenshot or copy the exact banner text and the check-run
+     state for the handoff record -- this is the DoD's evidence artifact.
+  7. Either click **Approve and run** to also observe the held run
+     complete normally once approved (optional, closes the loop end to
+     end), or leave it unapproved -- either way, do NOT merge the PR.
+  8. Close the PR (do not merge) and delete the branch/fork afterward
+     (the fork itself can also just be left or deleted from the second
+     account's settings; it never touched `main`).
+  9. Report back (or edit this handoff entry directly) with: the PR
+     number/URL, the exact "awaiting approval" state observed, and
+     confirmation the checks did not execute before the approval click
+     (or were never approved).
+
+  **Runner-targeting-workflow variant (RFC-005 Part B ~line 787, forward-
+  looking):** once the self-hosted timing-tier runner lands (slice 28,
+  not yet built), that slice's own DoD calls for the SAME second-account
+  mechanism, but with the fork PR instead ADDING a new workflow file that
+  targets the runner's labels (e.g. `runs-on: [self-hosted, ...]`) rather
+  than editing `README.md` -- the point there is showing that even a
+  workflow-file-adding attack from an approved-but-untrusted PR is held
+  for the identical approval click, since "the approval click is the
+  load-bearing control" for the runner (RFC-005 Part B's own wording).
+  Steps 1-4 above are identical except step 3 adds a new
+  `.github/workflows/*.yml` file targeting the runner label instead of
+  editing `README.md`; steps 5-9 are unchanged. Filed here now (rather
+  than only in a future slice 28 handoff) since the second-account
+  mechanics are identical and worth recording once — slice 28 should
+  reuse this playbook, not rediscover it.
 
 ## Resolved forks
 - **GitHub Actions billing gate (2026-08-24):** resolved by Corey's
@@ -511,6 +689,32 @@ Phase 4 — nightly, timing, release:
   it. Owner-attested trust-root items (hardware-key 2FA, ghcr PAT
   scope/custody) filed as an open fork per the escalation rule, not
   treated as a blocker.
+- 2026-08-24: slice 6 done end-to-end except one leg. `pr-checks.yml`
+  landed via the branch flow (green branch run, green post-fast-forward
+  main run), `CONTRIBUTING.md`/`CLAUDE.md` cross-checked, a same-account
+  PR smoke test showed both PR-lane checks trigger and go green
+  side-by-side with the independently-triggered push-lane checks
+  (confirming the naming decision holds in practice), and a second
+  same-account PR with a deliberately-broken README fence showed
+  `pr-check-readme` go red while `pr-unit-linux-amd64-gcc` stayed green
+  (targeted red demo). Resolved in-slice (not escalated, per the TRAP
+  note's own instruction to verify first): read
+  `scripts/gates-manifest-check.sh`/`scripts/ruleset-sync-check.sh`
+  before writing anything -- both hard-code their workflow scan to
+  `merge-gate.yml` specifically, confirming the new workflow file
+  correctly needs no `scripts/lib/gates.txt` entry with no design change.
+  The one leg NOT completed -- an actual fork PR from a genuinely
+  external account shown held for approval -- requires a second GitHub
+  account with no write access to the repo; none exists in this
+  environment (`gh auth status` shows only the owner account; the two
+  orgs the owner belongs to don't help, since GitHub's approval check
+  keys off the PR author/actor's own collaborator status, not the fork's
+  namespace, so a PR opened by the same `coreyleavitt` account from an
+  org-owned fork would still not be held). Filed as a Corey-owned open
+  fork with exact click-by-click instructions (including the forward-
+  looking runner-targeting-workflow variant for the eventual slice 28),
+  not worked around by creating a new account (explicitly out of scope
+  per the task's own instruction).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
