@@ -154,6 +154,24 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# extglob, enabled once, unconditionally, up front (RFC-005 slice 13):
+# the --expect-os OS-identity canary below needs the `@(pattern-list)`
+# extglob construct to support `|`-alternation supplied as ONE dynamic
+# string (a bash `case` pattern-list's `|` is otherwise parsed as
+# separate literal pattern tokens at SOURCE-PARSE time -- substituting a
+# variable whose value happens to contain `|` does not retroactively
+# split it into alternatives). This MUST be set here, before the `if`
+# block that uses it is ever reached -- bash parses a whole compound
+# command (the entire `if ... fi` block below) as one unit before
+# executing any part of it, so a `shopt -s extglob` placed INSIDE that
+# same block does not take effect in time for the `case` statement
+# sharing it (confirmed empirically: this was the exact ordering the
+# first real hosted run of this leg hit, a genuine syntax error, not
+# merely a match failure). Harmless everywhere `--expect-os` is unused --
+# extglob only adds new pattern syntax, it does not change any existing
+# plain-glob behavior elsewhere in this script.
+shopt -s extglob
+
 # Portable SHA-256 (RFC-005 slice 12 portability finding): `sha256sum` is a
 # GNU-coreutils-ism -- absent by default on macOS (BSD userland ships
 # `shasum -a 256` instead, a bundled Perl script, and has no `sha256sum`
@@ -235,8 +253,27 @@ echo "arch canary: PASS -- runner architecture confirmed '$expect_arch'."
 actual_os_raw="$(uname -s)"
 if [[ -n "$expect_os" ]]; then
   echo "OS canary: expected uname -s to match '$expect_os', observed '$actual_os_raw'"
+  # `shopt -s extglob` + the `@(...)` wrapper is REQUIRED here, not
+  # decorative: a bash `case` pattern-list's `|` alternation is parsed at
+  # SOURCE-PARSE time as separate literal pattern tokens (`case x in
+  # a|b)` is grammar, not runtime string content) -- substituting a
+  # variable whose VALUE happens to contain a `|` character does not
+  # retroactively split it into multiple patterns; without extglob, `|`
+  # inside an expanded pattern is just a literal character the subject
+  # string would have to contain (confirmed empirically: the first real
+  # hosted run of this leg went red here, `uname -s` correctly observed
+  # as `MINGW64_NT-10.0-26100` but the plain-pattern match failing since
+  # that string has no literal `|` in it). `@(pattern-list)` is extglob's
+  # own alternation construct and IS evaluated against the expanded
+  # pattern text at match time, in both `case` and `[[ ]]` -- the correct
+  # tool for "alternation supplied as one dynamic string," not a
+  # workaround. (extglob itself is enabled once, unconditionally, at the
+  # very top of this script -- see that comment for why it cannot be
+  # enabled here instead: bash parses this whole `if...fi` block as one
+  # unit before executing any part of it, so a `shopt` on this same block
+  # would not take effect in time for the `case` below.)
   case "$actual_os_raw" in
-    $expect_os)
+    @($expect_os))
       echo "OS canary: PASS -- runner OS identity confirmed against pattern '$expect_os'."
       ;;
     *)
