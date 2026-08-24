@@ -14,12 +14,25 @@
 # deliberately-partial snippet; none currently do.
 #
 # Usage:  scripts/check-readme.sh
+#         SELLO_IN_CONTAINER=1 scripts/check-readme.sh   # already inside
+#                                                          # the pinned image (CI)
 #
 # Mounts: the project + the milpa CAS (at both the canonical path and its
 # host-absolute path), same pattern as scripts/test.sh. Prerequisite:
 # `milpa fetch` has been run on the host at least once (populates _deps/
 # and nim.cfg, which `import sello` in the extracted fences resolves
-# through).
+# through) -- or, under SELLO_IN_CONTAINER=1 with no local `_deps/` at
+# all, scripts/ci-setup.sh has written the zero-dependency nim.cfg first
+# (README fences only exercise `import sello`, never proptest).
+#
+# RFC-005 slice 2 retrofit: this script used to hardcode the podman
+# invocation and skip scripts/lib/milpa-preflight.sh entirely (both
+# named as traps in the RFC) -- it now follows scripts/test.sh's own
+# split exactly: SELLO_IN_CONTAINER=1 runs the extracted-fence checks
+# directly (CI already IS the pinned image, so there is no podman layer
+# left to add and no host-side milpa state to preflight), and the
+# host/local path gains the milpa-lock preflight scripts/test.sh already
+# had and this script did not.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -53,8 +66,6 @@ if [[ ! -f "$outdir/manifest.txt" ]]; then
   exit 1
 fi
 
-img=ghcr.io/coreyleavitt/nim:2.2.10
-
 cmd="set -e"
 while read -r num disposition fname; do
   if [[ "$disposition" == "SKIP" ]]; then
@@ -65,12 +76,27 @@ while read -r num disposition fname; do
   fi
 done < "$outdir/manifest.txt"
 
-podman run --rm \
-  -v "$PWD:/workspace" \
-  -v "$HOME/.cache/milpa:/.cache/milpa" \
-  -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
-  -w /workspace \
-  "$img" \
+if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
+  # Already inside the pinned toolchain image (CI) -- run directly, no
+  # podman wrapper, no host milpa-lock preflight (same split as
+  # scripts/test.sh; see this script's header comment).
   bash -c "$cmd"
+else
+  # Lockfile-conformance preflight (RFC-001 ledger finding 30), same as
+  # scripts/test.sh -- host-only, since _deps/milpa.lock are host-side
+  # state meaningless to check from inside the container this preflight
+  # gates entry to.
+  source "$(dirname "$0")/lib/milpa-preflight.sh"
+  milpa_preflight
+
+  img=ghcr.io/coreyleavitt/nim:2.2.10
+  podman run --rm \
+    -v "$PWD:/workspace" \
+    -v "$HOME/.cache/milpa:/.cache/milpa" \
+    -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+    -w /workspace \
+    "$img" \
+    bash -c "$cmd"
+fi
 
 echo "check-readme.sh: all README.md \`\`\`nim fences compile."

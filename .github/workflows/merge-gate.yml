@@ -1,8 +1,9 @@
 name: merge-gate
 
-# RFC-005 slice 1: minimal CI build path. One job today
-# (unit-linux-amd64-gcc); later slices widen this workflow, never fork a
-# second one for required checks (Part B, "The build-path invariant").
+# RFC-005 slice 1: minimal CI build path (unit-linux-amd64-gcc). Slice 2
+# adds property-linux-amd64-gcc (milpa-in-CI) and check-readme; later
+# slices keep widening this one workflow, never forking a second one for
+# required checks (Part B, "The build-path invariant").
 #
 # Trigger: every push on every branch except the orphan `evidence` branch
 # (RFC-005 Part B — evidence publications have no source tree and would
@@ -52,3 +53,39 @@ jobs:
       # mode (SELLO_IN_CONTAINER=1 -- we are already inside the pinned
       # image, so test.sh skips its own podman wrapper and host preflight).
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+
+  # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
+  # proptest dependency, which only milpa can fetch -- this job builds
+  # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the
+  # same pinned image, fetches proptest under `--locked` (asserts the
+  # fetch matches the committed milpa.lock -- identity + provenance, the
+  # replacement for `milpa verify`, which milpa 0.0.1 cannot run against a
+  # non-default feature selection), and asserts the proptest SKIPPED
+  # banner is ABSENT from the run log (a silent skip here must be a red
+  # check, not a quietly weaker suite -- RFC-005 Part B). See
+  # scripts/ci-property.sh's own header comment for the full mechanics.
+  property-linux-amd64-gcc:
+    name: property-linux-amd64-gcc
+    runs-on: ubuntu-latest
+    # Same digest pin as unit-linux-amd64-gcc above -- one image, one pin
+    # comment to keep current (slice 7 consolidates image pins into a
+    # committed pin file).
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-property.sh
+
+  # RFC-005 slice 2: check-readme.sh retrofitted with the same
+  # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
+  # podman and skip the host milpa preflight -- see that script's header
+  # comment). README fences only exercise `import sello`, so this job
+  # needs ci-setup.sh's zero-dependency nim.cfg, not milpa.
+  check-readme:
+    name: check-readme
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/check-readme.sh

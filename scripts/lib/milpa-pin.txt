@@ -1,0 +1,31 @@
+# scripts/lib/milpa-pin.txt — RFC-005 slice 2: the commit sello's CI
+# builds milpa FROM, inside the digest-pinned Nim toolchain image.
+#
+# milpa publishes no release artifact (source-only, two implementations --
+# see the repo's own README): the CI install mechanics settled on for this
+# slice are the Python reference implementation via `pip install` from the
+# git subdirectory, mirroring the README's own documented `uv tool install`
+# route but without depending on `uv` being present in the pinned Nim
+# image (it is not; the image ships python3 + venv only -- verified
+# empirically against ghcr.io/coreyleavitt/nim:2.2.10). scripts/lib/
+# milpa-install.sh reads this file's SHA and runs:
+#
+#   python3 -m venv <dir>
+#   <dir>/bin/pip install "git+https://github.com/coreyleavitt/milpa.git@<sha>#subdirectory=impls/python"
+#
+# landing an isolated `milpa` entrypoint at <dir>/bin/milpa with no effect
+# on the container's system Python. Verified working end-to-end against
+# this exact pin inside the pinned image before this file was committed.
+#
+# Repin ritual: update the SHA below, verify `milpa-install.sh` still
+# lands a working `milpa --version` inside the pinned image, verify
+# `milpa fetch --features proptest --locked` still resolves against the
+# committed milpa.lock, commit both files together. RFC-005 A6 records a
+# future `milpa@HEAD` nightly canary leg that will watch for the resolver
+# drifting ahead of this pin; no such leg exists yet as of this slice.
+#
+# One line, no trailing whitespace: the commit SHA alone, so both bash
+# (`$(head -n1 …)`-free `grep -v '^#' | head -1`) and a future YAML/Python
+# reader can take it as a bare value with no parsing beyond comment
+# stripping.
+6efed43311e415a0ea3b5a2867a2d40581e69e15
