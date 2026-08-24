@@ -189,6 +189,64 @@ jobs:
       - run: scripts/ci-nim-setup.sh --expect-arch aarch64
       - run: SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 
+  # RFC-005 slice 12: the macOS-arm64 leg. Unit suite ONLY, per Part B's
+  # merge-gate paragraph ("macOS-arm64 ... unit suite (proptest-skip loud
+  # and asserted)") -- there is no property-macos-arm64 sibling: this
+  # runner has no milpa/proptest story of its own (no network-installed
+  # Python venv chain has been built for it, and nothing in the RFC calls
+  # for one), so the property suites are EXPECTED to self-skip loud, not
+  # run for real.
+  #
+  # No `container:` field -- macOS runners have no digest-pinnable
+  # container image at all (unlike linux/arm64, which at least has the
+  # option in principle; slice 7's manifest query never found one here
+  # either since none exists). Same direct-install pattern as the
+  # linux/arm64 legs above: scripts/ci-nim-setup.sh installs a
+  # checksum-pinned Nim toolchain (scripts/lib/nim-pin.txt's
+  # `darwin-arm64` row, from the SAME nim-lang/nightlies release/source
+  # commit as every other pinned row -- that script's own header has the
+  # full provenance writeup) onto the $HOME/.sello-nim/current path
+  # scripts/test.sh already knows to pick up. `--expect-arch arm64`, NOT
+  # `aarch64` -- this is the platform-identity canary (RFC-005 Part B's
+  # matrix-leg rule), and Darwin's `uname -m` reports `arm64`, a
+  # genuinely different string from Linux's `aarch64` for the identical
+  # physical architecture (verified, not assumed: `scripts/ci-nim-setup.sh`
+  # asserts this BEFORE installing anything, so a mismatched runner image
+  # fails loud rather than silently installing the wrong tarball).
+  #
+  # `runs-on: macos-15` -- the current (non-deprecated, as of this slice)
+  # GitHub-hosted Apple-silicon (arm64) macOS runner label; recorded here
+  # explicitly since, unlike the Linux legs, there is no separate image
+  # digest pin to carry the "which exact image" story instead.
+  #
+  # `--cc clang`: macOS ships no real `gcc` (Apple's Xcode Command Line
+  # Tools alias `/usr/bin/gcc` to Apple clang under the hood, which would
+  # make scripts/test.sh's default `gcc`-named toolchain canary pass on a
+  # technicality while printing a `gcc`-named --listCmd line that isn't
+  # upstream GCC at all) -- passing `--cc clang` explicitly makes Nim
+  # invoke, and scripts/lib/toolchain-canary.sh assert, the `clang`
+  # compiler-config section by name, matching this job's own check name
+  # and giving an honest identity match instead of a same-binary
+  # coincidence. scripts/lib/toolchain-canary.sh's slice-12 addition also
+  # echoes the observed `clang --version` line into the job log, so the
+  # actual Apple clang version this run compiled under is on record, per
+  # this leg's own DoD ("pin story = runner label + Nim pin + observed
+  # Apple clang version recorded").
+  #
+  # `--expect-proptest-skip`: this leg's own proptest-skip assertion,
+  # inverted from every property-* job's own (which assert the banner is
+  # ABSENT) -- this leg has no proptest fetch story, so the banner's
+  # PRESENCE is the correct, expected outcome, and its absence (or the
+  # property suites somehow running for real) must go red here
+  # (scripts/test.sh's own header comment has the full mechanism).
+  unit-macos-arm64-clang:
+    name: unit-macos-arm64-clang
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-nim-setup.sh --expect-arch arm64
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
+
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
   # podman and skip the host milpa preflight -- see that script's header

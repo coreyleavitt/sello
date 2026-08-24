@@ -10,6 +10,7 @@
 #         scripts/test.sh -d:release   # extra defines forwarded to each nim c
 #         scripts/test.sh --cc clang   # compile with clang instead of gcc (RFC-005 slice 8)
 #         scripts/test.sh --sanitize asan-ubsan   # ASan/UBSan build of the unit suite (RFC-005 slice 9)
+#         scripts/test.sh --expect-proptest-skip   # assert the proptest SKIPPED banner appears (RFC-005 slice 12)
 #         scripts/test.sh --cc clang -d:release   # leading flags compose with defines
 #         scripts/test.sh --sanitize asan-ubsan --cc clang   # leading flags compose with each other too
 #
@@ -68,13 +69,33 @@
 # weakening: AddressSanitizer's and UndefinedBehaviorSanitizer's own
 # (non-leak) checks are unaffected and stay fully active.
 #
-# Both flags are parsed by a small leading-argument loop (still not a
-# general getopts parser -- this script has exactly two optional flags,
-# each taking one value, and every other argument stays an opaque
-# pass-through define as before), so either flag, in either order, may
-# lead the argument list; the loop stops at the first argument that isn't
-# `--cc`/`--sanitize`, and everything from there on is forwarded verbatim
-# as a define. The FIRST unit test file's compile is additionally run
+# --expect-proptest-skip (RFC-005 slice 12, the macOS-arm64 leg): a
+# boolean (no value) leading flag asserting the proptest SKIPPED banner
+# (see the "Additional prerequisite" paragraph below) DOES appear in this
+# run's own output. This is the exact inverse of scripts/ci-property.sh's
+# own assertion (that job asserts the banner is ABSENT, since it exists to
+# run the property suites for real): a hosted leg with no milpa/proptest
+# story of its own (macOS-arm64 today; Windows/MinGW, RFC-005 slice 13)
+# has NO way to populate _deps/proptest, so the skip is the CORRECT,
+# expected outcome there -- and a run where it went silently missing (or
+# where the property suites somehow ran for real, e.g. a future change
+# vendoring proptest into the zero-dep path) should be a red check, not a
+# quietly-different suite. Implemented by tee-ing the run's combined
+# output to a log file and grepping it afterward -- the same mechanism
+# ci-property.sh already uses for its own (inverted) assertion, just
+# inlined here rather than forwarded, since this flag belongs to
+# scripts/test.sh itself (RFC-005 Part B's build-path invariant: one
+# scripts/ invocation per job, no separate wrapper script needed for one
+# grep).
+#
+# All three flags are parsed by a small leading-argument loop (still not a
+# general getopts parser -- this script has exactly three optional
+# leading flags, two taking a value and one boolean, and every other
+# argument stays an opaque pass-through define as before), so any of them,
+# in any order, may lead the argument list; the loop stops at the first
+# argument that isn't `--cc`/`--sanitize`/`--expect-proptest-skip`, and
+# everything from there on is forwarded verbatim as a define. The FIRST
+# unit test file's compile is additionally run
 # through a canary: scripts/lib/toolchain-canary.sh (compiler identity
 # only) when `--sanitize` is unset, or scripts/lib/sanitizer-canary.sh
 # (compiler identity AND sanitizer-flag presence, from the same one
@@ -160,7 +181,8 @@ cc_name="gcc"
 cc_flag=""
 sanitize_name=""
 sanitize_nim_args=""
-while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" ]]; do
+expect_proptest_skip=0
+while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--expect-proptest-skip" ]]; do
   case "$1" in
     --cc)
       if [[ -z "${2:-}" ]]; then
@@ -195,6 +217,10 @@ while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" ]]; do
           ;;
       esac
       shift 2
+      ;;
+    --expect-proptest-skip)
+      expect_proptest_skip=1
+      shift
       ;;
   esac
 done
@@ -256,10 +282,28 @@ for f in "${skipped_property_files[@]}"; do
   cmd+=$'\n'"echo 'SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)'"
 done
 
+# --expect-proptest-skip's own log capture (RFC-005 slice 12) -- see the
+# header comment above. Only allocated when the flag is set, so a plain
+# `scripts/test.sh` run's output still streams straight to the terminal
+# with no `tee` indirection at all (byte-identical to every prior slice's
+# behavior). `set -o pipefail` (part of this script's own `set -euo
+# pipefail`) is what makes `... | tee "$run_log"` still propagate the
+# real command's exit status past the pipe, not `tee`'s own (always-zero)
+# one.
+run_log=""
+if [[ "$expect_proptest_skip" -eq 1 ]]; then
+  run_log="build/test-proptest-skip-check.log"
+  mkdir -p "$(dirname "$run_log")"
+fi
+
 if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   # Already inside the pinned toolchain image (CI) -- run the same
   # commands directly, no podman wrapper, no host milpa-lock preflight.
-  bash -c "$cmd"
+  if [[ -n "$run_log" ]]; then
+    bash -c "$cmd" 2>&1 | tee "$run_log"
+  else
+    bash -c "$cmd"
+  fi
 else
   # Lockfile-conformance preflight (RFC-001 ledger finding 30): fails fast
   # on the host if milpa.lock and _deps/ are genuinely out of sync, before
@@ -271,13 +315,43 @@ else
   source "$(dirname "$0")/lib/milpa-preflight.sh"
   milpa_preflight
 
-  podman run --rm \
-    -v "$PWD:/workspace" \
-    -v "$HOME/.cache/milpa:/.cache/milpa" \
-    -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
-    -w /workspace \
-    "$img" \
-    bash -c "$cmd"
+  if [[ -n "$run_log" ]]; then
+    podman run --rm \
+      -v "$PWD:/workspace" \
+      -v "$HOME/.cache/milpa:/.cache/milpa" \
+      -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+      -w /workspace \
+      "$img" \
+      bash -c "$cmd" 2>&1 | tee "$run_log"
+  else
+    podman run --rm \
+      -v "$PWD:/workspace" \
+      -v "$HOME/.cache/milpa:/.cache/milpa" \
+      -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+      -w /workspace \
+      "$img" \
+      bash -c "$cmd"
+  fi
+fi
+
+# --expect-proptest-skip's own assertion, run only after the suite itself
+# has already succeeded (set -e above would have stopped this script
+# already if it hadn't) -- the exact inverse of scripts/ci-property.sh's
+# "assert the SKIPPED banner is ABSENT" check: this leg has no
+# milpa/proptest story, so the banner's PRESENCE is the expected, correct
+# outcome, and its absence (or the property suites somehow having run for
+# real) is what must go red here.
+if [[ -n "$run_log" ]]; then
+  if grep -q 'SKIPPED (proptest not fetched' "$run_log"; then
+    echo "test.sh: proptest SKIPPED banner present, as required (--expect-proptest-skip)." >&2
+  else
+    echo "" >&2
+    echo "test.sh: FAIL -- --expect-proptest-skip was set but no SKIPPED banner appears in this run's log." >&2
+    echo "test.sh: this leg has no milpa/proptest fetch story of its own, so the property" >&2
+    echo "test.sh: suites are expected to self-skip loudly; either the skip went silent or" >&2
+    echo "test.sh: they ran for real -- investigate, do not silence." >&2
+    exit 1
+  fi
 fi
 
 print_tier_summary "scripts/test.sh"

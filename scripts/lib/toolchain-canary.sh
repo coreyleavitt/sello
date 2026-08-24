@@ -13,6 +13,13 @@
 # passed) since the cost is one already-necessary compile, not a second
 # one -- there was no reason to special-case gcc out of it.
 #
+# RFC-005 slice 12 addition: after the PASS/FAIL verdict, also echoes
+# `<compiler> --version`'s first line -- the macOS-arm64 leg's own DoD
+# needs the observed Apple clang version on record (Apple clang's version
+# string diverges from upstream LLVM clang's), and this is the one place
+# every leg's canary output already funnels through, so recording it here
+# covers every leg uniformly rather than adding a macOS-only step.
+#
 # Mechanism: runs the given `nim c ...` invocation with `--listCmd`
 # (Nim's own "print every command I execute" flag) and `-f`/--forceBuild
 # (so the C-compiler invocation line is guaranteed to be emitted even if
@@ -68,3 +75,19 @@ case "$line" in
     exit 1
     ;;
 esac
+
+# Observed compiler VERSION (RFC-005 slice 12 addition, general to every
+# leg -- not macOS-specific): the checks above prove Nim invoked a binary
+# named '$expect', but the macOS-arm64 leg's own pin story needs the
+# ACTUAL version string on record too, not just the name -- Apple's clang
+# reports a distinct "Apple clang version ..." line (its own version
+# numbering, separate from upstream LLVM's), so a bare "clang" name match
+# alone would not distinguish Apple's clang from upstream LLVM clang the
+# way this project's pin-everything-verify-empirically posture expects.
+# `--version`'s first line is enough to record identity; failure to run it
+# is non-fatal (some compiler wrappers don't support a bare --version) so
+# it never turns an otherwise-passing canary red.
+if command -v "$expect" >/dev/null 2>&1; then
+  version_line="$("$expect" --version 2>&1 | head -n1 || true)"
+  echo "toolchain canary: observed '$expect --version' (first line): ${version_line:-<no output>}"
+fi

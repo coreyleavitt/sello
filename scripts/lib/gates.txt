@@ -105,6 +105,18 @@
 # still runs unconditionally underneath, so this leg additionally proves
 # gcc was really invoked, for free, exactly like every other leg.
 #
+# RFC-005 slice 12 (macOS-arm64 leg): unit suite only, no property
+# sibling (see merge-gate.yml's own job comment for the full rationale --
+# this runner has no milpa/proptest fetch story). Same
+# SELLO_IN_CONTAINER=1-hardcoded register as the linux/arm64 legs above
+# (no container to dual-mode against on macOS either) plus two additions
+# specific to this leg: `--expect-arch arm64` (NOT `aarch64` -- Darwin's
+# `uname -m` spelling differs from Linux's for the identical physical
+# architecture) and scripts/test.sh's own `--expect-proptest-skip` flag
+# (the inverse of every property-* row's implicit "banner absent"
+# expectation: this leg has no proptest fetch story, so the banner's
+# PRESENCE is the correct, asserted outcome).
+#
 # check-name                        script-invocation
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
@@ -113,6 +125,7 @@ unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch6
 property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
+unit-macos-arm64-clang              scripts/ci-nim-setup.sh --expect-arch arm64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
 check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh

@@ -14,6 +14,15 @@
 # (scripts/lib/nim-pin.txt's platform-key lookup) rather than hardcoding
 # linux/arm64, even though this slice only wires and exercises one row.
 #
+# RFC-005 slice 12 (macOS-arm64) extends this table with a `darwin-arm64`
+# row and, per its own DoD's real-macOS portability audit, fixes two
+# GNU-coreutils-isms this script's slice-11 body carried that macOS's BSD
+# userland does not ship: `sha256sum` (macOS has `shasum -a 256` instead,
+# resolved via a small `sha256()` shell function below) and `ln -sfn`
+# (GNU-only `-n` flag spelling; replaced with a portable `rm -f` + plain
+# `ln -s`). Neither changes behavior on Linux -- `sha256sum` is still
+# preferred first, and the symlink's end state is identical either way.
+#
 # Source + pin story: scripts/lib/nim-pin.txt's own header has the full
 # provenance writeup (nim-lang/nightlies, the official Nim project's own
 # release repo; the row this slice uses is built from the EXACT same
@@ -88,6 +97,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Portable SHA-256 (RFC-005 slice 12 portability finding): `sha256sum` is a
+# GNU-coreutils-ism -- absent by default on macOS (BSD userland ships
+# `shasum -a 256` instead, a bundled Perl script, and has no `sha256sum`
+# binary on PATH). Resolved once, here, rather than at each call site, so
+# the checksum-verification logic below stays a single `sha256 <file>`
+# call regardless of which tool the host actually has.
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256() { sha256sum "$1" | awk '{print $1}'; }
+elif command -v shasum >/dev/null 2>&1; then
+  sha256() { shasum -a 256 "$1" | awk '{print $1}'; }
+else
+  echo "ci-nim-setup: no SHA-256 tool found on PATH (need 'sha256sum' or 'shasum') -- cannot verify download integrity, refusing to proceed." >&2
+  exit 1
+fi
+
 if [[ "${1:-}" != "--expect-arch" || -z "${2:-}" ]]; then
   echo "scripts/ci-nim-setup.sh: usage: scripts/ci-nim-setup.sh --expect-arch <name>" >&2
   echo "  e.g. scripts/ci-nim-setup.sh --expect-arch aarch64" >&2
@@ -136,7 +160,7 @@ else
   echo "ci-nim-setup: downloading $url"
   curl -sSfL -o "$tmp_tarball" "$url"
 
-  actual_sha="$(sha256sum "$tmp_tarball" | awk '{print $1}')"
+  actual_sha="$(sha256 "$tmp_tarball")"
   if [[ "$actual_sha" != "$expected_sha" ]]; then
     echo "ci-nim-setup: CHECKSUM MISMATCH for $asset_name -- expected $expected_sha, got $actual_sha. Refusing to install an unverified toolchain (treat as a supply-chain event, not a flake)." >&2
     exit 1
@@ -158,7 +182,15 @@ else
   echo "$expected_marker" > "$marker"
 fi
 
-ln -sfn "$install_dir" "$install_root/current"
+# rm-then-ln (RFC-005 slice 12 portability finding), not `ln -sfn`: GNU
+# ln's `-n`/`--no-dereference` flag has no confirmed-portable BSD ln
+# equivalent (BSD ln's own "don't follow an existing symlink" flag is
+# spelled `-h`, not `-n` -- a genuine, not merely cosmetic, flag-spelling
+# divergence between the two `ln` implementations). Removing the old
+# symlink first and creating a plain new one sidesteps the whole question
+# and works identically under GNU coreutils, BSD/macOS, and Git Bash.
+rm -f "$install_root/current"
+ln -s "$install_dir" "$install_root/current"
 
 echo "ci-nim-setup: resolved toolchain version (proof the extracted binary actually runs, not just that a checksum matched):"
 "$install_root/current/bin/nim" --version

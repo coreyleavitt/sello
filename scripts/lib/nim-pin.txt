@@ -57,14 +57,18 @@
 # line (whole-line only); blank lines ignored -- same convention as
 # gates.txt/milpa-pin.txt/image-pins.txt.
 #
-# Only the row this slice's own jobs actually exercise is recorded below
+# Only the rows each slice's own jobs actually exercise are recorded below
 # (RFC-005's standing "no dormant substrate" discipline -- a table row
 # with no consumer is exactly the deferral-relabeled-as-scaffolding this
-# project's own review process rejects). A verified macosx_arm64 asset +
-# checksum for this identical release/commit was also found during this
-# slice's research and is recorded for slice 12's convenience in that
-# slice's own handoff entry, NOT added as a row here, since nothing in
-# this slice reads or exercises it.
+# project's own review process rejects).
 #
-# platform-key      release-tag                                                       asset-name                      sha256
-linux-aarch64        2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_arm64.tar.xz   cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a
+# RFC-005 slice 12 (macOS-arm64) adds the `darwin-arm64` row below, from
+# the SAME nightlies release (identical source commit) slice 11 pinned for
+# linux-aarch64 -- verified independently by slice 12 itself (re-downloaded
+# the live asset and recomputed its SHA-256 via `sha256sum` on 2026-08-24,
+# matching the value slice 11's own research had already found and
+# recorded, byte for byte -- not merely copied forward unverified).
+#
+# platform-key      release-tag                                                       asset-name                          sha256
+linux-aarch64        2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_arm64.tar.xz       cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a
+darwin-arm64         2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-macosx_arm64.tar.xz      9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e
