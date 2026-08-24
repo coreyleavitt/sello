@@ -727,6 +727,18 @@ Phase 4 — nightly, timing, release:
   slice 4's push-ruleset finding, which depends on this).
 - Slice-N DoDs include red-path demos through the real entry point (real
   push, real red check) — budget scratch branches for them.
+- Trap (slice 6): `gh pr close --delete-branch` silently switches the
+  local checkout to `main` as a side effect (it has to, to delete the
+  branch you were on). Under the enforced branch model, a `git commit`
+  issued right after a PR-close/smoke-test sequence with no explicit
+  `git checkout -b` first lands directly on local `main` -- harmless
+  until pushed (the ruleset rejects a direct push to `main` outright),
+  but it's a wasted commit that has to be moved onto a real branch
+  (`git branch <name> <sha>`, `git reset --hard origin/main`,
+  `git checkout <name>`) before it can go through the flow. Caught this
+  session before pushing; the fix cost one avoidable extra branch cycle.
+  Always `git branch --show-current` (or just habitually `checkout -b`)
+  immediately before any commit that follows a PR-close call.
 - Trap (slice 1): this host's /tmp is a small shared tmpfs holding podman's
   default storage and was 100% full — local podman validation needed
   `podman --root <dir-under-/home> --runroot <dir-under-/home>
