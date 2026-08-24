@@ -315,7 +315,7 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw
+      - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'RED-DEMO-NOT-WINDOWS*' --with-mingw
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-proptest-skip
 
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
