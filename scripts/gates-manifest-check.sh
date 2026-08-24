@@ -26,27 +26,15 @@
 # hand-written YAML (RFC-005 Part B: jobs are heterogeneous, and
 # generating YAML means building a templater with no customer), so this
 # is a light grep/awk scan, not a real YAML parser -- a deliberate,
-# named trade-off, not an oversight. To keep that trade-off honest rather
-# than silently wrong on a workflow edit this scan doesn't understand,
-# this script independently collects two things under the top-level
-# `jobs:` key and cross-checks them against EACH OTHER before trusting
-# either:
-#   (a) every job KEY (a 2-space-indented line consisting of nothing but
-#       an identifier and a trailing colon -- YAML's own job-definition
-#       shape).
-#   (b) every job's own `name:` field VALUE (a 4-space-indented `name:`
-#       line -- RFC-005 Part B's "every job carries an explicit name:
-#       equal to its manifest check-name" convention, load-bearing for
-#       ruleset required-check matching since GitHub's ruleset engine
-#       matches check-RUN names, not job keys).
-# If the COUNT of (a) differs from the COUNT of (b), or the SET of (a)
-# differs from the SET of (b), that is a parse surprise -- the light
-# scan's structural assumption (one job key, one same-named `name:` field
-# somewhere in its body) no longer holds, e.g. a job missing its `name:`,
-# a differently-indented job, or a `name:` line appearing inside a step
-# rather than a job -- and this script fails LOUD with both sets printed,
-# rather than silently comparing a partial/wrong set against the
-# manifest and reporting a false pass or a confusing false drift.
+# named trade-off, not an oversight. As of RFC-005 slice 4 the scan itself
+# lives in scripts/lib/workflow-job-names.sh's `extract_workflow_job_names`
+# (factored out so scripts/ruleset-sync-check.sh can reuse the identical
+# extraction instead of a second hand-typed copy -- round-2 finding 25's
+# "one source, multiple consumers" precedent, applied to this scan too).
+# That function's own header comment has the full parse-method writeup
+# (the two independent extractions -- job keys vs. name: values -- cross-
+# checked against each other before either is trusted, failing LOUD on
+# any parse surprise rather than silently comparing a partial/wrong set).
 #
 # Self-reference (by design, not a bug): this script's own CI job,
 # "gates-manifest-sync", must appear in BOTH merge-gate.yml (as a job
@@ -61,6 +49,7 @@ cd "$(dirname "$0")/.."
 
 source "$(dirname "$0")/lib/gates.sh"
 load_gates
+source "$(dirname "$0")/lib/workflow-job-names.sh"
 
 workflow=".github/workflows/merge-gate.yml"
 
@@ -69,59 +58,8 @@ if [[ ! -f "$workflow" ]]; then
   exit 1
 fi
 
-job_keys="$(awk '
-  /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
-  in_jobs && /^[^[:space:]]/ { in_jobs = 0 }
-  in_jobs && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-    line = $0
-    sub(/^  /, "", line)
-    sub(/:[[:space:]]*$/, "", line)
-    print line
-  }
-' "$workflow" | sort)"
-
-name_values="$(awk '
-  /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
-  in_jobs && /^[^[:space:]]/ { in_jobs = 0 }
-  in_jobs && /^    name:[[:space:]]/ {
-    line = $0
-    sub(/^    name:[[:space:]]*/, "", line)
-    print line
-  }
-' "$workflow" | sort)"
-
-job_key_count=$(printf '%s\n' "$job_keys" | grep -c . || true)
-name_value_count=$(printf '%s\n' "$name_values" | grep -c . || true)
-
-if [[ "$job_key_count" -eq 0 ]]; then
-  echo "gates-manifest-check: PARSE SURPRISE -- found zero job keys under 'jobs:' in $workflow. The light awk scan's structural assumptions (a top-level 'jobs:' key, 2-space-indented job keys directly under it) no longer hold for this file -- fix the scan or the file before trusting this check." >&2
-  exit 1
-fi
-
-if [[ "$job_key_count" -ne "$name_value_count" ]]; then
-  {
-    echo "gates-manifest-check: PARSE SURPRISE -- found $job_key_count job key(s) but $name_value_count 'name:' line(s) under 'jobs:' in $workflow."
-    echo "Every job must carry an explicit name: field equal to its job key (RFC-005 Part B) -- this count mismatch means either a job is missing its name:, or the light scan mis-read the file. Refusing to guess which."
-    echo "Job keys found:"
-    printf '  %s\n' "$job_keys"
-    echo "name: values found:"
-    printf '  %s\n' "$name_values"
-  } >&2
-  exit 1
-fi
-
-if [[ "$job_keys" != "$name_values" ]]; then
-  {
-    echo "gates-manifest-check: PARSE SURPRISE -- the job-key set and the name:-value set are not IDENTICAL (every job's own name: must equal its job key)."
-    echo "Job keys:"
-    printf '  %s\n' "$job_keys"
-    echo "name: values:"
-    printf '  %s\n' "$name_values"
-  } >&2
-  exit 1
-fi
-
-workflow_names="$job_keys"
+workflow_names="$(extract_workflow_job_names "$workflow")" || exit 1
+job_key_count=$(printf '%s\n' "$workflow_names" | grep -c . || true)
 manifest_names="$(printf '%s\n' "${gate_check_names[@]}" | sort)"
 
 missing_from_manifest="$(comm -23 <(printf '%s\n' "$workflow_names") <(printf '%s\n' "$manifest_names"))"

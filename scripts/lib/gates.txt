@@ -8,9 +8,11 @@
 #         job) -- asserts this file's check-name column (i) equals
 #         .github/workflows/merge-gate.yml's job name set, in both
 #         directions.
-#   (iii) scripts/ruleset-apply.sh (RFC-005 slice 4, not landed yet) --
-#         will generate the ruleset's required-check array from column
-#         (i) alone.
+#   (iii) scripts/ruleset-apply.sh (RFC-005 slice 4) -- generates the
+#         "main" ruleset's required-check array from column (i) alone,
+#         never hand-written; scripts/ruleset-sync-check.sh (the
+#         "ruleset-sync" CI check, also added in slice 4) generates the
+#         same array the same way on the read/comparison side.
 #
 # This file is DATA, not executable (no shebang, no +x bit -- same
 # convention as scripts/lib/milpa-pin.txt).
@@ -67,3 +69,5 @@ unit-linux-amd64-gcc         scripts/test.sh
 property-linux-amd64-gcc     scripts/ci-property.sh
 check-readme                 scripts/check-readme.sh
 gates-manifest-sync          scripts/gates-manifest-check.sh
+ruleset-sync                 scripts/ruleset-sync-check.sh
+policy-lint                  scripts/policy-lint.sh

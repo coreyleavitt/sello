@@ -1,0 +1,58 @@
+# scripts/lib/waivers.txt -- RFC-005 slice 4: the ruleset-sync waiver
+# register -- the emergency hatch for an infra outage that has taken a
+# required check's LIVE-ruleset entry down (e.g. a runner/toolchain
+# outage that cannot produce a passing check-run for that context at
+# all), never for a genuinely red gate. Without this file, dropping a
+# flaky required check from the live main ruleset to unblock a push would
+# turn scripts/ruleset-sync-check.sh itself red -- the exact deadlock
+# RFC-005 Part B's Rulesets paragraph names and closes ("the hatch no
+# longer deadlocks... the manifest supports a committed waiver entry...
+# legitimate only for infra outage, never for a genuinely red gate").
+#
+# Format: three whitespace-separated columns, column 3 (reason) running to
+# the end of the line -- same convention as scripts/lib/gates.txt's own
+# column 2:
+#
+#   check-name   expiry   reason
+#
+# check-name: must match a scripts/lib/gates.txt check-name exactly.
+#
+# expiry: EITHER an ISO date (YYYY-MM-DD, expires at UTC midnight that
+#   day -- inclusive, so the expiry date itself already counts as
+#   expired) OR a full 40-character git commit SHA (expires once that SHA
+#   is an ancestor of the SHA scripts/ruleset-sync-check.sh is evaluating
+#   -- "this waiver dies the moment the real fix lands," not a calendar
+#   guess). Pick whichever actually bounds the outage: a SHA when the
+#   landing commit that restores the check is already known/in flight; a
+#   date when it isn't.
+#
+# reason: free text, one line, why the check's live-ruleset entry is
+#   missing and why this is an outage, not a red gate being silenced.
+#
+# scripts/ruleset-sync-check.sh (the "ruleset-sync" CI check) is the one
+# consumer: a live main ruleset missing a manifest-required check FAILS
+# unless an ACTIVE (non-expired) waiver entry names it, in which case the
+# check PASSES for that entry but logs the waiver loudly (name, expiry,
+# reason) every run so a waived gap is never silent. An EXPIRED waiver
+# entry does NOT excuse a missing check -- ruleset-sync fails loudly,
+# naming the expired waiver, exactly as if no waiver existed. A waiver for
+# a check that IS present live is inert (logged as a no-op note, not a
+# failure) -- harmless to leave committed briefly while confirming a
+# restored check, but should be deleted once confirmed working.
+#
+# Storage decision, recorded (RFC-005 slice 4): a SEPARATE file from
+# gates.txt, not a gates.txt column extension. A waiver is an exceptional,
+# time-boxed, reviewed statement about the LIVE ruleset's TEMPORARY
+# departure from the manifest -- gates.txt describes what always exists;
+# this file describes a named, expiring exception to that being enforced
+# live right now. Keeping them separate also means a diff to this file is
+# unambiguously "someone is invoking or retiring the emergency hatch,"
+# never folded into an ordinary gate-adding/renaming diff, and a reviewer
+# scanning `git log -p -- scripts/lib/waivers.txt` sees the repo's entire
+# outage history in one place.
+#
+# Comments start with `#` as the first non-whitespace character of the
+# line (whole-line only). Blank lines ignored. Not executable (data file,
+# no +x bit -- same convention as gates.txt/milpa-pin.txt/image-pins.txt).
+#
+# check-name                expiry            reason

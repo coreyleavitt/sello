@@ -105,3 +105,47 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/gates-manifest-check.sh
+
+  # RFC-005 slice 4: the ruleset-sync drift check -- asserts the full
+  # canonicalized live GitHub ruleset state (.github/rulesets/*.json)
+  # equals what's committed, plus two name-equality legs (main ruleset
+  # required checks vs. scripts/lib/gates.txt, and gates.txt vs. this
+  # workflow's own job names). See scripts/ruleset-sync-check.sh's own
+  # header for the full mechanics, including the waiver register
+  # (scripts/lib/waivers.txt) and why live ruleset reads work
+  # unauthenticated on this public repo (this job still passes
+  # GITHUB_TOKEN for the higher authenticated rate limit, not because
+  # reads require it). `fetch-depth: 0` (full history, not the default
+  # shallow clone) so a SHA-form waiver expiry can be checked via local
+  # `git merge-base --is-ancestor` against this small repo's full history.
+  # Pure text/API scan, no Nim/podman/milpa needed -- plain runner, same
+  # rationale as gates-manifest-sync above. Still exactly one scripts/
+  # invocation.
+  ruleset-sync:
+    name: ruleset-sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - run: scripts/ruleset-sync-check.sh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # RFC-005 slice 4: the policy-lint check -- actionlint (self-fetched
+  # and checksum-verified inside the script, pinned version -- see
+  # scripts/policy-lint.sh's own header for why it isn't a Marketplace
+  # action) plus four content assertions over every
+  # .github/workflows/*.yml: every `uses:` SHA-pinned, no
+  # continue-on-error on any (required) job, a top-level permissions:
+  # block present, and container: image digests matching
+  # scripts/lib/image-pins.txt. Pure text scan plus one network fetch
+  # (the actionlint binary) -- plain runner, same rationale as
+  # gates-manifest-sync/ruleset-sync above. Still exactly one scripts/
+  # invocation.
+  policy-lint:
+    name: policy-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/policy-lint.sh

@@ -1,0 +1,27 @@
+{
+  "_status": "NOT APPLIED -- residual recorded, not faked. See header note below (this is the one JSON file under .github/rulesets/ that is NOT a functional key of this repo's schema, since GitHub's ruleset API rejects both fields it needs; kept as an inert historical record of the intended design, matching this codebase's own -d:selloBmcFullUnroll precedent for a preserved-but-superseded artifact).",
+  "_empirical_findings": [
+    "POST /repos/coreyleavitt/sello/rulesets with target=\"push\" -> 422 Validation Failed: \"Source public repos cannot have push rules\", \"Source only org-owned repos can have push rules\" -- push-target rulesets require an org-owned repository; coreyleavitt/sello is a personal-account repo (owner.type == \"User\"), so this is unavailable regardless of the repo's public/private visibility.",
+    "POST with a file_path_restriction rule on a target=\"branch\" ruleset (isolated from the push-target question, tested independently) -> 422 Validation Failed: \"Invalid rule 'file_path_restriction': \" -- this rule type itself is plan-gated (GitHub's docs bundle file-path/extension/size restrictions under Enterprise-only \"metadata restrictions\"), independent of target type.",
+    "Both findings verified live against disposable probe rulesets (created with enforcement=\"disabled\", confirmed to fail for the stated reasons, then deleted) on 2026-08-24, not assumed from documentation alone -- GitHub's plan-gating docs for file-path rules do not explicitly state Enterprise-only in as many words, so the live 422 is the actual evidence, not a secondary citation."
+  ],
+  "_compensating_control": "RFC-005 Part B's Rulesets paragraph names policy-lint as the fallback for exactly this case (\"plus the policy-lint check above for content drift below that threshold\"): scripts/policy-lint.sh asserts every .github/workflows/*.yml `uses:` is SHA-pinned, no continue-on-error on required jobs, a permissions: block is present, and container: digests match scripts/lib/image-pins.txt -- catching workflow-content drift by CONTENT inspection on every push, in lieu of a push-time path-restriction gate GitHub does not offer on this repo's plan/ownership tier.",
+  "_revisit_when": "Either (a) the repo migrates to an org-owned account (a considered-and-declined move recorded in RFC-005's own timing-tier paragraph for a different reason -- true workflow-scoping -- the same trade-off applies here), or (b) GitHub extends push rulesets / file_path_restriction to personal-account public repos. Neither is scheduled; this file is not wired into scripts/ruleset-apply.sh or scripts/ruleset-sync-check.sh (both glob only .github/rulesets/*.json at the top level, which this subdirectory placement deliberately excludes from).",
+  "name": "workflow-and-policy-paths",
+  "target": "push",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {},
+  "rules": [
+    {
+      "type": "file_path_restriction",
+      "parameters": {
+        "restricted_file_paths": [
+          ".github/workflows/**",
+          ".github/rulesets/**",
+          "scripts/lib/gates.txt"
+        ]
+      }
+    }
+  ]
+}
