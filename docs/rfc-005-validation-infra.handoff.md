@@ -362,10 +362,16 @@ Phase 0 — bootstrap (private repo):
       - **Re-run-green-under-public-conditions**: every `merge-gate` run
         on `main` since the visibility flip earlier today (2026-08-24)
         has run under public/anonymous-fork conditions by construction
-        (the repo has been public since before any of them started).
-        This slice's own branch-then-fast-forward run pair (run ids
-        below, once landed) is cited as the concrete verification rather
-        than re-running anything for its own sake; the most recent
+        (the repo has been public since before any of them started). This
+        slice's own branch run (`32722396766`, branch `rfc-005-slice5`,
+        SHA `f4de89d`, all six jobs green, `property-linux-amd64-gcc`
+        completed in 8m52s) and the post-fast-forward run on `main`
+        (`32723188647`, same SHA `f4de89d`, `status: completed`,
+        `conclusion: success`) are cited as the concrete verification --
+        the fast-forward itself succeeded before the main-ref run even
+        finished, confirming live the slice-4 finding that the ruleset
+        engine accepts check-runs already reported against the arriving
+        SHA rather than blocking on a fresh main-ref run. The most recent
         pre-existing green main run under public conditions before this
         slice started was `32720085738` (push, `c6f6246`, 2026-08-24
         11:05:45Z).
@@ -374,9 +380,14 @@ Phase 0 — bootstrap (private repo):
         to demonstrate, and slice 4's enforced-rejection-of-a-direct-push
         evidence already covers the branch model this slice's own commits
         flow through. Not re-demoed here.
-      - Branch `rfc-005-slice5` green run: `<RUN_ID_PENDING>`; fast-forward
-        to `main`: `<MAIN_RUN_ID_PENDING>`. (Filled in below once the push
-      lands -- see the closing paragraph of this entry.)
+      - Commits: `a341f40` (code: CONTRIBUTING/README/SECURITY/CLAUDE.md),
+        `f4de89d` (handoff-doc update recording the above). Branch
+        `rfc-005-slice5` green run: `32722396766`. Fast-forward to `main`
+        (`c6f6246..f4de89d`): main run `32723188647`, green. A small
+        follow-up commit landed the exact run ids above into this file
+        (matching slice 4's own precedent of a final record-keeping
+        commit whose own CI run isn't further self-cited); branch deleted
+        after landing (locally and on `origin`).
 - [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo).
       Note: the fork-PR approval POLICY was live-verified as part of
       slice 5 above (`all_external_contributors`, via the corrected
