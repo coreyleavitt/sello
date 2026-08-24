@@ -6,7 +6,10 @@
   to `main` directly. Slice 4 (DONE 2026-08-24) established the branch
   model and turned on enforcement -- as of slice 4's own close-out commit,
   `main` rejects direct pushes; slices 5+ land on `rfc-*` branches, green
-  CI, then `git push origin <branch>:main` to fast-forward.
+  CI, then `git push origin <branch>:main` to fast-forward. Slice 5 (DONE
+  2026-08-24) closed out the remaining go-public deliverables (see the
+  Slices list and Open forks below). Next up: slice 6 (contribution
+  lane).
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -289,9 +292,97 @@ Phase 0 — bootstrap (private repo):
       target, enforcement, bypass_actors, conditions, rules) every time --
       there is no partial-field PATCH-style update for rulesets (`PATCH`
       itself 404s outright, per the finding above).
-- [ ] 5. Go public (history scan, SECURITY.md, approval-for-all flip, CONTRIBUTING, minimal README section)
-- [ ] 5. Go public (history scan, SECURITY.md, approval-for-all flip, CONTRIBUTING, minimal README section)
-- [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo)
+- [x] 5. Go public -- DONE 2026-08-24. Pre/post-flip safety items (history
+      scan, private vulnerability reporting, SECURITY.md intake rewrite,
+      fork-PR approval-for-all flip) were already recorded under
+      "Resolved forks" from the earlier front-run flip. This entry closes
+      the remaining deliverables. Code `a341f40` (branch
+      `rfc-005-slice5`), handoff/CLAUDE.md doc commit `<this commit>`:
+      - **`CONTRIBUTING.md`** (new): validation-bar pointer (back to
+        CLAUDE.md's own section + `docs/`), local gate instructions
+        (`scripts/merge-gate.sh`, `milpa fetch`), the branch model stated
+        honestly for contributors (fast-forward-only `main` is the
+        maintainer's own flow), the fork-PR CI current state disclosed
+        honestly (approval policy is live repo-wide today, but the
+        `pull_request`-triggered workflow itself does not exist yet --
+        that is slice 6, not this one), crypto-contribution expectations
+        (tests+vectors, CT discipline, full affected-gate battery for
+        secret-path changes), and commit-message conventions.
+      - **README `## Validation` section** (minimal, per the RFC's
+        gap-closing rule): prose pointing at `docs/ct-results.md`,
+        `docs/mutation-results.md`, and `docs/rfc-001-signing.md` through
+        `docs/rfc-006-sha512.md`, plus the `merge-gate` badge (added under
+        the title) pinned `?branch=main`. Verified zero job-name claims
+        and exactly one badge in the section by direct re-read after
+        writing it -- the hand-curated claim table and its drift check
+        are explicitly deferred to slice 31, not built here.
+      - **SECURITY.md "Trust root / security posture" section** (new):
+        states everything upstream of the ruleset resolves to the owner
+        account (`coreyleavitt`, a personal `User`, not an org), split
+        into independently-API-verified facts and owner-attested facts.
+        Verified live before writing: `gh api repos/coreyleavitt/sello`
+        -> `visibility: "public"`, `owner.type: "User"`; `gh api
+        repos/coreyleavitt/sello/actions/runners` -> `total_count: 0`
+        (zero self-hosted runners registered -- there is no
+        runner-registration credential to custody yet, contrary to the
+        RFC's implicit assumption that this line always applies; noted
+        honestly rather than writing a custody claim with nothing behind
+        it). `gh api user`'s `two_factor_authentication` field returns
+        `null` unconditionally (GitHub's API no longer exposes this for
+        privacy reasons, confirmed by the field being present-but-null
+        rather than absent) -- hardware-key 2FA, ghcr PAT scope/custody,
+        and other-credential-custody are therefore recorded as
+        owner-attested, not fabricated; see "Open forks" below for the
+        confirmation request filed against them.
+      - **ghcr anonymous-pull re-verification**: lighter-weight
+        token+manifest proof (no image pull, avoiding this host's /tmp
+        podman trap entirely) --
+        `curl -sf https://ghcr.io/token?scope=repository:coreyleavitt/nim:pull`
+        (no `Authorization` header sent, i.e. a logged-out/anonymous
+        request) returned a bearer token; that token against
+        `GET https://ghcr.io/v2/coreyleavitt/nim/manifests/2.2.10`
+        returned `HTTP/2 200` (`docker-content-digest:
+        sha256:dfc376d37354901b68d31960657d71eef9fdd5f15b2e8d9acd492d999693935a`,
+        an OCI image index); the same token against the exact pinned
+        digest from `scripts/lib/image-pins.txt`
+        (`GET .../manifests/sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780`)
+        also returned `HTTP/2 200` with a matching
+        `docker-content-digest`. Both requests carried no credential of
+        any kind -- anonymous pull by tag and by the exact CI-pinned
+        digest both confirmed.
+      - **Fork-PR approval-for-all readback**: the RFC-suggested
+        `.../actions/permissions/fork-pr-workflows` endpoint 404s (wrong
+        endpoint name); the correct one, found via docs lookup and
+        confirmed live, is `GET
+        repos/coreyleavitt/sello/actions/permissions/fork-pr-contributor-approval`
+        -> `{"approval_policy": "all_external_contributors"}` -- reads
+        back exactly as the earlier flip recorded. The end-to-end
+        held-for-approval demo (an actual fork PR run pausing for
+        approval) stays slice 6's DoD, not re-demonstrated here.
+      - **Re-run-green-under-public-conditions**: every `merge-gate` run
+        on `main` since the visibility flip earlier today (2026-08-24)
+        has run under public/anonymous-fork conditions by construction
+        (the repo has been public since before any of them started).
+        This slice's own branch-then-fast-forward run pair (run ids
+        below, once landed) is cited as the concrete verification rather
+        than re-running anything for its own sake; the most recent
+        pre-existing green main run under public conditions before this
+        slice started was `32720085738` (push, `c6f6246`, 2026-08-24
+        11:05:45Z).
+      - **No red demo** (stated explicitly per the DoD): this slice is
+        docs/verification, not a new gate -- there is no natural red path
+        to demonstrate, and slice 4's enforced-rejection-of-a-direct-push
+        evidence already covers the branch model this slice's own commits
+        flow through. Not re-demoed here.
+      - Branch `rfc-005-slice5` green run: `<RUN_ID_PENDING>`; fast-forward
+        to `main`: `<MAIN_RUN_ID_PENDING>`. (Filled in below once the push
+      lands -- see the closing paragraph of this entry.)
+- [ ] 6. Contribution lane (pull_request cheap subset; fork-PR held-for-approval demo).
+      Note: the fork-PR approval POLICY was live-verified as part of
+      slice 5 above (`all_external_contributors`, via the corrected
+      `fork-pr-contributor-approval` endpoint) -- but the `pull_request`
+      workflow itself and its held-for-approval end-to-end demo remain
+      entirely unstarted; slice 5 does not advance this slice.
 
 Phase 1 — matrix (7 first, then 8–13 independent):
 - [ ] 7. Image consolidation (sello-dev to ghcr by digest; package enumeration; arm64 manifest check)
@@ -328,7 +419,21 @@ Phase 4 — nightly, timing, release:
 - [ ] 32. Registry + close-out audit
 
 ## Open forks (awaiting Corey)
-- (none)
+- **Trust-root owner-attestation confirmation (filed 2026-08-24, slice
+  5).** `SECURITY.md`'s new "Trust root / security posture" section
+  records three items as owner-attested because they cannot be checked
+  from an API session (GitHub's `two_factor_authentication` API field is
+  unconditionally `null` for privacy reasons, and there's no endpoint
+  enumerating PAT scopes or custody practices): (1) the `coreyleavitt`
+  account's GitHub sign-in uses hardware-key 2FA; (2) the personal access
+  token(s) used to push to `ghcr.io/coreyleavitt/*` are scoped minimally
+  (package-write only, not a broad/classic token) and are periodically
+  reviewed/rotated; (3) no other long-lived credential with write access
+  to this repository/its packages/its Actions configuration exists
+  outside the owner's own custody. Please confirm or correct these three
+  in `SECURITY.md` directly (or reply here for the next session to make
+  the edit) — not a blocker for this slice's own close-out, per the RFC's
+  escalation rule for owner-attested items.
 
 ## Resolved forks
 - **GitHub Actions billing gate (2026-08-24):** resolved by Corey's
@@ -338,11 +443,13 @@ Phase 4 — nightly, timing, release:
   Nim identifiers containing "Secret" + the published RFC 8032 TEST-1024
   vector), private vulnerability reporting enabled, fork-PR approval
   policy set to all_external_contributors, SECURITY.md intake rewritten.
-  NOTE: this front-runs slice 5 out of RFC order (rulesets in slice 4 do
-  not exist yet — checks are advisory-only while public). Remaining
-  slice-5 items still due in order: CONTRIBUTING, README validation
-  section, trust-root paragraph, ghcr anonymous-pull verification,
-  re-run-green-under-public-conditions.
+  NOTE: this front-ran slice 5 out of RFC order (rulesets in slice 4 did
+  not exist yet at flip time — checks were advisory-only while public,
+  until slice 4 turned enforcement on). The remaining slice-5 items
+  (CONTRIBUTING, README validation section, trust-root paragraph, ghcr
+  anonymous-pull verification, re-run-green-under-public-conditions) are
+  now DONE — see the slice 5 entry in the Slices list above for the full
+  record.
 
 ## Key decisions (this session)
 - 2026-08-24: stage 3 opened; RFC status → ACCEPTED. Stage-2 amendments
@@ -383,6 +490,16 @@ Phase 4 — nightly, timing, release:
   `PATCH .../rulesets/{id}` 404s outright (undocumented); `PUT` is the
   real update verb -- discovered by testing before the script was
   written, not from GitHub's docs.
+- 2026-08-24: slice 5 done end-to-end -- CONTRIBUTING.md, README
+  Validation section + badge, SECURITY.md trust-root section. Resolved
+  in-slice (not escalated as a fork): the RFC's suggested
+  `.../actions/permissions/fork-pr-workflows` endpoint name is wrong
+  (404s) -- the real endpoint is
+  `.../actions/permissions/fork-pr-contributor-approval`, found via a
+  docs lookup and confirmed live before writing anything that depended on
+  it. Owner-attested trust-root items (hardware-key 2FA, ghcr PAT
+  scope/custody) filed as an open fork per the escalation rule, not
+  treated as a blocker.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
