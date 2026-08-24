@@ -1,0 +1,54 @@
+name: merge-gate
+
+# RFC-005 slice 1: minimal CI build path. One job today
+# (unit-linux-amd64-gcc); later slices widen this workflow, never fork a
+# second one for required checks (Part B, "The build-path invariant").
+#
+# Trigger: every push on every branch except the orphan `evidence` branch
+# (RFC-005 Part B — evidence publications have no source tree and would
+# burn a guaranteed-red battery). No path filters: required checks are
+# unconditional (a filtered-out required check never reports and blocks
+# the push).
+on:
+  push:
+    branches-ignore:
+      - evidence
+
+# Workflow-level least-privilege permissions (RFC-005 Part B, "CI supply
+# chain"): this workflow only needs to read the repository.
+permissions:
+  contents: read
+
+# Per-branch concurrency, cancel superseded runs -- only the branch head
+# ever needs to go green in the fast-forward merge model (RFC-005 Part B).
+concurrency:
+  group: merge-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Check name is a stable public interface (RFC-005 Part B) -- do not
+  # rename without the documented two-step (add new, retire old, manifest
+  # + ruleset regenerated in the same commit pair, once the gates manifest
+  # exists).
+  unit-linux-amd64-gcc:
+    name: unit-linux-amd64-gcc
+    runs-on: ubuntu-latest
+    # Pinned by digest, not tag (RFC-005 Part B: a mutable tag is "trust
+    # our transcripts" one layer down). Resolved from tag `2.2.10` via
+    # `podman image inspect ghcr.io/coreyleavitt/nim:2.2.10 --format
+    # '{{.Digest}}'` on 2026-08-24. Re-pin (new digest comment + this
+    # comment's date) whenever the tag moves; slice 7 consolidates image
+    # pins into a committed pin file.
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      # actions/checkout v5, pinned by full commit SHA (RFC-005 Part B:
+      # every third-party action pinned by commit SHA). Resolved via
+      # `gh api repos/actions/checkout/git/ref/tags/v5` on 2026-08-24.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      # Exactly one scripts/ invocation (RFC-005 Part B, "build-path
+      # invariant"): ci-setup.sh writes the zero-dependency nim.cfg (no
+      # milpa needed for the core suite), then test.sh runs in-container
+      # mode (SELLO_IN_CONTAINER=1 -- we are already inside the pinned
+      # image, so test.sh skips its own podman wrapper and host preflight).
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh

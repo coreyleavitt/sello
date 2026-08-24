@@ -18,6 +18,31 @@
 # proptest's scripts/ convention -- keeps this script network-free and lets
 # `--frozen` verification stay an explicit, separate step (`milpa verify`).
 #
+# SELLO_IN_CONTAINER=1 (RFC-005 slice 1): CI already runs this script
+# inside the pinned toolchain image (the workflow's own `container:`), so
+# there is no podman wrapper left to invoke and no HOST-side milpa state
+# to preflight-check -- lib/milpa-preflight.sh's own header is explicit
+# that `_deps/`/`milpa.lock` are host-side state the podman mount merely
+# exposes; a container job either runs against a bare zero-dep nim.cfg
+# (scripts/ci-setup.sh) or its own subsequently-fetched _deps/, and
+# either way there is no host to check. One code path, two entrypoints:
+# the `cmd` string built below is the single source of "what the suite
+# run actually does," normally handed to `podman run ... bash -c "$cmd"`;
+# under SELLO_IN_CONTAINER=1 it is instead handed to a plain local
+# `bash -c "$cmd"`, skipping the podman/milpa-preflight branch entirely.
+#
+# OS-portability audit (part of this mode's own DoD, since the
+# in-container branch is what the future macOS/Windows-Git-Bash CI jobs
+# will run natively): the `cmd` string below is built entirely from
+# forward-slash relative paths (`tests/unit/test_*.nim`, accepted as-is by
+# Nim on Windows), plain `nim c`/`echo`/`set -e` lines with no shell
+# builtin or flag specific to a Linux userland, and is executed via a bare
+# `bash -c` relying on PATH resolution -- no `/bin/bash` hardcoding, no
+# `/proc`, no GNU-coreutils-only flags. `cd "$(dirname "$0")/.."` and the
+# `source`s above it use only `dirname`/`cd`, both present in Git Bash.
+# Nothing in this branch shells out to a Linux-only tool (no `apt`, no
+# `/dev/...` path, no `ldconfig`). Conclusion: clean, no Linux-isms found.
+#
 # Additional prerequisite for the property-based tests (test_properties_*,
 # RFC-001 finding 10): proptest is an OPTIONAL milpa dep (milpa.kdl:
 # `optional=#true`, auto-gated behind a same-named "proptest" feature flag,
@@ -51,13 +76,6 @@ extra_defines=("$@")
 # is what makes that claim true).
 source "$(dirname "$0")/lib/unit-test-files.sh"
 
-# Lockfile-conformance preflight (RFC-001 ledger finding 30): fails fast on
-# the host if milpa.lock and _deps/ are genuinely out of sync, before the
-# podman invocation below ever starts. See scripts/lib/milpa-preflight.sh
-# for exactly what this does and does not treat as fatal.
-source "$(dirname "$0")/lib/milpa-preflight.sh"
-milpa_preflight
-
 # End-of-run validation-tier visibility (round-3 fix batch B, finding B6) --
 # see scripts/lib/tier-summary.sh's own header comment.
 source "$(dirname "$0")/lib/tier-summary.sh"
@@ -79,12 +97,28 @@ for f in "${skipped_property_files[@]}"; do
   cmd+=$'\n'"echo 'SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)'"
 done
 
-podman run --rm \
-  -v "$PWD:/workspace" \
-  -v "$HOME/.cache/milpa:/.cache/milpa" \
-  -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
-  -w /workspace \
-  "$img" \
+if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
+  # Already inside the pinned toolchain image (CI) -- run the same
+  # commands directly, no podman wrapper, no host milpa-lock preflight.
   bash -c "$cmd"
+else
+  # Lockfile-conformance preflight (RFC-001 ledger finding 30): fails fast
+  # on the host if milpa.lock and _deps/ are genuinely out of sync, before
+  # the podman invocation below ever starts. See
+  # scripts/lib/milpa-preflight.sh for exactly what this does and does not
+  # treat as fatal. Host-only: `_deps/`/`milpa.lock` are host-side state,
+  # meaningless to check from inside the container this preflight is
+  # gating entry to.
+  source "$(dirname "$0")/lib/milpa-preflight.sh"
+  milpa_preflight
+
+  podman run --rm \
+    -v "$PWD:/workspace" \
+    -v "$HOME/.cache/milpa:/.cache/milpa" \
+    -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
+    -w /workspace \
+    "$img" \
+    bash -c "$cmd"
+fi
 
 print_tier_summary "scripts/test.sh"
