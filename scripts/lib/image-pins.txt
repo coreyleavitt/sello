@@ -1,29 +1,32 @@
-# scripts/lib/image-pins.txt -- RFC-005 slice 4 (minimal seed; slice 7
-# owns full image-pin consolidation, per that slice's own "Image
-# consolidation" title in the handoff doc). The committed record of
-# container image digests referenced by .github/workflows/*.yml's
-# `image:` fields, checked by scripts/policy-lint.sh's "container:
-# digests match a committed pin file" assertion (RFC-005 Part B's
-# policy-lint paragraph: "container: digests match the committed pin
-# file -- workflow content drift as a red check, not a review hope").
+# scripts/lib/image-pins.txt -- RFC-005 slice 4 (minimal seed) + slice 7
+# (full image-pin consolidation, per that slice's own "Image
+# consolidation" title in the handoff doc). Two independent sections
+# below -- a base-image section (workflow `container:` digests) and a
+# sello-dev section (the (Containerfile-hash, digest) drift pair) -- kept
+# in one file since both are "committed image pin" records checked by
+# scripts/policy-lint.sh, even though their check logic and shape differ.
+#
+# Comments start with `#` as the first non-whitespace character of the
+# line; blank lines ignored. Not executable (data file, no +x bit).
+#
+# === Base-image section =====================================================
+# The committed record of container image digests referenced by
+# .github/workflows/*.yml's `image:` fields, checked by
+# scripts/policy-lint.sh's "container: digests match a committed pin
+# file" assertion (RFC-005 Part B's policy-lint paragraph: "container:
+# digests match the committed pin file -- workflow content drift as a
+# red check, not a review hope").
 #
 # One digest per line, `image@sha256:...` form -- matching the workflow's
 # own `image:` value verbatim, so the check is a straight set-membership
 # comparison with no parsing beyond comment/blank-line stripping (same
-# convention as gates.txt/milpa-pin.txt/waivers.txt). Comments start with
-# `#` as the first non-whitespace character of the line; blank lines
-# ignored. Not executable (data file, no +x bit).
+# convention as gates.txt/milpa-pin.txt/waivers.txt).
 #
-# This file intentionally holds ONLY today's one
-# ghcr.io/coreyleavitt/nim digest -- the workflow's only container: image
-# as of this slice, referenced by all three of unit-linux-amd64-gcc,
+# Today's one ghcr.io/coreyleavitt/nim digest is the workflow's only
+# container: image, referenced by all three of unit-linux-amd64-gcc,
 # property-linux-amd64-gcc, and check-readme (gates-manifest-sync,
 # ruleset-sync, and policy-lint itself run on plain ubuntu-latest with no
-# container: field, and are not covered by this check). Slice 7 is the
-# named owner of widening this beyond a single-image seed (additional
-# platform/arch images) and of collapsing merge-gate.yml's own repeated
-# per-job pin comments into something generated/checked against this file
-# rather than three independently-dated prose comments.
+# container: field, and are not covered by this check).
 #
 # Repin ritual: resolve the new digest (`podman image inspect
 # ghcr.io/coreyleavitt/nim:<tag> --format '{{.Digest}}'`, as each
@@ -33,3 +36,52 @@
 # two.
 
 ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+
+# === sello-dev section (RFC-005 slice 7) ====================================
+# The (Containerfile-hash, digest) drift pair for the `sello-dev` image
+# (Containerfile at the repo root; scripts/test-libsodium.sh,
+# scripts/bmc.sh, and later RFC-005 job wiring pull it by digest via
+# scripts/lib/sello-dev-image.sh). "Rebuild and compare digests" is
+# infeasible (container builds are not reproducible -- RFC-005 Part B, the
+# sello-dev drift model paragraph); instead this line records the pair
+# that was true at the last successful publish, and
+# scripts/policy-lint.sh's sello-dev assertion fails if the CURRENT
+# Containerfile's content hash no longer matches the recorded one -- the
+# checkable proxy for "the Containerfile changed since the image
+# recorded here was built," which is exactly the drift this check exists
+# to catch (a Containerfile edit silently testing against a stale image).
+#
+# Format: three whitespace-separated fields --
+#   `sello-dev <containerfile-sha256sum> <image>@sha256:<digest>`
+# The second field is `sha256sum Containerfile`'s hex digest (the
+# Containerfile as committed, not a build artifact of it). The third
+# field is the published image's own manifest digest, in the same
+# `image@sha256:...` form as the base-image section above --
+# scripts/lib/sello-dev-image.sh's pull-by-digest reads this field
+# directly.
+#
+# Repin ritual: after a Containerfile change, rebuild `sello-dev`, push it
+# to ghcr.io/coreyleavitt/sello-dev by digest (see the image's own
+# publish record in docs/rfc-005-validation-infra.handoff.md's slice 7
+# entry for the exact push mechanism used), then update BOTH fields below
+# together in the same commit as the Containerfile change -- never one
+# without the other.
+#
+# Recorded 2026-08-24 (RFC-005 slice 7). NOT YET LIVE at ghcr.io: the
+# real push is blocked on ghcr `write:packages` credentials at authoring
+# time (no scope on the session's gh token, no podman ghcr.io login --
+# see the handoff doc's open-forks entry for the exact unblock steps).
+# The digest below is not a placeholder: it was computed by building this
+# exact, already-committed Containerfile and pushing the resulting image
+# to a disposable scratch registry (verifying push/pull mechanics and the
+# digest computation end to end without needing a real credential), then
+# preserving that EXACT image -- not rebuilding it -- as a portable
+# oci-archive at /home/corey/.cache/sello-dev-image/ (untracked, outside
+# the repo) for the eventual real publish. Loading and pushing that exact
+# archive (rather than re-running `podman build`) reproduces this digest
+# byte-for-byte; a fresh rebuild might not (container builds are not
+# reproducible -- see this section's own note above), so the archive,
+# not the Containerfile alone, is the artifact of record until the real
+# push happens.
+
+sello-dev 806abfce49ffbbe88798043770b2698fc8ca1b7e88558946bc8c077d07ede932 ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4

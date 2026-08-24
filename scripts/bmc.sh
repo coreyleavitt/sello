@@ -33,8 +33,11 @@
 # Usage:  scripts/bmc.sh [timeout_secs]      # default 300s
 #
 # Needs the sello-dev image (Containerfile: base Nim image + libsodium-devel
-# + z3-devel). Builds it if missing and network allows; otherwise fails
-# with podman's own build error.
+# + z3-devel + the rest of RFC-005's package set). As of RFC-005 slice 7,
+# pulls `ghcr.io/coreyleavitt/sello-dev` BY DIGEST per the pin in
+# scripts/lib/image-pins.txt (scripts/lib/sello-dev-image.sh) rather than
+# building locally if missing -- see that file's header comment for the
+# SELLO_DEV_LOCAL_BUILD/SELLO_DEV_IMAGE_REF escape hatches.
 #
 # Mounts: the project + the milpa CAS (at both the canonical path and its
 # host-absolute path, so milpa's _deps/z3 and _deps/softlink absolute
@@ -55,8 +58,14 @@ source "$(dirname "$0")/lib/milpa-preflight.sh"
 milpa_preflight || exit 1
 
 timeout_secs="${1:-300}"
-img=localhost/sello-dev:latest
-podman image exists "$img" || podman build -t "$img" -f Containerfile .
+
+# Resolves `img` -- pull-by-digest of the published sello-dev image by
+# default, or a local build under SELLO_DEV_LOCAL_BUILD=1 (RFC-005 slice
+# 7 -- see scripts/lib/sello-dev-image.sh's own header comment). This
+# script doesn't `set -e` (see the header comment above), so the resolve
+# failure is checked explicitly, same as the preflight above.
+source "$(dirname "$0")/lib/sello-dev-image.sh"
+resolve_sello_dev_image || exit 1
 
 cname="sello_bmc_$$"
 cleanup() { podman rm -f "$cname" >/dev/null 2>&1 || true; }

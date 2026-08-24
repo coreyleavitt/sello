@@ -9,12 +9,14 @@
 # affected -- it has no backend dispatch and stays pure-Nim under this
 # flag too.
 #
-# Requires libsodium-devel -- built from the sello-owned Containerfile
-# (repo root) into the "sello-dev" image (also carries z3-devel for
-# scripts/bmc.sh; one dev image covers both matrices -- see the
-# Containerfile's own header comment), not the base Nim image. Builds the
-# image if missing and network allows; otherwise fails with podman's own
-# image-not-found error.
+# Requires libsodium-devel -- carried by the "sello-dev" image (built from
+# the sello-owned Containerfile, repo root; also carries z3-devel for
+# scripts/bmc.sh plus the rest of RFC-005's package set -- see the
+# Containerfile's own header comment), not the base Nim image. As of
+# RFC-005 slice 7, pulls `ghcr.io/coreyleavitt/sello-dev` BY DIGEST per the
+# pin in scripts/lib/image-pins.txt (scripts/lib/sello-dev-image.sh) rather
+# than building locally if missing -- see that file's header comment for
+# the SELLO_DEV_LOCAL_BUILD/SELLO_DEV_IMAGE_REF escape hatches.
 #
 # Usage:  scripts/test-libsodium.sh
 #
@@ -46,8 +48,11 @@ milpa_preflight
 # shared with scripts/test.sh -- see scripts/lib/tier-summary.sh).
 source "$(dirname "$0")/lib/tier-summary.sh"
 
-img=localhost/sello-dev:latest
-podman image exists "$img" || podman build -t "$img" -f Containerfile .
+# Resolves `img` -- pull-by-digest of the published sello-dev image by
+# default, or a local build under SELLO_DEV_LOCAL_BUILD=1 (RFC-005 slice
+# 7 -- see scripts/lib/sello-dev-image.sh's own header comment).
+source "$(dirname "$0")/lib/sello-dev-image.sh"
+resolve_sello_dev_image
 
 cmd="set -e"
 for f in "${unit_test_files[@]}"; do

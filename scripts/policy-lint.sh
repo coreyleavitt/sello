@@ -21,6 +21,19 @@
 #      changed without a digest bump" -- this check is the workflow-side
 #      half: the workflow's own image references must match the pin
 #      file, whichever direction drifted).
+#   5. (RFC-005 slice 7, sello-dev section) the committed root
+#      `Containerfile`'s content hash matches the hash recorded on the
+#      `sello-dev` line of scripts/lib/image-pins.txt -- the other half
+#      of the same pair: "rebuild and compare digests" is infeasible
+#      (container builds are not reproducible, so a rebuilt digest would
+#      never match and the check would be permanently red -- RFC-005
+#      Part B's own sello-dev drift-model paragraph), so this checks the
+#      cheap, exact, checkable proxy instead: has the Containerfile
+#      changed since the recorded pin's image was actually built and
+#      published. A mismatch means someone edited the Containerfile
+#      without repinning (rebuild + publish + update both fields on that
+#      line together) -- see that file's own header comment for the
+#      repin ritual.
 #
 # actionlint pinning strategy, decided (RFC-005 slice 4): actionlint is
 # NOT preinstalled on GitHub-hosted ubuntu-latest runners (unlike
@@ -141,6 +154,24 @@ for wf in .github/workflows/*.yml; do
     echo "   OK"
   fi
 done
+
+echo ""
+echo "policy-lint: checking sello-dev (Containerfile-hash, digest) drift pair..."
+
+sello_dev_line="$(grep -E '^sello-dev[[:space:]]' scripts/lib/image-pins.txt || true)"
+if [[ -z "$sello_dev_line" ]]; then
+  echo "policy-lint: FAIL -- no 'sello-dev' line found in scripts/lib/image-pins.txt." >&2
+  status=1
+else
+  recorded_hash="$(awk '{print $2}' <<<"$sello_dev_line")"
+  actual_hash="$(sha256sum Containerfile | awk '{print $1}')"
+  if [[ "$recorded_hash" != "$actual_hash" ]]; then
+    echo "policy-lint: FAIL -- Containerfile content hash ($actual_hash) does not match scripts/lib/image-pins.txt's recorded sello-dev hash ($recorded_hash). The Containerfile changed without a repin (rebuild sello-dev, publish it by digest, then update BOTH fields on the sello-dev line together) -- see that file's own header comment for the repin ritual." >&2
+    status=1
+  else
+    echo "   OK -- Containerfile hash matches the recorded sello-dev pin ($actual_hash)."
+  fi
+fi
 
 if [[ "$status" -eq 0 ]]; then
   echo ""
