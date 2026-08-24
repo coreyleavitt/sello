@@ -1,5 +1,7 @@
 # sello
 
+[![merge-gate](https://github.com/coreyleavitt/sello/actions/workflows/merge-gate.yml/badge.svg?branch=main)](https://github.com/coreyleavitt/sello/actions/workflows/merge-gate.yml?query=branch%3Amain)
+
 Pure-Nim ed25519 (EdDSA, RFC 8032) signing and verification, plus X25519
 (ECDH, RFC 7748) key exchange -- the Curve25519 family. **No FFI in the
 core.**
@@ -473,6 +475,25 @@ scalar inversion -- neither is exposed at this facade (the multiply-add
 exists submodule-only in `sello/scalar`; the inversion exists nowhere in
 sello at any layer). See `sello/ristretto`'s module doc comment for the
 full boundary.
+
+## Validation
+
+The badge above reflects the status of `main`'s required CI checks (see
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the current gate list and how to
+run the same checks locally). The evidence backing the claims made
+throughout this README --
+RFC 8032/RFC 7748 vector conformance, Wycheproof adversarial vectors, the
+dudect timing harness, mutation testing, differential testing against
+libsodium, property-based testing, coverage-guided fuzzing, and the Z3
+proofs -- lives in [`docs/`](docs/): [`docs/ct-results.md`](docs/ct-results.md)
+and [`docs/mutation-results.md`](docs/mutation-results.md) are the standing
+evidence records, and `docs/rfc-001-signing.md` through
+`docs/rfc-006-sha512.md` are the design docs each piece of that evidence
+was built against. This section is deliberately minimal for now -- a
+hand-curated table mapping every validation-bar claim to its enforcing
+mechanism, with its own drift check against CI, is planned but not yet
+built; until it lands, this section makes no per-check claims beyond the
+badge itself.
 
 ## Building and testing
 
