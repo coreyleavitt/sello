@@ -130,7 +130,7 @@ for f in "${unit_test_files[@]}"; do
     # `nim c`, proving Nim actually invoked the requested compiler (or the
     # gcc default) rather than merely accepting the flag. This IS this
     # file's real compile+run (`-r`), not an extra throwaway build.
-    cmd+=$'\n'"scripts/lib/toolchain-canary.sh $cc_name nim c $cc_flag ${extra_defines[*]:-} --listCmd -f -r $f"
+    cmd+=$'\n'"scripts/lib/toolchain-canary.sh gcc nim c $cc_flag ${extra_defines[*]:-} --listCmd -f -r $f"
     canary_done=1
   else
     cmd+=$'\n'"nim c $cc_flag ${extra_defines[*]:-} -r $f"
