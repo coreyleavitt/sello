@@ -182,10 +182,21 @@ run_in_container() {
     else
       age_seconds=$(( now_ts - last_ts ))
       age_hours=$(( age_seconds / 3600 ))
-      echo "nightly-fuzz: restored corpus marker age: ${age_hours}h (threshold ${threshold_hours}h)"
-      if (( age_hours > threshold_hours )); then
+      threshold_seconds=$(( threshold_hours * 3600 ))
+      echo "nightly-fuzz: restored corpus marker age: ${age_hours}h / ${age_seconds}s (threshold ${threshold_hours}h / ${threshold_seconds}s)"
+      # Compare in SECONDS, not truncated hours (this slice's own bug,
+      # caught during the staleness red-path DoD demo): two runs minutes
+      # apart both truncate to "0h" old, so an hour-granularity compare
+      # (`age_hours > threshold_hours`, i.e. `0 > 0`) never trips even
+      # with SELLO_FUZZ_STALENESS_THRESHOLD_HOURS=0 -- the documented
+      # mechanism for forcing this canary red on demand. Comparing
+      # age_seconds against threshold_hours*3600 fixes both: threshold=0
+      # trips on any nonzero elapsed time (the intended "force red"
+      # behavior), and the real 48h default still means 48 real hours,
+      # not "48, rounded from whatever the true age truncates to."
+      if (( age_seconds > threshold_seconds )); then
         stale=1
-        stale_reason="restored corpus marker is ${age_hours}h old, exceeds the ${threshold_hours}h threshold"
+        stale_reason="restored corpus marker is ${age_hours}h (${age_seconds}s) old, exceeds the ${threshold_hours}h (${threshold_seconds}s) threshold"
       fi
     fi
   else
