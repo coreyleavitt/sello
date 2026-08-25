@@ -909,7 +909,7 @@ Phase 4 — nightly, timing, release:
 - [ ] 28. Timing tier runner + workflow
 - [ ] 29. First quiet-box battery + carve-out re-adjudication
 - [ ] 30. Release workflow (5 per-clause red demos)
-- [ ] 31. README evidence table + drift check
+- [x] 31. README evidence table + drift check -- DONE 2026-08-25, taken out of order (slices 25/27-30 blocked on the Corey-owned ghcr credential or Corey-physical hardware; this slice needed only what already exists in the repo). See the full slice entry below for the table design, the `validation-map` gate, and all run ids.
 - [ ] 32. Registry + close-out audit
 
 ## Open forks (awaiting Corey)
@@ -3020,6 +3020,170 @@ Phase 4 — nightly, timing, release:
       since-disproven assumption; this commit brings CLAUDE.md in line
       with `7106162`'s real code).
 
+- [x] 31. README evidence table + drift check -- DONE 2026-08-25, taken
+      deliberately out of order. Branch `rfc-005-slice31`, code `249ea6c`
+      (table + gate) + exec-bit fix `bbfb592` + empty re-trigger commit
+      `197b236` (the fast-forwarded SHA).
+
+      **Reordering rationale, restated per the task's own instruction:**
+      slices 25/27-30 remain blocked on the same Corey-owned ghcr
+      `write:packages` credential or Corey-physical timing-tier hardware
+      already blocking the rest of the list below; slice 31 needed only
+      what already exists in this repo -- `scripts/lib/gates.txt`, both
+      workflows, and `scripts/lib/image-pins.txt`'s toolchain-versions
+      record (RFC-005 slice 26) -- plus a text scan, so it was pulled
+      forward, the identical judgment call slices 11/16/18/24/26 already
+      made.
+
+      **The table.** README.md's Validation section gained a "Validation
+      map" subsection: 13 rows, one per CLAUDE.md "validation bar" claim
+      (or claim/mechanism pair, where a claim is enforced by more than
+      one category -- the dudect harness's compile-smoke-only merge-gate
+      leg vs. its real-verdict manual battery is the clearest example).
+      Row keys: `rfc-vectors`, `wycheproof`, `dudect-compile-smoke`,
+      `dudect-full-battery`, `mutation-catalog`, `libsodium-build`,
+      `libsodium-interop`, `property-merge-gate`,
+      `property-cranked-nightly`, `fuzz-compile-smoke`,
+      `fuzz-nightly-campaign`, `fuzz-snapshot-ritual`, `bmc-symex`. Six
+      required-check rows, two nightly rows, five manual-ritual rows --
+      of the five manual-ritual rows, one (`dudect-full-battery`) carries
+      a `pending slice 28` marker (the timing-tier freshness canary, the
+      one genuinely future-dated cell in the table), one
+      (`fuzz-snapshot-ritual`) points at the REAL, already-landed
+      staleness canary in `scripts/nightly-fuzz.sh` (slice 24), and three
+      (`mutation-catalog`, `libsodium-interop`, `bmc-symex`) are marked
+      `none (by design)` -- a decision made by re-reading the RFC's
+      evidence-story text and A5 paragraph directly rather than guessing:
+      only fuzz-corpus continuity (A5) and the timing tier get an
+      RFC-mandated freshness canary; mutation/bmc/libsodium-interop are
+      deterministic given the source tree, with no calendar-staleness
+      concept, and are re-run per the standing "affected-gate battery"
+      escalation rule instead of on a schedule. Also added: a
+      **Platform support** paragraph naming the exact CI matrix by job
+      name (`unit-linux-amd64-gcc`/`-clang`/`-gcc-asan-ubsan`,
+      `unit-linux-arm64-gcc`, `unit-macos-arm64-clang`,
+      `unit-windows-amd64-gcc`) plus the WASM unsupported-for-secrets
+      note (not previously in README at all -- this slice's own addition,
+      not a rewording of existing text), and a **CT claim scope**
+      paragraph naming gcc 16.1.1, clang 22.1.8, and the pinned image
+      digest, pulled verbatim from `scripts/lib/image-pins.txt`'s slice-26
+      production-toolchain-versions record, plus the
+      consumer-compiles-their-own-toolchain disclosure.
+
+      **The gate.** `scripts/validation-map-check.sh` (thin bash entry,
+      matching the `gates-manifest-sync`/`ruleset-sync`/`policy-lint`
+      no-container register) delegates to
+      `scripts/lib/validation_map_check.py`, which parses the table
+      between `<!-- VALIDATION-MAP:TABLE START/END -->` markers (a light,
+      single-pass split on the markdown row shape -- cell text is written
+      to avoid literal `|` characters specifically so that trade-off
+      holds, matching `gates-manifest-check.sh`'s own "hand-written
+      markdown, no templater with no other customer" precedent) and
+      asserts, per row: required-check rows' job exists in BOTH
+      `merge-gate.yml` and `gates.txt` (deliberately NOT re-querying the
+      live ruleset too -- `ruleset-sync` already asserts
+      live-matches-`gates.txt`, and duplicating that fact here would add
+      nothing); nightly rows' job exists in `nightly.yml`; manual-ritual
+      rows' Freshness-canary cell is real -- a committed file
+      (existence-checked), an entry in the new, committed
+      `scripts/lib/validation-map-pending.txt` allowlist (`dudect-full-
+      battery 28`, the one entry today), or membership in the script's
+      own hardcoded `NONE_BY_DESIGN_ROWKEYS` set. Also asserts every
+      README `badge.svg` line carries `?branch=main` and that
+      `toolchain-canary.yml` carries no badge anywhere in README (both
+      already true pre-slice; this is the new mechanical proof, not a
+      fix), and cross-references the CT-scope paragraph's gcc/clang
+      versions and image digest against `scripts/lib/image-pins.txt` via
+      regex (first-match semantics deliberately select the file's
+      PRODUCTION observation, not its later "for comparison ... drifted"
+      block that reuses the same `gcc:`/`clang:` labels for a DIFFERENT,
+      intentionally-stale value).
+
+      **Exec-bit trap, again (same class as slice 1's own TRAP note at
+      the top of this checklist).** The first push (`249ea6c`) failed the
+      new `validation-map` job with a bare `Permission denied` / exit
+      126 -- `core.filemode=false` on this working copy meant the
+      `chmod 755` applied locally before `git add` never made it into the
+      tracked mode (`git ls-files -s` showed `100644`, filesystem showed
+      `-rwxr-xr-x`). Fixed via `git update-index --chmod=+x
+      scripts/validation-map-check.sh` (`bbfb592`) -- the exact fix
+      slice 1's own TRAP note already prescribes, re-confirmed live
+      rather than assumed stale advice.
+
+      **Ordering caution, exercised live.** After `bbfb592` pushed green
+      except the EXPECTED `ruleset-sync` red (the branch's own
+      `gates.txt` already had 17 entries; the live ruleset still required
+      16 until applied), `scripts/ruleset-apply.sh --apply` was run
+      (updates `main`: `70a71,73` diff, adding the `validation-map`
+      context -- `evidence`/`tags` no-op), THEN an empty re-trigger
+      commit (`197b236`) was pushed so the branch's own `ruleset-sync`
+      leg re-evaluated against the now-current live ruleset and went
+      green too, before the fast-forward -- exactly the sequencing this
+      slice's own task text prescribed (apply after the branch is ready,
+      before the fast-forward; branch green including `ruleset-sync`
+      before ff).
+
+      **Run ids.**
+      1. First push (`249ea6c`) -> run `32809725571`: 15/17 green,
+         `validation-map` FAILED (exec-bit, exit 126), `ruleset-sync`
+         FAILED (expected pre-apply drift) -- superseded by concurrency
+         cancel-in-progress on the next push (final state: cancelled).
+      2. Exec-bit fix (`bbfb592`) -> run `32809922417`: 16/17 green,
+         `validation-map` now PASSING; `ruleset-sync` still FAILED
+         (expected, ruleset not yet applied).
+      3. `scripts/ruleset-apply.sh --apply` run live (no run id -- a
+         direct API mutation, not a workflow): `main` ruleset updated
+         21282945, `evidence`/`tags` no-op-updated 21282944/21282947.
+      4. Re-trigger empty commit (`197b236`) -> run `32810595199`: 17/17
+         GREEN, including `ruleset-sync` and `validation-map`. Fast-
+         forwarded `dc32e6f..197b236` to `main`.
+      5. Post-fast-forward `main` push (same SHA `197b236`, a fresh push
+         event since `merge-gate.yml` has no path/ref filter beyond
+         excluding `evidence`) -> run `32811244488`: 17/17 GREEN,
+         confirming `main`'s own HEAD independently, not just the branch.
+      6. **Red demo:** scratch branch `rfc-005-slice31-red-demo` off the
+         now-updated `main`, one commit (`25bf7ef`) planting a row naming
+         a nonexistent `unit-linux-riscv64-gcc` required-check job ->
+         run `32811259832`, job id `97690897328`: `validation-map` FAILED
+         with the exact expected two-line diagnostic (job not in
+         `gates.txt`, job not in `merge-gate.yml`) -- confirmed both
+         locally (`python3 scripts/lib/validation_map_check.py`, before
+         ever pushing) and via this real CI run. Row removed in the
+         demo's own follow-up state (never merged); branch deleted
+         locally and on `origin` immediately after, confirmed via a 404
+         from `gh api repos/.../branches/rfc-005-slice31-red-demo`.
+
+      **Escalation check (per the task's own rule):** no core-arithmetic
+      or cryptographic finding surfaced this slice -- the one real
+      finding (the exec-bit trap) is infra/tooling, already documented as
+      a standing risk by slice 1's own TRAP note, re-confirmed rather than
+      newly discovered. No escalation triggered.
+
+      **Not mechanically checked, disclosed rather than elided:** the
+      Mechanism cell's prose for manual-ritual rows (e.g. the sibling
+      `unit-*`/`property-*` legs named in a required-check row's own
+      Mechanism cell beyond the first backtick token) is NOT verified
+      token-by-token -- only the row's Category-driven primary assertion
+      is mechanical, per the task's own scoping ("per-category
+      assertion," not "every word in every cell"). The CT-scope
+      paragraph's consumer-compiles-their-own-toolchain disclosure
+      sentence is checked only for the presence of "own" + "toolchain",
+      not for accuracy of the surrounding prose -- hand-maintained, same
+      as every other disclosure sentence in this project's evidence
+      story. `CONTRIBUTING.md` line ~96 still says "the full six-job
+      `merge-gate.yml` battery," a pre-existing staleness bug that
+      predates this slice (from when the workflow genuinely had six
+      jobs) -- left as found rather than fixed, since the task scoped
+      job-count updates to CLAUDE.md and the workflow's own comments
+      specifically, not a repo-wide count sweep; recorded here as a
+      found-but-out-of-scope item for a future slice/pass.
+
+      **CLAUDE.md** updated in the same commit as the code (`249ea6c`):
+      job count sixteen -> seventeen (three occurrences), a new "README
+      evidence table + drift check" paragraph in the CI section (mirroring
+      the API-surface-gate/build-smoke paragraphs' own shape: reordering
+      rationale, mechanism, the gate's own assertions, the red demo).
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -3079,15 +3243,14 @@ Phase 4 — nightly, timing, release:
   THIS host should expect it).
 
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
-- Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26 (16/32). All records above.
-  Slice 26's own full record (pinned-issue notifications, the toolchain-
-  canary workflow, cranked properties, the real timeout-vs-cancel
-  correction and the gawk finding, all run ids/issue URLs) is the entry
-  immediately above this note. A9 (untainted memcheck) is the one
-  sub-item of slice 26 that did NOT land -- blocked on the same ghcr
-  credential as the rest of the list below; recorded as a blocked
-  extension of `nightly.yml`, not attempted via a workaround.
+- Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26, 31 (17/32). All records
+  above. Slice 31's own full record (the validation-map table design, the
+  gate's per-category assertions, the exec-bit trap recurrence, all six
+  run ids including the real red demo) is the entry immediately above
+  this note. A9 (untainted memcheck, slice 26's own sub-item) is still
+  the one exception -- blocked on the same ghcr credential as the rest of
+  the list below.
 - BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25, plus slice 26's own A9 sub-item. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
 - Corey-owned: slice 27 (physical timing box); fork-PR-hold demo (slice 6); SECURITY.md attestation items (slice 5).
-- Slices 28-32 depend on earlier blocked/physical slices to varying degrees; 30/31 partially doable.
+- Slice 28 depends on slice 27 (physical); slice 29 depends on 27-28; slice 30 depends on 28-29 for its timing-freshness clause (a recorded degraded mode covers the gap -- see "Ordering & risks" above). Slice 31 is DONE (this session, out of order -- needed neither). Slice 32 depends on slice 30 (the release gate) for its registry-PR precondition.
 - Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above).
