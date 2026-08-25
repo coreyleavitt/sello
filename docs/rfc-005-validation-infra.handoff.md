@@ -904,7 +904,7 @@ Phase 3 — CT instruments (19→20→21→22→23 chain):
 Phase 4 — nightly, timing, release:
 - [x] 24. Nightly fuzz continuity A5 -- DONE 2026-08-25, taken out of order (slices 10/14/15/17/19-23/25 blocked on the Corey-owned ghcr write:packages credential; slice 27 is Corey-physical; this slice needed only the base image + already-public proptest). Code `416f3b7` (corpus persistence in tests/fuzz/, scripts/nightly-fuzz.sh, .github/workflows/nightly.yml, CLAUDE.md), staleness-canary bug fix `ca5fbfe` (hour-truncation bug caught during the slice's own red-path demo). See the full slice entry below for the corpus-carry design, cache-key isolation, the staleness-canary bug, and all six nightly-workflow run ids.
 - [ ] 25. Nightly s390x A4
-- [ ] 26. Nightly canaries + notifications (A6, A9, pinned-issue wiring)
+- [x] 26. Nightly canaries + notifications (A6, A9, pinned-issue wiring) -- DONE 2026-08-25 except A9 (BLOCKED, same ghcr credential as slice 25/10/14/15/17/19-23). See the full slice entry above for the timeout-vs-cancel correction, the gawk finding, and all run ids/issue URLs.
 - [ ] 27. Timing tier provisioning (**Corey-owned, physical** — will pause loop)
 - [ ] 28. Timing tier runner + workflow
 - [ ] 29. First quiet-box battery + carve-out re-adjudication
@@ -2725,6 +2725,300 @@ Phase 4 — nightly, timing, release:
       fails-job-only scope, the snapshot-commit ritual), the `tests/fuzz/`
       bullet's own extension (corpus persistence + crash artifacts), and a
       `scripts/nightly-fuzz.sh` line in the script-list table.
+- [x] 26. Nightly canaries + notifications -- DONE 2026-08-25, taken
+      deliberately out of order (slice 25/s390x and this slice's own A9
+      memcheck sub-item remain blocked on the same Corey-owned ghcr
+      `write:packages` credential blocking slices 10/14/15/17/19-23; this
+      slice's OTHER deliverables -- cranked properties, notification
+      wiring, the toolchain canary -- need only the always-available base
+      image, exactly as slice 24's own control-loop note anticipated).
+      Branch `rfc-005-slice26`, code `529161e`; two same-day follow-up
+      fix commits landed on their own short-lived branches after real
+      dispatches caught real bugs (see below): `d2649be` (missing `gawk`
+      in the toolchain-canary Tumbleweed legs) and `7106162` (the
+      timeout-vs-cancel detection correction -- the slice's own most
+      consequential finding). CLAUDE.md doc-only follow-up (this commit).
+
+      **Required reading done first:** the RFC's A6/A9 text (Part A), the
+      Nightly paragraph (Part B, ~lines 738-760, incl. the notification-
+      mechanism and 60-day-auto-disable sentences), the slice-24 handoff
+      entry (corpus-carry/staleness-canary precedent this slice extends),
+      `.github/workflows/nightly.yml` and `scripts/nightly-fuzz.sh` as
+      they stood after slice 24.
+
+      **(a) Pinned-issue notification wiring.** `scripts/lib/
+      notify-failure.sh` (new, shared by both workflows' `notify` jobs --
+      RFC-005 Part B's build-path invariant extended to the notification
+      path): search for an OPEN issue carrying a marker label, comment on
+      it if found, or create-and-pin one if not (`gh issue create` then
+      the GraphQL `pinIssue` mutation -- REST has no issue-pin endpoint,
+      confirmed by reading the REST API reference before writing this).
+      Pinning is designed BEST-EFFORT (a failed pin attempt logs a
+      warning but does not fail the job) but this fallback path was
+      empirically UNNEEDED: the default Actions `GITHUB_TOKEN`, widened
+      to `issues: write` on the `notify` job only (job-level
+      `permissions:` is a full redefinition for that job, not additive
+      over the workflow-level `contents: read` default -- GitHub's own
+      documented semantics), pinned successfully on the very first real
+      demo run. `nightly.yml`'s `notify` job (`needs: [fuzz,
+      cranked-properties, timeout-demo]`) and `toolchain-canary.yml`'s
+      own (`needs:` all five of that workflow's legs) post to SEPARATE
+      labels/issues (`nightly-failure` vs. `toolchain-canary-failure`) --
+      a deliberate decision, not deferred: nightly failures are
+      release-qualifying evidence gone red, a genuine finding;
+      toolchain-canary failures are sometimes EXPECTED (Nim devel
+      breaking is the canary working, not a defect) -- mixing the two
+      would bury one class under the other's routine noise. Both
+      workflows grew a permanent `force_failure` dispatch input (fails a
+      leg immediately, before any real work) rather than a
+      plant-then-revert scratch commit, matching `nightly.yml`'s own
+      pre-existing `staleness_threshold_hours=0` demo-knob convention --
+      recorded as a deliberate, disclosed, permanent knob, not a defect
+      left in place.
+
+      **Timeout-vs-failure: the slice's own most important finding, a
+      real correction caught by its own demo, not a documentation
+      exercise.** The ORIGINAL design (first pushed in `529161e`)
+      assumed the REST "list jobs for a workflow run" endpoint's
+      documented `conclusion` enum value `timed_out` (distinct from
+      `cancelled`) would appear for a job killed by exceeding its own
+      `timeout-minutes` -- reasonable from the API reference alone, but
+      NEVER ACTUALLY TESTED before that first push. A permanent
+      `timeout-demo` job (`timeout-minutes: 1` + a 90-second sleep,
+      gated behind a `timeout_demo` dispatch input) was built specifically
+      to test this, and its first real dispatch (run `32805160476`)
+      proved the assumption WRONG: `gh api repos/.../actions/jobs/{id}`
+      reported `"conclusion":"cancelled"` -- both at the job level and
+      the per-step level -- identical to an ordinary manual/concurrency
+      cancel, `timed_out` never observed. Investigated further via that
+      SAME job's check-run annotations
+      (`gh api repos/.../check-runs/{id}/annotations` -- a check-run's
+      own numeric id is identical to its job id in this API, confirmed
+      empirically) and found the REAL distinguishing signal: an
+      annotation reading `"The job has exceeded the maximum execution
+      time of 1m0s"`, present only on the genuine timeout (an ordinary
+      cancel's own annotations carry just the generic `"The operation
+      was canceled."` both classes share). Fixed same-day in `7106162`:
+      both `notify` jobs now query the Jobs API for every job's real
+      `conclusion`, and for each one reading `cancelled`, additionally
+      query ITS OWN check-run annotations and grep for that exact phrase
+      to split "timeout" from "genuine cancel" -- both workflows'
+      `permissions:` gained `checks: read` (a separate scope from
+      `actions: read`) for this query. Re-verified against a second real
+      `timeout-demo` dispatch (run `32806631398`) after the fix: the
+      `notify` job's issue body correctly printed `**TIMEOUT** -- job(s)
+      timeout-demo exceeded their own \`timeout-minutes\` limit...`
+      rather than a generic cancellation message. This is the literal,
+      corrected answer to the task's own "investigate and record the
+      actual detection mechanism you use" instruction -- the mechanism
+      actually shipped differs from what was first documented, and the
+      difference is recorded here rather than smoothed over.
+
+      **(b) A6 toolchain canary, its own workflow.**
+      `.github/workflows/toolchain-canary.yml` (new): advisory-only, no
+      badge, not in `scripts/lib/gates.txt`, scheduled `43 4 * * *`
+      (staggered from `nightly.yml`'s own `17 3 * * *`). Five jobs:
+      `nim-devel`/`nim-latest-stable` (`scripts/lib/nim-canary-install.sh`,
+      new -- installs an UNPINNED Nim from nim-lang/nightlies' own
+      rolling `latest-devel`/`latest-version-2-4` tags onto a bare
+      `ubuntu-latest` runner; `latest-version-2-4` chosen over
+      `latest-version-2-2` since nightlies' newest STABLE series is 2.4,
+      ahead of this project's own pinned 2.2.10 -- verified via `gh api
+      repos/nim-lang/nightlies/releases` before choosing); `newest-gcc`/
+      `newest-clang` (a deliberately unpinned `opensuse/tumbleweed:latest`
+      container -- chosen over "ubuntu-latest's newest packaged versions"
+      since Tumbleweed is genuinely rolling-release and is the same
+      distro family this project's own pinned image/`sello-dev`
+      Containerfile already build on; zypper installs `gcc gcc-c++ clang`
+      fresh each run, paired with a NEW `linux-x86_64` row in
+      `scripts/lib/nim-pin.txt` so `scripts/ci-nim-setup.sh` installs the
+      project's own PINNED Nim on top -- isolating the compiler-drift
+      variable from a second, independent Nim-version variable);
+      `milpa-head` (builds milpa from its own `main` HEAD, deliberately
+      bypassing `scripts/lib/milpa-pin.txt`'s pinned commit, then runs
+      `milpa fetch --features proptest --locked` against this repo's
+      committed lockfile). **Recorded blocked extension, not attempted:**
+      A6 asks that `newest-gcc`/`newest-clang` eventually run "through
+      the disasm gate" with a per-compiler rolling baseline -- the disasm
+      gate itself doesn't exist yet (slice 23, same credential block as
+      slice 25); these two legs land as plain suite-build/run jobs now,
+      per the slice-16 build-smoke precedent, and slice 23 extends these
+      same two jobs in place once the disasm gate lands.
+
+      **`gawk` -- a real bug caught by this workflow's own first live
+      dispatch (run `32804234064`), not anticipated by local
+      verification.** `newest-gcc`/`newest-clang` both failed in ~24-38s
+      with `scripts/ci-nim-setup.sh: line 304: awk: command not found` --
+      the minimal `opensuse/tumbleweed:latest` image ships no `awk`,
+      which that script's pin-table lookup needs. The `notify` job
+      correctly created and pinned issue #5
+      (`https://github.com/coreyleavitt/sello/issues/5`) for this real
+      finding on its very first real run -- not a demo, the mechanism
+      working exactly as designed against a genuine red. Fixed same-day
+      (`d2649be`, adding `gawk` to both legs' zypper install line,
+      verified against a fresh `podman run` before committing); re-run
+      (`32805044049`) confirmed all five legs green. Issue #5 closed with
+      the fix noted, unpinned.
+
+      **Production toolchain-version record.** `scripts/lib/
+      image-pins.txt` gained a new informational section recording the
+      gcc/clang/OS versions actually observed inside the pinned base
+      image (`gcc (SUSE Linux) 16.1.1`, `clang version 22.1.8`, openSUSE
+      Tumbleweed `20260806`, observed via a real no-mount `podman run` of
+      the exact pinned digest, 2026-08-25) -- the piece A6's own text
+      asks for ("All compiler pins... recorded in a committed file")
+      beyond the Nim version/image digest the base-image section already
+      carried. A same-day comparison against a bare
+      `opensuse/tumbleweed:latest` pull showed gcc had ALREADY drifted
+      forward (16.2.0) while clang had not yet (22.1.8, unchanged) -- a
+      live confirmation these legs watch something genuinely live.
+
+      **(c) Cranked properties.** `nightly.yml`'s new `cranked-properties`
+      job runs `scripts/ci-property.sh` (the same script the required
+      `property-linux-amd64-gcc` merge-gate job uses) with
+      `SELLO_PROPERTY_CRANK` set. New `tests/unit/property_crank.nim`
+      (TEST-ONLY, no `src/` change, per the task's own scoping) exports
+      `propertyCrankFactor()`/`cranked()`; every one of the six
+      `test_properties_*.nim` files' own settings constructors
+      (`covSettings`/`settingsWithExamples`/`settingsForPoints`) now
+      routes its base `maxExamples` (and, in
+      `test_properties_ristretto.nim`, the `maxRejections` budget derived
+      from it) through `cranked()`. Default (unset) is a no-op
+      multiply-by-1 -- verified via a full local `scripts/test.sh` run
+      (12 unit files + 6 property files, all green, no behavior change)
+      BEFORE ever touching CI. **CRANK FACTOR: 10x**
+      (`SELLO_PROPERTY_CRANK=10`), the recorded nightly default;
+      `property_crank` (a `workflow_dispatch` input) overrides it for
+      faster demo runs.
+
+      **Measured wall-clock, and an honest non-monotonic-CI-timing
+      finding.** Two real CI dispatches of the SAME `cranked-properties`
+      job type: crank=10 (run `32802932473`) completed the full
+      unit+property suite in 350s (5m50s) total job time (269s of that
+      inside the property-suite phase alone); crank=1 (run `32803380881`,
+      the merge-gate-equivalent baseline) took 528s (8m48s) total -- i.e.
+      the 10x-cranked run measured FASTER than the 1x baseline on GitHub-
+      hosted infrastructure, the wrong direction for a naive
+      expectation. Investigated rather than reported uncritically: a
+      CONTROLLED local A/B (same pre-compiled `test_properties_ristretto`
+      binary, only `SELLO_PROPERTY_CRANK` varied, compile cost excluded)
+      showed the mechanism genuinely works and scales MONOTONICALLY --
+      23.5s (crank=1) / 24.7s (crank=10) / 29.1s (crank=50) run-only wall
+      clock on the heaviest suite -- but the marginal cost of a 10x crank
+      is small (~1.2s here) relative to per-process fixed overhead
+      (~23s: binary startup, the suite's many non-cranked deterministic
+      KAT/pinned-vector checks that never call `settingsWithExamples` at
+      all) and relative to GitHub-hosted runner-to-runner variance, which
+      this project's own `docs/ct-results.md` already documents as large
+      for this class of infrastructure. Recorded honestly: the mechanism
+      is confirmed correct and monotonic by the controlled local
+      measurement; the CI-observed wall-clock delta between the two real
+      dispatches is noise-dominated, not evidence the crank doesn't work.
+      The unmodified 10x default is what the `schedule:` cron runs.
+
+      **(d) A9 untainted memcheck -- BLOCKED, not attempted.** Needs
+      `valgrind`, which lives only in the `sello-dev` image (Containerfile),
+      whose ghcr push remains blocked on the same credential as slices
+      10/14/15/17/19-23/25. No workaround attempted (`apt-get install
+      valgrind` on bare `ubuntu-latest` would diverge from this project's
+      pinned-image posture) -- recorded as a blocked extension of
+      `nightly.yml` per the task's own explicit instruction not to work
+      around it.
+
+      **(e) Nightly badge.** Added to README.md's title area (next to
+      the `merge-gate` badge, same `?branch=main` pin) plus a short
+      Validation-section paragraph explaining the nightly/canary
+      distinction (nightly is non-required-but-real evidence;
+      toolchain-canary is advisory-only and deliberately unbadged).
+      `scripts/check-readme.sh` run clean after the edit.
+
+      **(f) 60-day scheduled-workflow auto-disable.** The RFC's own
+      recorded mitigation: the staleness/freshness canaries ARE the
+      mitigation -- `nightly.yml`'s corpus-staleness canary (slice 24)
+      already fails loud (now: notifies, per this slice) whenever the
+      corpus goes stale for ANY reason, including a silently-disabled
+      schedule, which looks identical to any other missed-nightlies gap
+      from that canary's own perspective. No separate detector built;
+      recorded in CLAUDE.md.
+
+      **DoD demonstrations, run ids and issue URLs (all real, all via
+      `workflow_dispatch`, foreground-polled throughout per the task's
+      own instruction):**
+      1. Branch `rfc-005-slice26` merge-gate `32801709780`, all 16 jobs
+         green on the first push (property-linux-amd64-gcc 8m49s,
+         property-linux-arm64-gcc 9m27s, property-linux-amd64-clang
+         8m52s -- unchanged from pre-slice baselines, confirming the
+         crank helper carries zero cost when unset). Fast-forwarded to
+         `main` (`6af3bf9..529161e`).
+      2. **Forced-failure notification demo (1st):** `gh workflow run
+         nightly.yml --ref main -f force_failure=true` -> run
+         `32802343809`, `fuzz` FAILED as designed, `notify-on-failure`
+         SUCCEEDED: created and PINNED
+         `https://github.com/coreyleavitt/sello/issues/4` using the
+         default Actions `GITHUB_TOKEN` (no fallback needed). Confirmed
+         pinned via `pinnedIssues` GraphQL query.
+      3. **Repeat-failure/reuse demo (2nd):** same dispatch again -> run
+         `32802932473`, `fuzz` FAILED again, `notify-on-failure`
+         COMMENTED on the SAME issue #4 rather than creating a second one
+         (confirmed via the job log: `"found existing open issue #4...
+         commenting"`) -- this same run doubled as the real crank=10
+         wall-clock measurement above (`cranked-properties` ran to
+         completion in parallel, unaffected by `fuzz`'s own failure).
+         Issue #4 closed with a comment explaining the demo and unpinned
+         after.
+      4. **Toolchain-canary first real dispatch:** `gh workflow run
+         toolchain-canary.yml --ref main` -> run `32804234064`:
+         `nim-devel`/`nim-latest-stable` both SUCCEEDED (a genuinely
+         possible canary outcome either way, per the task's own note);
+         `newest-gcc`/`newest-clang` both FAILED for the real `gawk`
+         reason above; `notify-on-failure` created and pinned issue #5.
+         Fixed (`d2649be`), merge-gate green (`32804392360`),
+         fast-forwarded (`529161e..d2649be`), re-dispatch
+         (`32805044049`) all five legs green. Issue #5 closed with the
+         fix noted, unpinned.
+      5. **Timeout-vs-cancel demo (1st, caught the real bug):** `gh
+         workflow run nightly.yml --ref main -f timeout_demo=true -f
+         property_crank=1 -f seconds_per_target=10 -f
+         allow_cold_start=true` -> run `32805160476`: `timeout-demo`
+         killed by GitHub for exceeding its 1-minute `timeout-minutes`,
+         real `conclusion` confirmed `cancelled` (not `timed_out`) via
+         direct `gh api repos/.../actions/jobs/{id}` query -- the finding
+         that drove the same-day fix `7106162` (merge-gate `32805988953`
+         green, fast-forwarded `d2649be..7106162`).
+      6. **Timeout-vs-cancel demo (2nd, confirms the fix):** identical
+         dispatch -> run `32806631398`: `timeout-demo` again killed
+         (`conclusion: cancelled`), `notify-on-failure`'s issue body now
+         correctly printed `**TIMEOUT** -- job(s) timeout-demo exceeded
+         their own \`timeout-minutes\` limit...` (verified directly from
+         the job's own log) rather than a generic cancellation message.
+         Created/updated issue #6, closed with the fix explained,
+         unpinned. `pinnedIssues` GraphQL query confirmed EMPTY afterward
+         -- no demo residue left pinned.
+      7. **Toolchain-canary re-verification after both fixes:** `gh
+         workflow run toolchain-canary.yml --ref main` -> run
+         `32807230246`, all five legs green.
+
+      **Branch hygiene.** Every branch used
+      (`rfc-005-slice26`, `rfc-005-slice26-canary-fix`,
+      `rfc-005-slice26-timeout-fix`, `rfc-005-slice26-docs-fix`) deleted
+      locally and on `origin` immediately after its own fast-forward;
+      each deletion confirmed via a 404 from `gh api repos/.../branches/
+      <name>`.
+
+      **Escalation check (per the task's own rule):** no core-arithmetic
+      or cryptographic finding surfaced this slice -- both real findings
+      (`gawk`, the timeout/cancel conclusion mismatch) are CI-
+      infrastructure/GitHub-platform-behavior findings, fixed in place
+      per the task's own instructions rather than escalated.
+
+      **CLAUDE.md** updated across the code commits (`529161e` for the
+      main mechanism, `d2649be`/`7106162` folded into their own fix
+      commits where the change was code-adjacent) plus this doc-only
+      follow-up commit correcting the CI-section prose to match what was
+      actually observed (the timeout-vs-cancel paragraph in particular --
+      the version committed alongside `529161e` stated the ORIGINAL,
+      since-disproven assumption; this commit brings CLAUDE.md in line
+      with `7106162`'s real code).
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
@@ -2785,12 +3079,15 @@ Phase 4 — nightly, timing, release:
   THIS host should expect it).
 
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
-- Done: slices 1-9, 11, 12, 13, 16, 18, 24 (15/32). All records above. Slice
-  24's own full record (corpus-carry design, cache-key isolation, the
-  staleness-canary hour-truncation bug found and fixed by its own red-path
-  demo, all six nightly-workflow run ids) is the entry immediately above
-  this note.
-- BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
+- Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26 (16/32). All records above.
+  Slice 26's own full record (pinned-issue notifications, the toolchain-
+  canary workflow, cranked properties, the real timeout-vs-cancel
+  correction and the gawk finding, all run ids/issue URLs) is the entry
+  immediately above this note. A9 (untainted memcheck) is the one
+  sub-item of slice 26 that did NOT land -- blocked on the same ghcr
+  credential as the rest of the list below; recorded as a blocked
+  extension of `nightly.yml`, not attempted via a workaround.
+- BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25, plus slice 26's own A9 sub-item. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
 - Corey-owned: slice 27 (physical timing box); fork-PR-hold demo (slice 6); SECURITY.md attestation items (slice 5).
-- After 24: slice 26 is partially blocked (A9 memcheck needs sello-dev; A6 canary + notifications doable) — split decision pending at launch time. Slices 28-32 depend on earlier blocked/physical slices to varying degrees; 30/31 partially doable.
+- Slices 28-32 depend on earlier blocked/physical slices to varying degrees; 30/31 partially doable.
 - Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above).
