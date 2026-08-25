@@ -2494,3 +2494,11 @@ Phase 4 — nightly, timing, release:
   slices (8+ don't need this mount pattern themselves, but any future
   local validation of test.sh/test-libsodium.sh/ct.sh/fuzz.sh/bmc.sh on
   THIS host should expect it).
+
+## Control-loop status note (2026-08-25, mid-grind checkpoint)
+- Done: slices 1-9, 11, 12, 13, 16, 18 (14/32). All records above.
+- IN FLIGHT: slice 24 (nightly fuzz continuity A5) — background agent working; its record will be appended above on landing.
+- BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
+- Corey-owned: slice 27 (physical timing box); fork-PR-hold demo (slice 6); SECURITY.md attestation items (slice 5).
+- After 24: slice 26 is partially blocked (A9 memcheck needs sello-dev; A6 canary + notifications doable) — split decision pending at launch time. Slices 28-32 depend on earlier blocked/physical slices to varying degrees; 30/31 partially doable.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above).

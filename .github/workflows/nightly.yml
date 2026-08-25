@@ -1,0 +1,231 @@
+name: nightly
+
+# RFC-005 slice 24 (Nightly part 1: fuzz continuity, A5) -- the first job
+# in what RFC-005 Part B calls the "Nightly" workflow (scheduled,
+# NON-BLOCKING: not a required check, not in scripts/lib/gates.txt, not
+# yet badged -- the nightly badge is slice 26's own deliverable, once the
+# canary/notification jobs land alongside this one in the same file).
+# Later RFC-005 slices (25: s390x/A4; 26: toolchain canaries/A6, cranked
+# properties, untainted memcheck/A9, pinned-issue notifications) ADD jobs
+# to this same workflow rather than forking a new one, mirroring
+# merge-gate.yml's own one-workflow-keeps-widening convention -- see A6's
+# own text for the ONE deliberate exception (the toolchain canary gets
+# its OWN workflow, specifically so its advisory, never-gate contract can
+# never taint this workflow's own pass/fail badge).
+#
+# Reordering note (recorded per this slice's own task instruction):
+# slices 10/14/15/17/19-23/25 remain blocked on a Corey-owned ghcr
+# `write:packages` credential (the `sello-dev` image push -- see
+# scripts/lib/image-pins.txt's own sello-dev section and the handoff
+# doc's slice 7 entry for the exact unblock steps), and slice 27 is
+# Corey-physical (the quiet-box timing runner). This slice needs only the
+# always-available base `ghcr.io/coreyleavitt/nim` image plus the
+# already-public proptest dependency, so it was pulled forward ahead of
+# 25 -- the identical "needed only the base image" reasoning that already
+# pulled slices 16 and 18 forward in the merge-gate track (see their own
+# handoff entries).
+#
+# Trigger: `schedule` (cron, quiet UTC hour -- see below) + manual
+# `workflow_dispatch` with three optional inputs, all of which exist
+# SPECIFICALLY so this slice's own DoD demonstrations (a real green run,
+# a continuity-proof second run, a staleness-canary red run, a crash-
+# artifact-upload demo) can be driven on demand rather than waiting on
+# the cron -- scripts/nightly-fuzz.sh's own header comment has the full
+# per-input design (defaults, threshold semantics, cold-start opt-in).
+#
+# 03:17 UTC: an intentionally NON-round time (GitHub's own scheduling
+# guidance: workflows scheduled for the top of the hour, or other popular
+# times, queue behind everyone else's identical schedule -- an arbitrary
+# offset avoids that contention) during low sello-maintainer-timezone
+# activity, with no other schedule in this repository to collide with
+# (this is the first scheduled workflow sello has).
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      seconds_per_target:
+        description: >-
+          Override SELLO_FUZZ_SECONDS (seconds per target; 4 targets
+          total). Leave blank for the script's own nightly default (450s
+          -- see scripts/nightly-fuzz.sh's header comment for the
+          reasoning). Use a small value (e.g. 20) for a fast demo/
+          iteration run.
+        required: false
+        type: string
+      staleness_threshold_hours:
+        description: >-
+          Override the corpus staleness canary's threshold (hours).
+          Leave blank for the script default (48h). Set to 0 to force the
+          canary red against ANY restored corpus (the slice 24 DoD's
+          staleness red-path demonstration).
+        required: false
+        type: string
+      allow_cold_start:
+        description: >-
+          Treat an absent corpus marker as an intentional first-ever run
+          rather than a staleness-canary failure. Leave OFF for every
+          ordinary run (including the cron); only the true first-ever
+          run of this feature (or a deliberate cache reset) should set
+          this.
+        required: false
+        type: boolean
+        default: false
+
+# Workflow-level least-privilege permissions (matching merge-gate.yml/
+# pr-checks.yml's own standing convention -- RFC-005 Part B's "CI supply
+# chain"): actions/cache and actions/upload-artifact both operate via the
+# runner's own scoped Actions cache/artifact service, not the repo API,
+# so `contents: read` (checkout) is the only scope this workflow needs.
+permissions:
+  contents: read
+
+# Per-workflow concurrency (this slice's own task text: "per-workflow
+# concurrency"), deliberately NOT per-ref like merge-gate.yml/pr-
+# checks.yml -- this is a long-running (tens-of-minutes), corpus-mutating
+# job; two overlapping runs (a cron fire racing a manual dispatch, or two
+# manual dispatches) writing the SAME branch's cache key concurrently
+# would race on the corpus directory. `cancel-in-progress: false`: a
+# nightly fuzz run's partial progress is real work (the corpus grows
+# incrementally throughout, per scripts/nightly-fuzz.sh's own header) --
+# cancelling a run in favor of a newer one throws that away for no
+# benefit at this cadence, so a second trigger queues behind the first
+# instead.
+concurrency:
+  group: nightly-fuzz
+  cancel-in-progress: false
+
+jobs:
+  # RFC-005 slice 24 (A5): the fuzz-continuity job. ONE scripts/
+  # invocation (RFC-005 Part B's build-path invariant, held even for a
+  # non-required job), same digest-pinned base image as every merge-gate
+  # job (scripts/lib/image-pins.txt; scripts/policy-lint.sh scans this
+  # workflow file too, same as every other one under .github/workflows/).
+  fuzz:
+    name: fuzz
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    # Safety net, not the expected runtime: scripts/nightly-fuzz.sh's own
+    # header documents the real expected wall clock (~30 minutes at the
+    # 450s/target default). 120 minutes is comfortably above that with
+    # real headroom for a slow runner, while stopping well short of
+    # GitHub's 360-minute hosted-job hard limit (RFC-005 Part B's
+    # nightly-budget paragraph: a job TIMEOUT must read as a timeout, not
+    # a silent 6-hour hang) -- a run that hits 120 minutes is a genuine
+    # anomaly worth separating from an ordinary crash/coverage-gate
+    # failure in the job's own annotations.
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # --- Corpus carry: restore ------------------------------------------
+      #
+      # Cache key design (this slice's own required deliverable -- "keyed
+      # so non-main branches cannot seed main-consumed entries"), TWO
+      # independent layers:
+      #
+      #   1. GitHub Actions' own built-in cache access scope: a cache
+      #      entry saved by a run on branch B is only restorable by later
+      #      runs on that SAME branch B, except that entries saved on the
+      #      repository's DEFAULT branch (main) are additionally visible
+      #      to every other branch as a read-only fallback. There is no
+      #      direction in which a non-default branch's save becomes
+      #      visible to `main` -- this is a platform guarantee, not
+      #      something this workflow's key string can weaken.
+      #   2. Belt-and-suspenders, explicit in the key string itself (so
+      #      the isolation is auditable straight from this YAML, not only
+      #      from GitHub's documented cache-scope rules): `github.
+      #      ref_name` is embedded directly in both `key` and
+      #      `restore-keys`, so even a hypothetical platform-level cache
+      #      -scope regression would still need an EXACT branch-name
+      #      string collision to cross-contaminate, and this run's own
+      #      restore-keys prefix never reaches into another branch's
+      #      entries even within its own visible scope.
+      #
+      # `restore-keys` (a PREFIX match, not exact) falls back to the most
+      # recent prior entry on this SAME branch -- `key` below is always
+      # unique per run (`github.run_id`), since actions/cache cannot
+      # overwrite an existing key; the incremental-cache pattern is:
+      # never hit an exact key match on restore (this run's id is new),
+      # always match the prefix instead, and always save a fresh
+      # `run_id`-keyed entry at the end regardless of outcome (the `save`
+      # step below runs unconditionally via `if: always()`).
+      #
+      # `v1` in the key: a format-version tag (matches this repo's
+      # existing pin-file convention, e.g. `serialize.nim`'s own
+      # `dbFormatVersion`) -- bump it if the on-disk corpus directory
+      # shape (proptest's `directoryBasedDatabase` layout, or this
+      # workflow's own marker-file convention) ever changes
+      # incompatibly, so an old-format cache entry is cleanly abandoned
+      # rather than fed into code that no longer understands it.
+      - name: restore fuzz corpus cache
+        id: restore-corpus
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/fuzz-corpus
+          key: sello-fuzz-corpus-v1-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            sello-fuzz-corpus-v1-${{ github.ref_name }}-
+
+      - run: |
+          echo "nightly.yml: cache restore outcome: ${{ steps.restore-corpus.outputs.cache-hit && 'exact-key hit (unexpected -- run_id keys are unique per run)' || 'prefix/no match' }}"
+          echo "nightly.yml: matched cache key: ${{ steps.restore-corpus.outputs.cache-matched-key || '(none -- cold start or first run on this branch)' }}"
+          ls -la build/fuzz-corpus 2>/dev/null || echo "nightly.yml: build/fuzz-corpus does not exist yet (cold start)"
+
+      # --- The campaign itself (one scripts/ invocation) -------------------
+      - name: run nightly fuzz campaign
+        env:
+          SELLO_IN_CONTAINER: '1'
+          SELLO_FUZZ_SECONDS: ${{ inputs.seconds_per_target }}
+          SELLO_FUZZ_STALENESS_THRESHOLD_HOURS: ${{ inputs.staleness_threshold_hours }}
+          SELLO_FUZZ_ALLOW_COLD_START: ${{ inputs.allow_cold_start && '1' || '0' }}
+        run: scripts/nightly-fuzz.sh
+
+      # --- Corpus carry: save back ------------------------------------------
+      #
+      # `if: always()`: a stale-canary failure OR a real crash/coverage-
+      # gate failure must still hand the corpus's own progress forward to
+      # the next run (scripts/nightly-fuzz.sh's own header note) -- only
+      # a whole-job infrastructure failure before the corpus directory
+      # even exists (e.g. the checkout step itself failing) would leave
+      # nothing to save, which this step tolerates silently (there is
+      # nothing at `build/fuzz-corpus` to upload in that case).
+      - name: save fuzz corpus cache
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/fuzz-corpus
+          key: sello-fuzz-corpus-v1-${{ github.ref_name }}-${{ github.run_id }}
+
+      # --- Periodic corpus snapshot artifact (this slice's own call,
+      # documented per the task text) ----------------------------------
+      #
+      # The Actions cache is an implementation detail (evictable after 7
+      # days unused, invisible outside Actions UI/API) -- this artifact
+      # is a plain, downloadable, auditable copy of the SAME directory
+      # the cache step above just saved, on every run (nightly cadence IS
+      # "periodic" at this project's scale), short retention (7 days --
+      # matching the cache's own eviction window, since this artifact's
+      # purpose is inspectability/debugging between now and the next
+      # run's cache, not long-term archival; the actual long-term,
+      # human-reviewed archival path is the snapshot-commit ritual into
+      # tests/fuzz/corpus/, documented in tests/fuzz/README).
+      - name: upload corpus snapshot artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fuzz-corpus-snapshot-${{ github.run_id }}
+          path: build/fuzz-corpus
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # --- Crash artifacts (only meaningful on a real crash) ---------------
+      - name: upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: fuzz-crashes-${{ github.run_id }}
+          path: build/fuzz-crashes
+          if-no-files-found: ignore
+          retention-days: 30

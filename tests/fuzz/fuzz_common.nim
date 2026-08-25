@@ -33,7 +33,7 @@
 ## sello source; only the separately-compiled, separately-instrumented
 ## `fuzz_external_target` binary does, one fresh subprocess per input
 ## (`[INV-fresh-exec]`, docs/fuzz/FUZZ_PLAN.md D2).
-import std/[os, times]
+import std/[os, times, strutils]
 import proptest
 # `integerChoice`/`booleanChoice` (round-3 fix batch B, finding B2): the
 # top-level `proptest` module deliberately does NOT re-export these
@@ -43,6 +43,14 @@ import proptest
 # KNOWN-VALID concrete input, to seed `FuzzSettings.initialIRCorpus`
 # below, is exactly that reason.
 import proptest/choice as ptchoice
+# `toBytes`/`fromBytes` for `seq[ChoiceNode]` (RFC-005 slice 24, corpus
+# continuity A5): full-fidelity binary serialization of a falsifying
+# choice-IR sequence, used ONLY to write a replayable crash artifact
+# alongside its human-readable message (`writeCrashArtifacts` below). Not
+# re-exported by top-level `proptest` (same "submodule import when you
+# have a specific reason" register as `proptest/choice` above) --
+# reaching for a raw crash reproducer's bytes is exactly that reason.
+import proptest/serialize as ptserialize
 
 # ---------------------------------------------------------------------------
 # Strategies (unchanged in shape from the pre-slice-3 harness)
@@ -439,6 +447,72 @@ proc ristrettoDecodeSeeds*(): seq[seq[ChoiceNode]] =
 # ---------------------------------------------------------------------------
 # Run + report
 # ---------------------------------------------------------------------------
+#
+# Corpus persistence (RFC-005 slice 24, fuzz continuity A5) -- OPTIONAL,
+# off by default: `runExternalTarget`'s `database`/`persistKey` params
+# below default to an inactive `ExampleDatabase()` (all-nil closures) and
+# an empty `persistKey`, which is exactly the pre-slice-24 behavior every
+# existing caller (a maintainer's plain `scripts/fuzz.sh`,
+# `scripts/build-smoke.sh`'s compile-only path) keeps unchanged -- no
+# corpus directory, no persistence, no new log lines. `scripts/
+# nightly-fuzz.sh` is the one caller that opts in, via `fuzz_main.nim`
+# constructing a real `directoryBasedDatabase` (proptest's own file-backed
+# `ExampleDatabase` -- `_deps/proptest/src/proptest/db.nim`, one
+# `<testId-as-safe-filename>.bin` per campaign, atomic tmp+rename writes)
+# pointed at `SELLO_FUZZ_CORPUS_DIR`. When active, the fuzz LOOP ITSELF
+# (`proptest/fuzz.nim`'s `fuzz` proc) loads any prior corpus as seeds on
+# start and calls `database.saveCorpus` synchronously on every
+# new-coverage admission during the run -- this module does not hand-roll
+# save/restore; it only reports the before/after entry counts (the
+# "corpus-delta summary" the RFC's A5 text calls for) by reading the same
+# DB directly before and after `fuzz()` runs, via the DB's own
+# `loadCorpus`/`fuzzCorpusKey` (both re-exported by top-level `proptest`,
+# no submodule import needed for these two).
+
+proc sanitizeForFilename(s: string): string =
+  ## Crash-artifact filenames only (RFC-005 slice 24) -- target names like
+  ## `"x25519 (attacker peer u-coordinate)"` carry spaces/parens that are
+  ## legal in a log line but not worth risking on every CI runner's
+  ## filesystem. Conservative allow-list (matches `db.nim`'s own
+  ## `safeKey`'s alphabet, minus the escape-percent machinery this
+  ## one-off use has no need for): alnum, `.`, `-`, `_` pass through;
+  ## everything else becomes `_`.
+  result = newStringOfCap(s.len)
+  for c in s:
+    if c.isAlphaAscii or c.isDigit or c in {'.', '-', '_'}:
+      result.add c
+    else:
+      result.add '_'
+
+proc bytesToRawStr(b: seq[byte]): string =
+  ## `seq[byte] -> string` with no encoding/validation -- a `writeFile`-
+  ## ready raw byte dump (the crash artifact's `.choices.bin`, a
+  ## `ptserialize.toBytes` output, is not UTF-8 and must round-trip
+  ## byte-for-byte).
+  result = newString(b.len)
+  if b.len > 0:
+    copyMem(addr result[0], unsafeAddr b[0], b.len)
+
+proc writeCrashArtifacts(name: string; report: FuzzReport; crashDir: string) =
+  ## Persists every retained IR crash to `crashDir` as a `(.txt message,
+  ## .choices.bin serialized-IR)` pair, so CI's `actions/upload-artifact`
+  ## step has real files to pick up (RFC-005 slice 24's "crash-artifact
+  ## upload" deliverable) and a maintainer downloading the artifact has
+  ## both the human-readable failure message and a byte-exact reproducer
+  ## of the falsifying choice sequence (replayable via
+  ## `ptserialize.fromBytes` plus `captureIR`, the same machinery
+  ## `FuzzSettings.initialIRCorpus` seeding already exercises above).
+  ## Called before `quit(1)` on any crash, in EVERY caller (local
+  ## `scripts/fuzz.sh` runs included, not just the nightly job) -- a
+  ## crash found by a maintainer's own manual campaign deserves the same
+  ## on-disk reproducer as one found by CI.
+  createDir(crashDir)
+  let slug = sanitizeForFilename(name)
+  for i, c in report.irCrashes:
+    let base = crashDir / (slug & "-" & $i)
+    writeFile(base & ".txt", c.message)
+    writeFile(base & ".choices.bin", bytesToRawStr(ptserialize.toBytes(c.choices)))
+    echo "    crash artifact written: ", base, ".txt / ", base, ".choices.bin"
 
 const
   MinEdgesGate* = 50
@@ -455,7 +529,13 @@ const
 proc runExternalTarget*[T](name: string; strat: Strategy[T];
                             encode: proc(x: T): seq[byte];
                             targetBin: string; seconds: int; seedVal: uint64;
-                            corpusSeeds: seq[seq[ChoiceNode]] = @[]) =
+                            corpusSeeds: seq[seq[ChoiceNode]] = @[];
+                            database: ExampleDatabase = ExampleDatabase();
+                            persistKey: string = "";
+                            crashDir: string = "build/fuzz-crashes") =
+  ## `database`/`persistKey` (RFC-005 slice 24): opt-in corpus continuity,
+  ## OFF by default (see this section's own module-doc paragraph above
+  ## for the full design and why every pre-slice-24 caller is unaffected).
   echo "=== fuzzing ", name, " (", seconds, "s budget, external SanitizerCoverage target) ==="
   doAssert fileExists(targetBin),
     "external fuzz target binary not found: " & targetBin &
@@ -473,8 +553,36 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
     timeBudget: initDuration(seconds = seconds),
     seed: seedVal,
     mutationMode: fmIR,
-    initialIRCorpus: corpusSeeds)
+    initialIRCorpus: corpusSeeds,
+    database: database,
+    persistKey: persistKey)
+
+  # Corpus-continuity "before" reading (RFC-005 slice 24's corpus-delta
+  # summary): `frontier.targetId` is "" for this driver (constructed via
+  # the bare `newCoverageFrontier()` above, matching every pre-existing
+  # call site -- the external-target driver process has no single
+  # instrumented binary identity of its own to hash, unlike an in-process
+  # target), so `fuzzCorpusKey(persistKey, "")` folds to the bare
+  # `persistKey` (see that proc's own doc comment on the empty-targetId
+  # case). Guarded on `loadCorpusImpl != nil`, mirroring exactly the
+  # gate `proptest/fuzz.nim`'s own `fuzz` proc uses before ever calling
+  # through the closure -- an inactive (all-nil) `database` must never be
+  # dispatched into.
+  let persistActive = persistKey.len > 0 and database.loadCorpusImpl != nil
+  let testId = fuzzCorpusKey(persistKey, frontier.targetId)
+  let corpusBefore = if persistActive: database.loadCorpus(testId).len else: 0
+  if persistActive:
+    echo "  corpus persistence: key=", testId, " restored entries=", corpusBefore
+
   let report = fuzz(strat, target, frontier, settings)
+
+  if persistActive:
+    # The loop above already persisted every new-coverage admission live
+    # (`proptest/fuzz.nim`'s `saveCorpusActive` branch) -- this is a
+    # read-back for the summary line, not a save of our own.
+    let corpusAfter = database.loadCorpus(testId).len
+    echo "  corpus persistence: key=", testId, " entries after run=", corpusAfter,
+         " (delta +", corpusAfter - corpusBefore, ")"
 
   # B2: a preloaded seed that fails to replay against this target's own
   # strategy shape (`captureIR`'s `ok: false` path in `fuzz.nim`) would
@@ -503,6 +611,7 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
     echo "  !!! CRASH FOUND in ", name, " !!!"
     for i, c in report.irCrashes:
       echo "    [", i, "] ", c.message
+    writeCrashArtifacts(name, report, crashDir)
     quit(1)
 
   if report.coverageHits < MinEdgesGate:

@@ -40,7 +40,15 @@
 ## `runExternalTarget` asserts `report.droppedSeeds == 0` so a future
 ## strategy-shape change that silently breaks a seed's replay fails the
 ## build instead of quietly losing this coverage.
+##
+## Corpus continuity (RFC-005 slice 24, A5): `SELLO_FUZZ_CORPUS_DIR`, when
+## set, turns on cross-run corpus persistence via proptest's own
+## `directoryBasedDatabase` -- see `fuzz_common.nim`'s "Run + report"
+## section doc paragraph for the full design and `scripts/nightly-fuzz.sh`
+## for the one caller that sets it. Unset (every other caller), behavior
+## is byte-for-byte the pre-slice-24 one-shot-in-memory-corpus run.
 import std/[os, parseutils]
+import proptest  # ExampleDatabase / directoryBasedDatabase (db.nim, re-exported)
 import ./fuzz_common
 
 proc secondsFromEnv(name: string; default: int): int =
@@ -53,16 +61,44 @@ proc secondsFromEnv(name: string; default: int): int =
 when isMainModule:
   let perTarget = secondsFromEnv("SELLO_FUZZ_SECONDS", 60)
   let targetBin = getEnv("SELLO_FUZZ_TARGET_BIN", "build" / "fuzz_external_target")
-  echo "sello fuzz harness (RFC-001 finding 12 / RFC-002 slice 3 / RFC-004 slice 8a) -- ",
+  let crashDir = getEnv("SELLO_FUZZ_CRASH_DIR", "build" / "fuzz-crashes")
+
+  # Corpus continuity (RFC-005 slice 24, A5) -- OPT IN via
+  # SELLO_FUZZ_CORPUS_DIR, unset by every pre-existing caller (a
+  # maintainer's plain `scripts/fuzz.sh`): `scripts/nightly-fuzz.sh` is
+  # the one caller that sets it, pointed at a directory restored from /
+  # saved back to the GitHub Actions cache (that script's own header has
+  # the full cache-key design). `directoryBasedDatabase` (proptest's
+  # file-backed `ExampleDatabase`, re-exported by top-level `proptest`
+  # via its `db` submodule) is a value-type closure record; one instance
+  # here is shared across all four `runExternalTarget` calls below, each
+  # under its own `persistKey` (so the one directory holds four
+  # `<safeKey>.bin` files, one per campaign -- see `db.nim`'s own
+  # `directoryBasedDatabase` doc comment for the on-disk shape). An empty
+  # env value leaves `database` at its default inactive `ExampleDatabase()`
+  # (see `fuzz_common.nim`'s own module-doc paragraph on this default).
+  let corpusDir = getEnv("SELLO_FUZZ_CORPUS_DIR", "")
+  let database = if corpusDir.len > 0: directoryBasedDatabase(corpusDir)
+                 else: ExampleDatabase()
+
+  echo "sello fuzz harness (RFC-001 finding 12 / RFC-002 slice 3 / RFC-004 slice 8a / RFC-005 slice 24) -- ",
        perTarget, "s budget per target, ", perTarget * 4, "s total, external target: ", targetBin
+  if corpusDir.len > 0:
+    echo "  corpus persistence ACTIVE: ", corpusDir, " (crash artifacts under ", crashDir, ")"
+  else:
+    echo "  corpus persistence: off (SELLO_FUZZ_CORPUS_DIR not set -- ordinary local/CI run)"
 
   runExternalTarget("ed25519.pointDecode", bytes32(), encodePointDecode,
-                     targetBin, perTarget, 0xC0FFEE'u64, pointDecodeSeeds())
+                     targetBin, perTarget, 0xC0FFEE'u64, pointDecodeSeeds(),
+                     database, "sello-pointDecode", crashDir)
   runExternalTarget("ed25519.verify", verifyInputs(), encodeVerify,
-                     targetBin, perTarget, 0xBADF00D'u64, verifySeeds())
+                     targetBin, perTarget, 0xBADF00D'u64, verifySeeds(),
+                     database, "sello-verify", crashDir)
   runExternalTarget("x25519 (attacker peer u-coordinate)", bytes32(), encodeX25519,
-                     targetBin, perTarget, 0xDEADBEEF'u64, x25519Seeds())
+                     targetBin, perTarget, 0xDEADBEEF'u64, x25519Seeds(),
+                     database, "sello-x25519", crashDir)
   runExternalTarget("ristretto.ristrettoDecode", bytes32(), encodeRistrettoDecode,
-                     targetBin, perTarget, 0xF00DBABE'u64, ristrettoDecodeSeeds())
+                     targetBin, perTarget, 0xF00DBABE'u64, ristrettoDecodeSeeds(),
+                     database, "sello-ristrettoDecode", crashDir)
 
   echo "fuzz campaign complete -- no crashes found on any target, coverage gate passed"
