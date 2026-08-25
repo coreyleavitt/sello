@@ -902,7 +902,7 @@ Phase 3 — CT instruments (19→20→21→22→23 chain):
 - [ ] 23. Disasm gate A2 ({.noinline.} roots + full battery refresh; nimcache-C resolver; per-backend baselines)
 
 Phase 4 — nightly, timing, release:
-- [ ] 24. Nightly fuzz continuity A5
+- [x] 24. Nightly fuzz continuity A5 -- DONE 2026-08-25, taken out of order (slices 10/14/15/17/19-23/25 blocked on the Corey-owned ghcr write:packages credential; slice 27 is Corey-physical; this slice needed only the base image + already-public proptest). Code `416f3b7` (corpus persistence in tests/fuzz/, scripts/nightly-fuzz.sh, .github/workflows/nightly.yml, CLAUDE.md), staleness-canary bug fix `ca5fbfe` (hour-truncation bug caught during the slice's own red-path demo). See the full slice entry below for the corpus-carry design, cache-key isolation, the staleness-canary bug, and all six nightly-workflow run ids.
 - [ ] 25. Nightly s390x A4
 - [ ] 26. Nightly canaries + notifications (A6, A9, pinned-issue wiring)
 - [ ] 27. Timing tier provisioning (**Corey-owned, physical** — will pause loop)
@@ -2437,6 +2437,295 @@ Phase 4 — nightly, timing, release:
       and a `--update-baselines` mention added to the existing
       `scripts/merge-gate.sh` paragraph.
 
+- [x] 24. Nightly fuzz continuity (A5) -- DONE 2026-08-25, taken deliberately
+      out of order. Branch `rfc-005-slice24` then `rfc-005-slice24-staleness-fix`,
+      code `416f3b7` (mechanism) + `ca5fbfe` (staleness-canary bug fix, found
+      by this slice's own red-path demo).
+
+      **Reordering rationale:** slices 10/14/15/17/19-23/25 remain blocked on
+      the Corey-owned ghcr `write:packages` credential for the `sello-dev`
+      image (same fork as slices 11/16/18); slice 27 is Corey-physical (the
+      quiet-box timing runner). This slice needed only the always-available
+      base `ghcr.io/coreyleavitt/nim` image plus the already-public proptest
+      dependency, so it was pulled forward ahead of 25 -- the identical
+      judgment call slices 11/16/18 already made. Recorded in CLAUDE.md's
+      own "Nightly fuzz continuity" paragraph too.
+
+      **Required reading done first:** the RFC's A5 text (Part A) and the
+      Nightly paragraph (Part B, ~lines 738-760); the cache-policy paragraph
+      (~line 688: "no cross-branch cache trust ... keyed so non-main
+      branches cannot seed main-consumed entries"); the "6h"/nightly-budget
+      language in Ordering & risks; `scripts/fuzz.sh` and
+      `tests/fuzz/fuzz_common.nim`/`fuzz_main.nim` for the campaign shape,
+      corpus representation, and seconds-per-target mechanism;
+      `scripts/build-smoke.sh`/`scripts/ci-property.sh` for the milpa
+      -install-then-fetch pattern this slice's own script reuses.
+
+      **Gap found before any code was written:** the fuzz driver had NO
+      corpus persistence mechanism at all prior to this slice --
+      `report.corpus` (`FuzzCorpus`) lived only in the driver process's own
+      memory, discarded on exit. A container-side spike against a real
+      `milpa fetch --features proptest` checkout (`podman run` against the
+      pinned image, reading `_deps/proptest/src/proptest/{fuzz,db,
+      serialize}.nim` directly) found that proptest ALREADY ships exactly
+      the mechanism needed: `FuzzSettings.database: ExampleDatabase` +
+      `persistKey: string`, with the fuzz loop itself (not this project's
+      code) loading a prior corpus as seeds on start and calling
+      `database.saveCorpus` synchronously on every new-coverage admission
+      DURING the run (`proptest/fuzz.nim`'s own `saveCorpusActive` branch).
+      `directoryBasedDatabase(path)` (`db.nim`) is a file-backed
+      `ExampleDatabase` -- one `<safeKey(testId)>.bin` file per campaign
+      under `path`, atomic tmp-then-rename writes. This is a strictly
+      better design than hand-rolling directory-based serialization: one
+      audited copy of the persistence logic, owned by proptest, not sello.
+
+      **Mechanism (`tests/fuzz/fuzz_common.nim`, `fuzz_main.nim`):**
+      `runExternalTarget` gained `database: ExampleDatabase = ExampleDatabase()`
+      and `persistKey: string = ""` params (the zero-value default has all
+      closure fields nil, which `proptest/fuzz.nim`'s own `fuzz` proc
+      already treats as "persistence inactive" -- gated the same way here,
+      via `database.loadCorpusImpl != nil`, never dispatching through a nil
+      closure) plus `crashDir: string = "build/fuzz-crashes"`. Every
+      pre-slice-24 caller (a maintainer's plain `scripts/fuzz.sh`,
+      `scripts/build-smoke.sh`'s `--build-only` compile path) is
+      byte-for-byte unaffected -- verified by local runs both before and
+      after the change compiling clean via `nim check`. `fuzz_main.nim`
+      reads `SELLO_FUZZ_CORPUS_DIR` (empty = off) and, when set,
+      constructs ONE shared `directoryBasedDatabase` for all four targets,
+      each under its own `persistKey` (`sello-pointDecode`/`sello-verify`/
+      `sello-x25519`/`sello-ristrettoDecode`). A before/after `loadCorpus`
+      read around the `fuzz()` call (via the exported `fuzzCorpusKey`)
+      produces the corpus-delta summary line the RFC's A5 text asks for
+      ("corpus persistence: key=... restored entries=N" / "entries after
+      run=N (delta +M)"), without this project re-implementing anything
+      proptest's own loop already does live.
+
+      **Crash artifacts:** any retained `report.irCrashes` entry now writes
+      a `(<slug>-<i>.txt message, <slug>-<i>.choices.bin serialized-IR)`
+      pair to `crashDir` before `quit(1)`, via `proptest/serialize`'s
+      `toBytes(seq[ChoiceNode])` (a submodule import, same register as the
+      existing `proptest/choice` reach-for-a-specific-reason precedent) --
+      for ANY caller with a crash, not gated behind corpus persistence.
+
+      **Local verification before ever touching CI (podman, real builds,
+      not `nim check` alone):** (1) confirmed corpus continuity works
+      correctly across genuinely SEPARATE `podman run` invocations sharing
+      a bind-mounted `build/corpustest` directory (a first attempt using
+      an unmounted container-internal `/tmp` path gave a false "restored
+      entries=0" -- caught and understood before it became a CI-run
+      surprise: `/tmp` inside a `--rm` container does not survive across
+      separate `podman run` invocations, only a host-bind-mounted path
+      does); (2) confirmed the crash-artifact write path end-to-end via a
+      scratch (never-committed) local edit forcing `handlePointDecode` to
+      always crash, ran the full build+campaign, saw two crash artifact
+      pairs written and the driver exit 1 as expected, then restored the
+      file from git before touching version control.
+
+      **`scripts/nightly-fuzz.sh`:** dual-mode (matches every other
+      RFC-005 script). In-container body: `install_milpa` +
+      `milpa fetch --features proptest --locked` (same pattern as
+      `ci-property.sh`/`build-smoke.sh`), then the staleness canary
+      (below), then `SELLO_IN_CONTAINER=1 scripts/fuzz.sh "$seconds"`
+      (reused unmodified -- no duplicated build recipe), then a marker
+      refresh on real campaign success, then a summary + the final exit
+      decision (campaign failure takes precedence in the exit code, but
+      BOTH failure classes print an unmissable banner so a log reader
+      never has to guess which one fired).
+
+      **Nightly budget chosen:** 450s/target (1800s total across the four
+      targets) -- the documented midpoint of the RFC's own "300-600s
+      /target" guidance, meaningfully deeper than the 60s/target local-dev
+      default while leaving enormous headroom under GitHub's 6-hour
+      hosted-job limit (a 120-minute job `timeout-minutes` safety net sits
+      well above the ~30-minute expected wall clock and well below the
+      hard limit, so a genuine hang reads as a TIMEOUT rather than a
+      6-hour silent wait). All DoD demo runs below used a SHORTER override
+      (15-20s/target, via the `seconds_per_target` dispatch input) purely
+      for iteration speed -- the mechanism exercised is identical at any
+      budget; only the wall clock differs. The unmodified 450s/target
+      default is what the `schedule:` cron actually runs.
+
+      **`.github/workflows/nightly.yml`:** new, separate, non-required
+      workflow -- NOT in `scripts/lib/gates.txt`, not a `merge-gate.yml`
+      job (`gates-manifest-sync`/`ruleset-sync` both scan only
+      `merge-gate.yml` by hardcoded design, re-verified unaffected: their
+      own `workflow=` variables are unchanged), not yet badged (slice 26's
+      job). `schedule: cron: '17 3 * * *'` (a non-round UTC hour, per
+      GitHub's own scheduling-contention guidance) + `workflow_dispatch:`
+      with three optional inputs (`seconds_per_target`,
+      `staleness_threshold_hours`, `allow_cold_start`) existing
+      specifically to drive this slice's own DoD demos on demand. One job,
+      `fuzz`, same digest-pinned base image as every merge-gate job,
+      `permissions: {contents: read}`, workflow-wide (not per-ref)
+      `concurrency: {group: nightly-fuzz, cancel-in-progress: false}`.
+      `scripts/policy-lint.sh` (which DOES scan every workflow file)
+      passed clean locally before the first push (SHA-pinned actions:
+      `actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09` #v5,
+      `actions/cache/restore`+`actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830`
+      #v4, `actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02`
+      #v4, all resolved via `gh api repos/<owner>/<repo>/git/ref/tags/<v>`
+      before pinning; image digest reused verbatim from
+      `scripts/lib/image-pins.txt`, so no new pin-file entry was needed).
+
+      **Corpus carry mechanics:** `actions/cache/restore` + `actions/cache/save`
+      (the SPLIT actions, not the combined `actions/cache`, specifically so
+      save runs unconditionally via `if: always()` -- a stale or crashed
+      run still hands its own corpus growth forward to the next run).
+
+      **Cache-key isolation (the slice's own required deliverable), two
+      layers, both documented directly in the workflow YAML's own
+      comments:** (1) GitHub's built-in cache access scope -- a branch's
+      cache saves are visible only to that same branch, plus a read-only
+      fallback FROM the default branch TO every other branch, never the
+      reverse; (2) `github.ref_name` baked directly into both `key`
+      (`sello-fuzz-corpus-v1-<ref>-<run_id>`, always unique per run since
+      `actions/cache` cannot overwrite an existing key -- the standard
+      incremental-cache idiom) and `restore-keys` (the
+      `sello-fuzz-corpus-v1-<ref>-` prefix, same-branch-only, newest-first)
+      -- auditable straight from the YAML, not resting solely on GitHub's
+      documented-but-implicit scoping rules. Verified empirically, not
+      merely designed: the crash-demo scratch branch
+      (`rfc-005-slice24-crash-demo`) restored NOTHING from `main`'s own
+      cache lineage (`cache restore outcome: prefix/no match`, confirmed in
+      that run's own log) despite `main` already having three cache
+      entries at that point -- the isolation held in a real run, not just
+      on paper.
+
+      **Periodic corpus-snapshot artifact + crash-artifact upload:**
+      `actions/upload-artifact`, `if: always()` for the snapshot
+      (`fuzz-corpus-snapshot-<run_id>`, 7-day retention, `if-no-files-found:
+      ignore`) and `if: failure()` for crashes
+      (`fuzz-crashes-<run_id>`, 30-day retention) -- both verified present
+      via `gh api .../actions/runs/<id>/artifacts` on real runs below, not
+      merely present in the YAML.
+
+      **Staleness canary -- designed, then a REAL bug caught by its own
+      red-path demo (see run ids below):** `.last-success` timestamp
+      marker inside the corpus dir, written only after a campaign
+      completes with real exit 0, checked before that run's own campaign
+      starts. First implementation compared TRUNCATED integer hours
+      (`age_hours > threshold_hours`, both computed via `$(( seconds / 3600
+      ))`) -- a corpus marker only minutes old always truncates to `0h`,
+      so `SELLO_FUZZ_STALENESS_THRESHOLD_HOURS=0` (the documented
+      "force this canary red" mechanism) never tripped: `0 > 0` is false.
+      Caught live during the red-path demo itself (run `32797131873` came
+      back GREEN when it should have been red), root-caused from the run's
+      own log (`restored corpus marker age: 0h (threshold 0h)`), fixed by
+      comparing in SECONDS instead (`age_seconds > threshold_hours * 3600`)
+      -- verified locally (a bash-only logic test, both the threshold=0
+      and threshold=48 cases) before repushing, then re-verified for real
+      against the actual workflow (run `32797991560`, below). Absent
+      marker: also treated as stale unless
+      `SELLO_FUZZ_ALLOW_COLD_START=1` is explicitly set -- the one
+      legitimate case (this feature's own first-ever run). Consequence is
+      fails-the-job-only, stated in the script's own log output verbatim
+      ("no notification channel exists yet; slice 26 wires that").
+
+      **Snapshot-commit ritual:** documented in CLAUDE.md (not a new
+      README file -- "your call" per the task, CLAUDE.md chosen since this
+      repo has no precedent for per-directory READMEs and CLAUDE.md is
+      already the living record for every other mechanism). The working
+      corpus (cache-carried `.bin` files) is distinct from the small,
+      committed, human-reviewed corpus already living as
+      `tests/fuzz/fuzz_common.nim`'s hardcoded `*Seeds()` procs -- the
+      direct RFC-vector-vendoring precedent this project already follows
+      for Wycheproof. Promotion is a deliberate, never-automated human act
+      (decode an interesting entry, hand-transcribe its bytes into a new
+      `array[N, byte]` seed constant) -- never machine-committed, matching
+      the mutation-catalog's own "curated, not auto-regenerated" precedent.
+
+      **DoD demonstrations, all via `workflow_dispatch` (foreground-watched
+      throughout, per the task's own instruction):**
+
+      1. Branch `rfc-005-slice24` pushed; merge-gate run `32795443759`,
+         ALL SIXTEEN jobs green (582s), first push, no fix cycle. Fast
+         -forwarded to `main` (`90412b8..416f3b7`); `main`'s own re-run
+         `32796113380` also green (582s). `gh workflow run nightly.yml
+         --ref rfc-005-slice24` returned an HTTP 404 ("workflow not found
+         on the default branch") BEFORE the fast-forward -- confirming the
+         task's own anticipated trap: `workflow_dispatch` requires the
+         workflow file to exist on the DEFAULT branch before it can be
+         dispatched against ANY ref, branch included. Landing the minimal
+         version to `main` first (already required by the green
+         merge-gate) resolved this with no extra sequencing needed.
+      2. **Real green run (full campaign, all 4 targets, corpus saved):**
+         `gh workflow run nightly.yml --ref main -f seconds_per_target=20
+         -f allow_cold_start=true` -> run `32796753647`, SUCCESS, 162s.
+         Log: cold start (no marker), all four targets ran to completion,
+         zero crashes, corpus grew from 0 in every target
+         (pointDecode +4, verify +8, x25519 +3, ristrettoDecode +2),
+         marker written.
+      3. **Continuity proof (second dispatch, corpus restored + grew):**
+         `gh workflow run nightly.yml --ref main -f seconds_per_target=20`
+         -> run `32796945339`, SUCCESS, 160s. `restore fuzz corpus cache`
+         step's own log: `Cache hit for restore-key:
+         sello-fuzz-corpus-v1-main-32796753647` / `Cache restored from
+         key: sello-fuzz-corpus-v1-main-32796753647`, and a directory
+         listing inside the run showing all four `.bin` files plus
+         `.last-success` present BEFORE the campaign started. Campaign log:
+         `restored entries=4`/`8`/`3`/`2` (exactly run 2's own saved
+         counts) growing to `entries after run=6`/`12`/`3`/`4` (deltas
+         +2/+4/+0/+2) -- real, cache-carried, cross-run corpus growth
+         through the actual production entrypoint, not a local simulation.
+      4. **Staleness-canary red (real bug found and fixed in-flight):**
+         first attempt, `-f staleness_threshold_hours=0`, run `32797131873`
+         -- came back GREEN (144s), which was WRONG; investigated via the
+         run's own log (`restored corpus marker age: 0h (threshold 0h)`,
+         `0 > 0` false) and root-caused as an hour-truncation bug (see
+         above). Fixed on branch `rfc-005-slice24-staleness-fix`
+         (`ca5fbfe`); merge-gate `32797334540` green (16/16, 576s);
+         fast-forwarded to `main` (`416f3b7..ca5fbfe`). Re-dispatched with
+         the identical input: run `32797991560`, FAILED (128s) -- the `run
+         nightly fuzz campaign` step itself went red (`X`) while `save
+         fuzz corpus cache`/`upload corpus snapshot artifact`/`upload
+         crash artifacts` all still ran green via `if: always()`; log:
+         `nightly-fuzz: FAIL -- corpus staleness canary tripped: restored
+         corpus marker is 0h (703s) old, exceeds the 0h (0s) threshold`.
+         **Revert; green again:** `-f seconds_per_target=15` (default 48h
+         threshold), run `32798144161`, SUCCESS (141s).
+      5. **Crash-artifact upload (scratch branch, never merged):** branch
+         `rfc-005-slice24-crash-demo` (commit `ffef681`, an unconditional
+         `doAssert false` planted at the top of
+         `fuzz_external_target.handlePointDecode`, with an explicit
+         "never merge" comment and commit message). `gh workflow run
+         nightly.yml --ref rfc-005-slice24-crash-demo -f
+         seconds_per_target=15 -f allow_cold_start=true` -> run
+         `32798319892`, FAILED (76s) at the campaign step; log: `!!! CRASH
+         FOUND in ed25519.pointDecode !!!` plus five `crash artifact
+         written:` lines. `save`/`upload corpus snapshot artifact`/`upload
+         crash artifacts` all still ran (green) via `if: always()`/`if:
+         failure()`. Confirmed via `gh api
+         .../actions/runs/32798319892/artifacts`: both
+         `fuzz-crashes-32798319892` (2949 bytes) and
+         `fuzz-corpus-snapshot-32798319892` (398 bytes) present. Branch
+         deleted locally and on `origin` immediately after (`git branch
+         -D` + `git push origin --delete`), confirmed 404 via the GitHub
+         API -- never touched `main`, never left a crashing artifact
+         there.
+
+      **Escalation check (per the task's own rule):** the one crash found
+      during this slice was the deliberately-planted scratch-branch demo
+      above (an unconditional `doAssert false`, never a real input-
+      dependent finding) -- no genuine crash in sello's decode/verify
+      surface was found by the real campaigns (demo 2/3 above: zero
+      crashes across roughly 320s of real fuzzing per run). No escalation.
+
+      **Measured job times (recorded per the RFC's own instruction):**
+      merge-gate full battery ~582-576s (unchanged from prior slices,
+      confirming this slice's changes carry no merge-gate wall-clock
+      cost); nightly `fuzz` job 76-162s at the 15-20s/target DEMO budget
+      used throughout (real nightly default is 450s/target, ~1800s/~30min
+      total, not separately re-measured this slice since the mechanism
+      exercised is identical at any budget -- only wall clock scales
+      linearly with `seconds_per_target`).
+
+      **CLAUDE.md** updated in the same commit as the code (`416f3b7`):
+      a new "Nightly fuzz continuity" paragraph in the CI section (full
+      mechanism, cache-key isolation rationale, staleness canary's
+      fails-job-only scope, the snapshot-commit ritual), the `tests/fuzz/`
+      bullet's own extension (corpus persistence + crash artifacts), and a
+      `scripts/nightly-fuzz.sh` line in the script-list table.
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -2496,8 +2785,11 @@ Phase 4 — nightly, timing, release:
   THIS host should expect it).
 
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
-- Done: slices 1-9, 11, 12, 13, 16, 18 (14/32). All records above.
-- IN FLIGHT: slice 24 (nightly fuzz continuity A5) — background agent working; its record will be appended above on landing.
+- Done: slices 1-9, 11, 12, 13, 16, 18, 24 (15/32). All records above. Slice
+  24's own full record (corpus-carry design, cache-key isolation, the
+  staleness-canary hour-truncation bug found and fixed by its own red-path
+  demo, all six nightly-workflow run ids) is the entry immediately above
+  this note.
 - BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
 - Corey-owned: slice 27 (physical timing box); fork-PR-hold demo (slice 6); SECURITY.md attestation items (slice 5).
 - After 24: slice 26 is partially blocked (A9 memcheck needs sello-dev; A6 canary + notifications doable) — split decision pending at launch time. Slices 28-32 depend on earlier blocked/physical slices to varying degrees; 30/31 partially doable.
