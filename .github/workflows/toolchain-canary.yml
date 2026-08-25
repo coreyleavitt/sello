@@ -137,7 +137,13 @@ jobs:
   # zypper package names (`gcc gcc-c++ clang`) verified against the real,
   # live `opensuse/tumbleweed:latest` image before this workflow was
   # written (podman run, no committed pin -- see the handoff doc's slice
-  # 26 entry for the observed versions on that run).
+  # 26 entry for the observed versions on that run). `gawk` is a REAL
+  # finding from this workflow's own first hosted run, not anticipated by
+  # that local verification: `scripts/ci-nim-setup.sh`'s pin-table lookup
+  # uses `awk`, which this minimal container image does not ship by
+  # default (`awk: command not found`) -- fixed by adding `gawk`
+  # (verified via a fresh `podman run` before committing the fix, same as
+  # every other package in this line).
   #
   # BLOCKED EXTENSION, recorded honestly rather than attempted (per this
   # slice's own task instruction): A6's own text asks that these two legs
@@ -165,7 +171,7 @@ jobs:
       - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
         run: |
           zypper --non-interactive --gpg-auto-import-keys refresh
-          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip
+          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk
           gcc --version
       - name: install pinned Nim (isolates the gcc-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
@@ -186,7 +192,7 @@ jobs:
       - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
         run: |
           zypper --non-interactive --gpg-auto-import-keys refresh
-          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip
+          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk
           clang --version
       - name: install pinned Nim (isolates the clang-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
