@@ -117,11 +117,14 @@ on:
         description: >-
           RFC-005 slice 26 DoD demo knob: when true, an additional
           `timeout-demo` job runs with a deliberately tiny
-          timeout-minutes so its own conclusion is genuinely `timed_out`
-          (not `failure`/`cancelled`) -- proving the notify job's
-          timeout-vs-failure text distinction against a REAL timed-out
-          job, not merely a described one. Leave OFF for every ordinary
-          run (including the cron) -- this job never runs otherwise.
+          timeout-minutes so it is genuinely killed by GitHub for
+          exceeding it -- proving the notify job's timeout-vs-failure
+          text distinction against a REAL timeout, not merely a described
+          one. (Empirically, a timeout-killed job's own `conclusion` is
+          `cancelled`, the SAME value an ordinary cancel gets -- see the
+          `notify` job's own comment for the real detection mechanism
+          this demo proved out.) Leave OFF for every ordinary run
+          (including the cron) -- this job never runs otherwise.
         required: false
         type: boolean
         default: false
@@ -373,18 +376,31 @@ jobs:
         run: scripts/ci-property.sh
 
   # RFC-005 slice 26 DoD demo job: proves the `notify` job's TIMEOUT-vs-
-  # FAILURE text distinction against a REAL `timed_out` job conclusion,
-  # not merely a described one. NEVER runs on the cron or on an ordinary
-  # dispatch -- gated entirely behind the `timeout_demo` input (default
-  # false), same permanent-off-by-default-knob posture as
-  # `force_failure` above. `timeout-minutes: 1` plus a 90-second sleep
-  # guarantees GitHub kills this job for exceeding its own timeout,
-  # producing conclusion `timed_out` (a value distinct from both
-  # `failure` and `cancelled` -- see the `notify` job's own comment for
-  # the investigation confirming this against the real Jobs API, and why
-  # the `needs.<job>.result` EXPRESSION CONTEXT this job's own `if:`
-  # trigger relies on cannot see that distinction itself and must query
-  # the API directly instead).
+  # FAILURE text distinction against a REAL timed-out job, not merely a
+  # described one. NEVER runs on the cron or on an ordinary dispatch --
+  # gated entirely behind the `timeout_demo` input (default false), same
+  # permanent-off-by-default-knob posture as `force_failure` above.
+  # `timeout-minutes: 1` plus a 90-second sleep guarantees GitHub kills
+  # this job for exceeding its own timeout.
+  #
+  # EMPIRICAL CORRECTION (this slice's own first real dispatch of this
+  # job): the ORIGINAL design here assumed the REST Jobs API's documented
+  # `timed_out` conclusion value (distinct from `cancelled`) would appear
+  # for a timeout-killed job -- verified WRONG against a real run
+  # (docs/rfc-005-validation-infra.handoff.md's slice 26 entry has the
+  # cited run id): this job's own `conclusion` came back `cancelled`,
+  # identical to an ordinary manual/concurrency cancel, both at the job
+  # level AND at the step level (`GET .../actions/jobs/{id}`'s own
+  # `steps[].conclusion`). The REAL distinguishing signal, found by
+  # inspecting that same run's check-run ANNOTATIONS (`GET .../check-runs/
+  # {id}/annotations` -- a check-run's numeric id is identical to its
+  # own job id in this API, confirmed empirically), is a specific
+  # annotation message GitHub attaches only for a genuine timeout-kill:
+  # "The job has exceeded the maximum execution time of <duration>" --
+  # absent from an ordinary cancel's own annotations (which carry only
+  # the generic "The operation was canceled." both classes share). See
+  # the `notify` job's own comment, immediately below, for the corrected
+  # detection mechanism this finding drove.
   timeout-demo:
     name: timeout-demo
     if: ${{ inputs.timeout_demo == true }}
@@ -393,7 +409,7 @@ jobs:
     steps:
       - name: deliberately exceed timeout-minutes (slice 26 timeout-vs-failure demo only)
         run: |
-          echo "sleeping 90s against a 1-minute job timeout -- this job is EXPECTED to be killed with conclusion 'timed_out', not fail on its own terms."
+          echo "sleeping 90s against a 1-minute job timeout -- this job is EXPECTED to be killed by GitHub for exceeding it (conclusion 'cancelled' -- see this job's own comment for why that's the real value, not 'timed_out')."
           sleep 90
 
   # RFC-005 slice 26 (Nightly part 3): pinned-issue notification wiring
@@ -407,36 +423,50 @@ jobs:
   # explicit result check over the `needs.<job>.result` EXPRESSION
   # CONTEXT, whose only four possible values are `success`/`failure`/
   # `cancelled`/`skipped` (verified against GitHub's own documented
-  # context reference before writing this condition) -- note `timed_out`
-  # is NOT one of the four: a job killed by `timeout-minutes` reports
-  # `failure` in THIS context, collapsing the distinction this job's own
-  # message body then has to recover a different way (see below).
+  # context reference before writing this condition). A timeout-killed
+  # job's own result in THIS context is `cancelled` (see below) -- already
+  # one of the four values this `if:` condition checks, so the TRIGGER
+  # itself needs no special-casing; only the MESSAGE BODY (below) needs
+  # to tell a genuine cancel apart from a timeout-caused one.
   #
   # Timeout-vs-failure distinction, INVESTIGATED AND VERIFIED EMPIRICALLY
   # this slice (per the task's own instruction, not merely asserted from
-  # docs): the REST "list jobs for a workflow run" endpoint
-  # (`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`) reports each
-  # job's real `conclusion` field from a LARGER enum than the `needs`
-  # expression context exposes --
-  # success/failure/neutral/cancelled/skipped/timed_out/action_required/
-  # null -- confirmed against GitHub's own REST API reference and, for
-  # `timed_out` specifically, against a REAL run of the `timeout-demo`
-  # job above (see docs/rfc-005-validation-infra.handoff.md's slice 26
-  # entry for the cited run id and the observed `conclusion` value). The
-  # detection mechanism this job actually uses: query that Jobs API
-  # directly (below) and inspect each job's real `conclusion`, rather
-  # than trusting the collapsed `needs.<job>.result` value for anything
-  # beyond "should this notify job run at all."
+  # docs) -- AND CORRECTED after the first real dispatch of the
+  # `timeout-demo` job above contradicted the original design's own
+  # assumption: the REST "list jobs for a workflow run" endpoint's
+  # documented `conclusion` enum DOES list a `timed_out` value distinct
+  # from `cancelled` (confirmed against GitHub's own REST API reference),
+  # but a REAL job killed by exceeding its own `timeout-minutes` was
+  # observed to report `conclusion: "cancelled"` -- NOT `timed_out` --
+  # both at the job level and at the per-step level (`GET .../actions/
+  # jobs/{id}`'s own `steps[].conclusion`), identical to an ordinary
+  # manual/concurrency cancel (see docs/rfc-005-validation-infra.
+  # handoff.md's slice 26 entry for the cited run id). The REAL
+  # distinguishing signal, found by inspecting that SAME job's check-run
+  # ANNOTATIONS (`GET /repos/{owner}/{repo}/check-runs/{id}/annotations`
+  # -- a check-run's own numeric id is identical to its job id in this
+  # API, confirmed empirically): GitHub attaches an annotation reading
+  # "The job has exceeded the maximum execution time of <duration>" ONLY
+  # for a genuine timeout-kill -- absent from an ordinary cancel's own
+  # annotations (which carry just the generic "The operation was
+  # canceled." both classes share). The detection mechanism this job
+  # actually uses, below: query the Jobs API for every job's real
+  # `conclusion`; for each one that reads `cancelled`, query ITS OWN
+  # check-run annotations and grep for that exact phrase to split
+  # "timeout" from "genuine cancel" -- the literal, corrected answer to
+  # "investigate and record the actual detection mechanism you use."
   #
   # Permissions: workflow-level `permissions:` above stays `contents:
   # read` (unchanged) -- this job alone widens, via its OWN job-level
   # `permissions:` block (a complete redefinition for this job, not an
   # additive union with the workflow-level default -- GitHub's own
   # documented job-permissions semantics), to also carry `issues: write`
-  # (open/comment on the notification issue) and `actions: read` (the
-  # Jobs API query above -- `contents: read` is repeated here rather than
-  # dropped, since this job also checks out the repo for
-  # scripts/lib/notify-failure.sh).
+  # (open/comment on the notification issue), `actions: read` (the Jobs
+  # API query), and `checks: read` (the check-run annotations query, a
+  # separate permission scope from `actions:` -- added after the
+  # annotations query above was added) -- `contents: read` is repeated
+  # here rather than dropped, since this job also checks out the repo for
+  # scripts/lib/notify-failure.sh.
   notify:
     name: notify-on-failure
     # `timeout-demo` is included here (not just `fuzz`/`cranked-properties`)
@@ -458,16 +488,32 @@ jobs:
       contents: read
       issues: write
       actions: read
+      checks: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: build failure summary (real per-job conclusions, timeout distinguished)
+      - name: build failure summary (real per-job conclusions, timeout vs. genuine-cancel split via check-run annotations)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p build
           gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate > build/nightly-jobs.json
+
+          # Split every "cancelled" job into TIMEOUT vs. genuine CANCELLED
+          # by querying its own check-run annotations (see this job's own
+          # comment above for the full empirical investigation this
+          # implements). A job's id IS its check-run id in this API.
+          timeout_names=""
+          cancelled_names=""
+          for jid in $(jq -r '.jobs[] | select(.conclusion == "cancelled") | .id' build/nightly-jobs.json); do
+            jname="$(jq -r --argjson id "$jid" '.jobs[] | select(.id == $id) | .name' build/nightly-jobs.json)"
+            if gh api "repos/${{ github.repository }}/check-runs/$jid/annotations" --jq '.[].message' 2>/dev/null | grep -qF "exceeded the maximum execution time"; then
+              timeout_names="$timeout_names $jname"
+            else
+              cancelled_names="$cancelled_names $jname"
+            fi
+          done
 
           {
             echo "Nightly workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -476,16 +522,16 @@ jobs:
             echo "|---|---|"
             jq -r '.jobs[] | select(.name != "notify-on-failure") | "| \(.name) | \(.conclusion) |"' build/nightly-jobs.json
             echo ""
-            if jq -e '.jobs[] | select(.conclusion == "timed_out")' build/nightly-jobs.json >/dev/null; then
-              echo "**TIMEOUT** -- at least one job above hit its \`timeout-minutes\` limit (conclusion: \`timed_out\`). This reads as a wall-clock/infrastructure event, not a code regression -- investigate speed, not correctness, first (RFC-005 Part B: a job timeout must not read as a finding)."
+            if [ -n "$timeout_names" ]; then
+              echo "**TIMEOUT** -- job(s)$timeout_names exceeded their own \`timeout-minutes\` limit (per their check-run annotations; both report plain \`conclusion: cancelled\`, indistinguishable from a genuine cancel without this check). This reads as a wall-clock/infrastructure event, not a code regression -- investigate speed, not correctness, first (RFC-005 Part B: a job timeout must not read as a finding)."
               echo ""
             fi
             if jq -e '.jobs[] | select(.conclusion == "failure")' build/nightly-jobs.json >/dev/null; then
-              echo "**FAILURE** -- at least one job above genuinely failed (conclusion: \`failure\`, not a timeout). Investigate that job's own log for a real finding."
+              echo "**FAILURE** -- at least one job above genuinely failed (conclusion: \`failure\`). Investigate that job's own log for a real finding."
               echo ""
             fi
-            if jq -e '.jobs[] | select(.conclusion == "cancelled")' build/nightly-jobs.json >/dev/null; then
-              echo "**CANCELLED** -- at least one job above was cancelled (not a timeout, not an assertion failure -- e.g. a concurrent run superseding this one, or a manual cancel)."
+            if [ -n "$cancelled_names" ]; then
+              echo "**CANCELLED** -- job(s)$cancelled_names were cancelled for a reason OTHER than their own timeout (e.g. a concurrent run superseding this one, or a manual cancel)."
               echo ""
             fi
           } > build/nightly-notify-body.md

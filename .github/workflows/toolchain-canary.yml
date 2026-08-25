@@ -274,16 +274,35 @@ jobs:
       contents: read
       issues: write
       actions: read
+      checks: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
-      - name: build failure summary (real per-job conclusions, timeout distinguished)
+      # Timeout-vs-genuine-cancel split: see nightly.yml's own `notify`
+      # job comment for the full empirical investigation (a timeout-killed
+      # job's real `conclusion` is `cancelled`, not the REST API's
+      # documented-but-unobserved `timed_out` value -- the real signal is
+      # a check-run annotation reading "The job has exceeded the maximum
+      # execution time of ..."). Same mechanism, this workflow's own job
+      # set.
+      - name: build failure summary (real per-job conclusions, timeout vs. genuine-cancel split via check-run annotations)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p build
           gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate > build/canary-jobs.json
+
+          timeout_names=""
+          cancelled_names=""
+          for jid in $(jq -r '.jobs[] | select(.conclusion == "cancelled") | .id' build/canary-jobs.json); do
+            jname="$(jq -r --argjson id "$jid" '.jobs[] | select(.id == $id) | .name' build/canary-jobs.json)"
+            if gh api "repos/${{ github.repository }}/check-runs/$jid/annotations" --jq '.[].message' 2>/dev/null | grep -qF "exceeded the maximum execution time"; then
+              timeout_names="$timeout_names $jname"
+            else
+              cancelled_names="$cancelled_names $jname"
+            fi
+          done
 
           {
             echo "toolchain-canary workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
@@ -297,16 +316,16 @@ jobs:
             echo "|---|---|"
             jq -r '.jobs[] | select(.name != "notify-on-failure") | "| \(.name) | \(.conclusion) |"' build/canary-jobs.json
             echo ""
-            if jq -e '.jobs[] | select(.conclusion == "timed_out")' build/canary-jobs.json >/dev/null; then
-              echo "**TIMEOUT** -- at least one leg above hit its \`timeout-minutes\` limit (conclusion: \`timed_out\`)."
+            if [ -n "$timeout_names" ]; then
+              echo "**TIMEOUT** -- leg(s)$timeout_names exceeded their own \`timeout-minutes\` limit."
               echo ""
             fi
             if jq -e '.jobs[] | select(.conclusion == "failure")' build/canary-jobs.json >/dev/null; then
-              echo "**FAILURE** -- at least one leg above genuinely failed (conclusion: \`failure\`, not a timeout)."
+              echo "**FAILURE** -- at least one leg above genuinely failed (conclusion: \`failure\`)."
               echo ""
             fi
-            if jq -e '.jobs[] | select(.conclusion == "cancelled")' build/canary-jobs.json >/dev/null; then
-              echo "**CANCELLED** -- at least one leg above was cancelled."
+            if [ -n "$cancelled_names" ]; then
+              echo "**CANCELLED** -- leg(s)$cancelled_names were cancelled for a reason OTHER than their own timeout."
               echo ""
             fi
           } > build/canary-notify-body.md
