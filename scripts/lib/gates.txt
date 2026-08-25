@@ -179,6 +179,15 @@
 # gate this slice, not deferred to the sello-dev credential fork the way
 # slices 10/14/15/17 are.
 #
+# RFC-005 slice 31 (README evidence table + drift check): a pure text
+# scan over README.md's validation-map table plus its badge/platform/
+# CT-scope sections (round-2 corrections (i)-(iii) to the Part B
+# evidence-story paragraph) -- no Nim/podman/milpa needed, same
+# no-container register as gates-manifest-sync/ruleset-sync/policy-lint
+# above. scripts/validation-map-check.sh's own header has the full
+# mechanism (parsing, per-category assertions, the CT-scope-vs-
+# image-pins.txt version cross-check).
+#
 # check-name                        script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
@@ -196,3 +205,4 @@ gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh
 policy-lint                         scripts/policy-lint.sh
 build-smoke                         scripts/build-smoke.sh
+validation-map                      scripts/validation-map-check.sh

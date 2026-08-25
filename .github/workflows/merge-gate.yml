@@ -481,3 +481,27 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/build-smoke.sh
+
+  # RFC-005 slice 31 (README evidence table + drift check): parses
+  # README.md's validation-map table (every CLAUDE.md "validation bar"
+  # claim, mapped to its enforcing mechanism, per RFC-005 Part B's
+  # evidence-story paragraph and its round-2 corrections (i)-(iii)) and
+  # asserts each row's declared mechanism is real -- a required-check
+  # row's job exists in this workflow AND scripts/lib/gates.txt, a
+  # nightly row's job exists in nightly.yml, a manual-ritual row's
+  # freshness canary is a real committed file, a committed "pending slice
+  # N" allowlist entry, or an explicit "none (by design)". Also checks
+  # the badge-URL branch pin, the toolchain-canary workflow's deliberate
+  # lack of a badge, the platform-support claim's named CI legs, and the
+  # CT compiler-scope claim's gcc/clang versions and image digest against
+  # scripts/lib/image-pins.txt's committed record. Pure text scan over
+  # committed files -- no Nim/podman/milpa needed -- so this runs on a
+  # plain `ubuntu-latest` runner, no `container:`, same rationale as
+  # gates-manifest-sync/ruleset-sync/policy-lint above. Still exactly one
+  # scripts/ invocation.
+  validation-map:
+    name: validation-map
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/validation-map-check.sh

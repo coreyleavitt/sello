@@ -500,16 +500,78 @@ proofs -- lives in [`docs/`](docs/): [`docs/ct-results.md`](docs/ct-results.md)
 and [`docs/mutation-results.md`](docs/mutation-results.md) are the standing
 evidence records, and `docs/rfc-001-signing.md` through
 `docs/rfc-006-sha512.md` are the design docs each piece of that evidence
-was built against. The required CI matrix builds sello on Linux (amd64
-and arm64), macOS (arm64), and Windows (amd64, MinGW-w64 gcc) -- MSVC
-(`vcc`) is not a supported build target: the constant-time signer's
-secret-wipe primitive (`private/ct.nim`) depends on an `asm volatile`
-compiler barrier, which MSVC's compiler intrinsics have no equivalent
-for. This section is deliberately minimal for now -- a
-hand-curated table mapping every validation-bar claim to its enforcing
-mechanism, with its own drift check against CI, is planned but not yet
-built; until it lands, this section makes no per-check claims beyond the
-badge itself.
+was built against.
+
+### Validation map
+
+The table below maps every claim in `CLAUDE.md`'s "The validation bar"
+section to the mechanism that enforces it. It is hand-curated -- the
+prose is the value -- but its load-bearing columns (**Category**,
+**Mechanism**, **Freshness canary**, **Carve-out doc**, **Row key**) are
+checked on every push by the `validation-map` gate
+(`scripts/validation-map-check.sh`), so this table cannot silently drift
+from what CI actually runs. **Category** is one of three kinds, each with
+its own mechanical proof that the named mechanism is real, not merely
+claimed:
+
+- **required-check** -- a job in `merge-gate.yml`'s required set (checked:
+  the job name exists in both `.github/workflows/merge-gate.yml` and
+  `scripts/lib/gates.txt`; the live GitHub ruleset's required-check set is
+  itself *generated* from `gates.txt` by `scripts/ruleset-apply.sh` and
+  independently verified against it by the `ruleset-sync` gate, so
+  `gates.txt` membership is the correct, non-duplicative proxy here).
+- **nightly** -- a job in the separate, non-required `nightly.yml`
+  workflow (checked: the job name exists there).
+- **manual-ritual** -- a maintainer-run script with no CI wiring of its
+  own yet (checked: the row's declared **Freshness canary** is real -- a
+  committed file, an entry in the committed
+  `scripts/lib/validation-map-pending.txt` allowlist recording which
+  future slice owes the real canary, or an explicit `none (by design)`
+  for a ritual the RFC never demanded a freshness canary for at all).
+
+<!-- VALIDATION-MAP:TABLE START -->
+| Claim | Category | Mechanism | Freshness canary | Carve-out doc | Row key |
+|---|---|---|---|---|---|
+| Bit-exact pass of RFC 8032 (ed25519) and RFC 7748 (X25519) vectors | required-check | `unit-linux-amd64-gcc` (and its five sibling `unit-*` legs across the CI matrix) | n/a | none | rfc-vectors |
+| Pass Google Wycheproof adversarial vectors (ed25519 + X25519) | required-check | `unit-linux-amd64-gcc` (same unit suite; no Wycheproof corpus exists for ristretto255 -- RFC 9496 App. A plus fuzzing plus the libsodium differential suite carry that weight instead) | n/a | none | wycheproof |
+| dudect timing harness -- compiles cleanly, no verdict | required-check | `build-smoke` (compiles `tests/ct/ct_main.nim`, never runs it) | n/a | none | dudect-compile-smoke |
+| dudect timing harness -- real worst-case t-statistic verdict, ten targets | manual-ritual | `scripts/ct.sh` (maintainer-run, `-d:release`, roughly 1e6 samples/class) | pending slice 28 | `docs/ct-results.md` | dudect-full-battery |
+| Mutation testing of the highest-risk arithmetic/boundary logic (84/84 killed) | manual-ritual | `scripts/mutation.sh` | none (by design) | `docs/mutation-results.md` | mutation-catalog |
+| Audited alternative implementation builds cleanly (`-d:selloLibsodium`) | required-check | `api-surface-libsodium` (facade compiles and its surface diff is pinned under this config; does not itself run the interop suite below) | n/a | none | libsodium-build |
+| Differential adversarial testing against libsodium, bidirectional interop | manual-ritual | `scripts/test-libsodium.sh` (needs the `sello-dev` image; blocked on the same ghcr credential as RFC-005 slice 14) | none (by design) | none | libsodium-interop |
+| Property-based testing of field/scalar/ristretto/sha512 primitives | required-check | `property-linux-amd64-gcc` (and `property-linux-amd64-clang`, `property-linux-arm64-gcc`) | n/a | none | property-merge-gate |
+| Property-based testing -- deeper nightly pass at a cranked example count | nightly | `cranked-properties` (10x `maxExamples`, same suites as the merge-gate job above) | n/a | none | property-cranked-nightly |
+| Coverage-guided fuzzing -- target and driver compile, one iteration run | required-check | `build-smoke` (real SanitizerCoverage instrumentation; one deterministic known-valid input, not a campaign) | n/a | none | fuzz-compile-smoke |
+| Coverage-guided fuzzing -- real campaign with cross-run corpus continuity | nightly | `fuzz` (450s/target default, persisted corpus via proptest's `directoryBasedDatabase`) | n/a | none | fuzz-nightly-campaign |
+| Coverage-guided fuzzing -- periodic corpus snapshot promoted into the committed seed corpus | manual-ritual | hand-curation of interesting entries into `fuzz_common.nim`'s `*Seeds()` procs (the one standing manual duty the no-bots rule imposes) | `scripts/nightly-fuzz.sh` (its corpus staleness canary is the compensating control) | none | fuzz-snapshot-ritual |
+| Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | manual-ritual | `scripts/bmc.sh` (needs the `sello-dev` image; blocked on the same ghcr credential as RFC-005 slice 15) | none (by design) | none | bmc-symex |
+<!-- VALIDATION-MAP:TABLE END -->
+
+**Platform support.** <!-- VALIDATION-MAP:PLATFORM START -->The required
+CI matrix builds and tests sello on: linux amd64 (`unit-linux-amd64-gcc`,
+`unit-linux-amd64-clang`, `unit-linux-amd64-gcc-asan-ubsan`), linux arm64
+(`unit-linux-arm64-gcc`), macOS arm64 (`unit-macos-arm64-clang`), and
+Windows amd64 (`unit-windows-amd64-gcc`, MinGW-w64 gcc). MSVC (`vcc`) is
+not a supported build target: the constant-time signer's secret-wipe
+primitive (`private/ct.nim`) depends on an `asm volatile` compiler
+barrier, which MSVC's compiler intrinsics have no equivalent for. WASM is
+not merely untested but **unsupported-for-secrets**: `private/ct.nim`'s
+wipe barrier and `std/sysrand` do not exist there, so the wipe and
+keygen guarantees are void; the verify-only path may well compile, but
+nothing in this README claims more than that.<!-- VALIDATION-MAP:PLATFORM END -->
+
+**CT claim scope.** <!-- VALIDATION-MAP:CT-SCOPE START -->The dudect
+timing evidence in `docs/ct-results.md` is verified on the CI-pinned
+toolchains only: gcc 16.1.1, clang 22.1.8, both inside the pinned image
+`ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780`
+(`scripts/lib/image-pins.txt`'s own committed record is the source of
+truth for these three numbers; this sentence is checked against it, not
+the other way around). A consumer who compiles sello with their own
+toolchain -- a different gcc/clang version, a different libc, a different
+optimization level -- is compiling code this project believes is
+constant-time by construction (branchless on secret data, arithmetic
+masking throughout), but has not itself measured under that toolchain;
+that residual is disclosed here, not elided.<!-- VALIDATION-MAP:CT-SCOPE END -->
 
 ## Building and testing
 

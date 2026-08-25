@@ -1,0 +1,30 @@
+# scripts/lib/validation-map-pending.txt -- RFC-005 slice 31: the
+# committed allowlist scripts/lib/validation_map_check.py validates every
+# README validation-map row's "pending slice N" Freshness-canary cell
+# against, rather than trying to infer live "has slice N landed yet"
+# status from docs/rfc-005-validation-infra.handoff.md's prose (which
+# would be brittle -- prose reformats, headings move, and a scan tuned to
+# today's phrasing breaks silently on tomorrow's edit). Instead: a row
+# claiming "pending slice N" must have an EXACT matching entry here, so
+# the claim is itself a reviewed, committed fact, not a free-floating
+# assertion -- moving a row off "pending" requires touching this file in
+# the same commit that lands the real canary, the same "regenerable pin,
+# hand-maintained, drift is a diff" register scripts/lib/gates.txt and
+# scripts/lib/image-pins.txt already use for their own committed facts.
+#
+# Format: two whitespace-separated columns, <row-key> <slice-number>,
+# `#`-comments and blank lines ignored (same convention as gates.txt).
+# <row-key> must match the README table's own Row key column exactly.
+#
+# dudect-full-battery: the CT dudect battery's own timing-freshness
+# canary (querying the self-hosted timing-tier runner for the latest
+# successful battery, notifying if older than a threshold) is a
+# slice-28 deliverable (RFC-005 Part B) -- blocked on the same
+# Corey-owned physical timing-tier hardware prerequisite as slices
+# 27/29 (see docs/rfc-005-validation-infra.handoff.md's control-loop
+# status note: "Corey-owned: slice 27 (physical timing box)... Slices
+# 28-32 depend on earlier blocked/physical slices to varying degrees").
+# Until it lands, the full battery stays a manual-ritual row with no
+# mechanical freshness proof beyond this recorded, reviewed pending
+# marker.
+dudect-full-battery 28
