@@ -3253,4 +3253,23 @@ Phase 4 — nightly, timing, release:
 - BLOCKED on Corey (write:packages ghcr credential for sello-dev push): slices 10, 14, 15, 17, 19-23, 25, plus slice 26's own A9 sub-item. Unblock: `! gh auth refresh -h github.com -s write:packages`, then push the archived image (/home/corey/.cache/sello-dev-image/) per slice 7's open-fork instructions.
 - Corey-owned: slice 27 (physical timing box); fork-PR-hold demo (slice 6); SECURITY.md attestation items (slice 5).
 - Slice 28 depends on slice 27 (physical); slice 29 depends on 27-28; slice 30 depends on 28-29 for its timing-freshness clause (a recorded degraded mode covers the gap -- see "Ordering & risks" above). Slice 31 is DONE (this session, out of order -- needed neither). Slice 32 depends on slice 30 (the release gate) for its registry-PR precondition.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above).
+- Slice 30 deferral decision (control loop, 2026-08-25): slice 30's
+  nightly-qualification clause keys on the RFC's enumerated subset --
+  fuzz, s390x, memcheck, cranked properties (RFC line ~738). Two of the
+  four (s390x = slice 25, memcheck = A9) are credential-blocked, so a
+  release workflow built today would check for nightly evidence no job
+  can produce: a consumer without its producer, the exact dormant-substrate
+  shape the standing orders forbid, and its "missing nightly
+  qualification" red demo would be trivially, permanently red with no
+  demonstrable green counterpart. Recommendation (confident): defer slice
+  30 until slice 25 + the A9 memcheck job land, i.e. it is transitively
+  blocked on the same ghcr credential. Corey can override by directing a
+  reduced qualification subset (fuzz + cranked properties only), which
+  would let 30's workflow land now at the cost of a release gate weaker
+  than the RFC's own round-2 text -- not recommended.
+- GRIND STATE (2026-08-25, end of unattended window): 17/32 done; every
+  remaining slice (10, 14, 15, 17, 19-23, 25, 27, 28, 29, 30, 32, plus
+  A9) is blocked on Corey -- the ghcr write:packages credential, the
+  physical timing box, or a dependency chain ending in one of those. The
+  /loop grind is PAUSED; nothing further is launchable unattended.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, push the archived sello-dev image (slice 7's open-fork instructions), then resume RFC order at slice 10.
