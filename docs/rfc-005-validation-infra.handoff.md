@@ -127,7 +127,27 @@
   plus compiles (never runs) `tests/ct/ct_main.nim`. Fourteen required
   jobs total. See the full slice entry below for the build-sharing
   design (`--build-only` retrofit on `scripts/fuzz.sh`/`scripts/ct.sh`),
-  run ids, and the red-then-green sequence.
+  run ids, and the red-then-green sequence. Slice 18 (DONE 2026-08-24,
+  taken deliberately out of order -- slices 10/14/15/17 remain blocked on
+  that same Corey-owned ghcr `write:packages` credential; slice 18 needed
+  only the always-available base image, verified before any design work
+  rather than assumed) landed the API-surface gate (A8): `api-surface`/
+  `api-surface-libsodium`, a generated facade-surface dump diffed against
+  a committed baseline via the newly-landed `scripts/lib/baseline.sh`
+  (assigned by the RFC to slice 17, pulled forward here since slice 17
+  stays blocked and slice 18 is this file's first actual consumer -- see
+  that slice's own entry for the full placement-swap reasoning). The
+  verify-first spike confirmed empirically that neither `nim doc` nor
+  `nim jsondoc` enumerates a module's re-exports, and that the pinned
+  base image lacks `libsodium-devel` yet the generator never needs it
+  (`nim jsondoc` never invokes a C compiler/linker) -- so both configs'
+  baselines landed as full CI jobs this slice with no dependency on the
+  credential-blocked `sello-dev` image. Real red-then-green demo:
+  exporting the deliberately-unexported `ristretto.ristrettoUnchecked`
+  confirmed RED in BOTH configs through a real push, all other jobs
+  staying green, then reverted and confirmed green again. Sixteen
+  required jobs total. See the full slice entry below for the complete
+  spike writeup, blind spots, the plain/libsodium delta, and run ids.
 
 ## Slices (32 — see RFC "Slices" section for full DoDs)
 
@@ -871,8 +891,8 @@ Phase 2 — heavy deterministic gates (independent after 7):
 - [ ] 14. libsodium differential job (skip paths fatal under CI env var)
 - [ ] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision)
 - [x] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error) -- DONE 2026-08-24, taken out of order (see slice 11's precedent and CLAUDE.md). Code `defa505` (mechanism + job), red demo `41a8e2d`, revert `2b3747a`. See the full slice entry below for mechanism design, run ids, and the red-then-green sequence.
-- [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs)
-- [ ] 18. API-surface gate A8 (generator verify-first spike; dual baselines)
+- [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs) -- BLOCKED on the same Corey-owned ghcr write:packages credential as slices 10/14/15 (the sello-dev image); scripts/lib/baseline.sh itself was pulled forward into slice 18 instead (see that slice's own entry and CLAUDE.md's placement-swap note) since slice 18 needed only the base image.
+- [x] 18. API-surface gate A8 (generator verify-first spike; dual baselines) -- DONE 2026-08-24, taken out of order (see slice 11's/16's precedent and CLAUDE.md) -- slices 10/14/15/17 remain blocked on the same Corey-owned ghcr credential; this slice needed only the base image. Code `ad24138` (mechanism, generator, baseline.sh, both jobs, both baselines), red demo `ec1fde2`, revert `eee808c`. See the full slice entry below for mechanism design, spike findings, run ids, and the red-then-green sequence.
 
 Phase 3 — CT instruments (19→20→21→22→23 chain):
 - [ ] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike)
@@ -2185,6 +2205,237 @@ Phase 4 — nightly, timing, release:
       the `ct_main` no-verdict-authority statement, the reordering note),
       and short cross-references added to the existing `tests/fuzz/`/
       `tests/ct/` bullets plus the `scripts/*.sh` usage block.
+
+- [x] 18. API-surface gate A8 -- DONE 2026-08-24, taken deliberately out of
+      order (see slice 11's/16's own precedent and CLAUDE.md): slices
+      10/14/15/17 remain blocked on the same Corey-owned ghcr
+      `write:packages` credential for the `sello-dev` image; this slice
+      needed only the always-available base `ghcr.io/coreyleavitt/nim`
+      image, verified as an assumption check BEFORE any design work (per
+      the task's own instruction), not assumed.
+
+      **FIRST TASK: the verify-first spike, done before committing to a
+      design.** Prototyped directly against the real base image (alt-root
+      podman on this host -- see the standing /tmp and /home mount traps
+      below; `podman cp`/`create`+`start`+`exec` into a long-lived scratch
+      container, not bind mounts, per this slice's own instructions).
+      Tried `nim doc --project --index:on` first: it FAILED OUTRIGHT in
+      this environment, before even reaching the re-export question --
+      `Error: unhandled exception: No such file or directory ... doc/
+      nimdoc.css` -- the pinned base image ships no `doc/` assets at all
+      (confirmed via `find`; no `doc/` directory anywhere under
+      `/opt/nim/2.2.10-patched`). `nim jsondoc` (a sibling of `nim doc`
+      sharing the front end but not the missing CSS dependency) DID run,
+      and confirmed the RFC's own premise empirically rather than by
+      assertion: `nim jsondoc src/sello.nim` emits `"entries": []` --
+      zero declarations, because every symbol `sello.nim` exposes is a
+      re-export, and `jsondoc`/`doc` only ever enumerate a module's OWN
+      declarations. Run twice back-to-back on the same source and
+      compared byte-for-byte identical (`json.load(...) == ...` -> `True`)
+      -- deterministic, confirmed rather than assumed.
+
+      **Mechanism chosen -- a hybrid, per the RFC's own "a hybrid is fine
+      if that's what proves out" allowance.** `tests/api/
+      api_surface_gen.py`: (1) parses `src/sello.nim`'s own `export`
+      statements textually (candidate (a)'s first half -- exact for this
+      file's own hand-enumerated export block, not a full Nim parser);
+      (2) resolves each parsed name's full signature by running `nim
+      jsondoc` against a small CURATED corpus of source files -- the six
+      modules `sello.nim` itself imports (`wire`, `wipe`, `ed25519`,
+      `x25519`, `signing`, `ristretto`), confirmed against its own
+      `import` lines, PLUS `private/backend.nim`/`private/backend_sodium.nim`,
+      added after a real spike finding: `export signing.SodiumInitError`
+      names `signing`, but `SodiumInitError` is not declared there --
+      `signing.nim` only re-exports it from whichever backend file
+      `import ... as backend` resolves to under the active config, a
+      two-hop chain the original six-module corpus would have missed
+      entirely (caught by testing, not anticipated in the plan -- the
+      first full-suite run on the `selloLibsodium` config came back
+      MISSING `SodiumInitError` until this was found and fixed). A
+      "compiled probe module" (candidate (a)'s other half) was considered
+      and rejected: resolving an OVERLOADED bare identifier's full
+      signature set generically from inside a macro needs `bindSym`'s
+      open-symbol-choice machinery for real, nontrivial complexity `nim
+      jsondoc` already solves per-module with none -- `nim jsondoc` on
+      `wire.nim` alone correctly enumerated all six of its overloaded
+      `toBytes`/`==`/`$`/`hash` pairs with full signatures and effects in
+      one pass, verified by direct inspection before committing to the
+      corpus-based design over the probe-module one.
+
+      **Blind spots, recorded in the generator's own module doc comment
+      and in CLAUDE.md (per the RFC's own instruction that these travel
+      WITH the mechanism, not just get asserted away):** wildcard export
+      forms (`export somemodule` with no `.symbol`) are UNTESTED against
+      a real case -- none exists in `src/sello.nim` today (verified) --
+      and the parser does not fail loud on one, a genuine, honestly
+      -disclosed gap rather than a claimed-handled one; converter
+      visibility is caught only as an ordinary `skConverter`-tagged diff
+      with no special blast-radius flag (no `converter` exists in `src/`
+      today, also verified, also untested); corpus-wide bare-name
+      resolution (the fallback used for `SodiumInitError` and the three
+      bare exports `verify`/`x25519Base`/`X25519BasePoint`) assumes at
+      most one corpus file declares any given name -- true today,
+      verified -- and FAILS LOUD on a hypothetical future collision
+      rather than silently picking one.
+
+      **A real generator bug found and fixed during the spike, NOT a
+      facade defect:** an early smoke test appeared to show zero
+      `x25519.*` entries in the plain-config dump. Root-caused (not
+      assumed) to the TEST HARNESS, not the generator: `python3
+      api_surface_gen.py plain | tee out.txt | head -20` let `head`'s
+      early exit SIGPIPE-kill `tee` mid-write, truncating the captured
+      file well before the alphabetically-last `x25519.*` section ever
+      printed -- confirmed by re-running with plain output redirection
+      (`> out.txt`, no pipe), which produced the full, correct 86-line
+      dump with all 24 `x25519.*` lines present, and by directly calling
+      `resolve('x25519', 'x25519', index)` in isolation, which returned
+      the correct entries throughout. Recorded here as the concrete
+      "verify empirically, do not assume a first symptom's cause" moment
+      this slice's own instructions ask for.
+
+      **Libsodium-in-base-image verdict, and why the dual-config gate
+      landed in full THIS slice rather than deferring to the sello-dev
+      archive.** `zypper se -i libsodium` inside the pinned base image
+      returned "No matching items found" -- confirmed empirically:
+      `libsodium-devel` is NOT installed. Per the task's own decision
+      tree this would normally route the `-d:selloLibsodium` baseline to
+      the archived `sello-dev` OCI tarball
+      (`/home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar`).
+      Instead, tested the actual generator command directly against the
+      define first: `nim jsondoc -d:selloLibsodium src/sello.nim` inside
+      the BARE base image (no libsodium headers anywhere) -- it
+      SUCCEEDED (`53699 lines; ... [SuccessX]`), because `nim jsondoc` is
+      a Nim-semantic-pass-only tool that never invokes a C compiler or
+      linker: an FFI `{.importc, header: "sodium.h".}` declaration
+      resolves as a plain name binding at this stage, with no need for
+      the header to exist on disk. This is the "verify assumption early"
+      task instruction paying off directly -- both `api-surface` and
+      `api-surface-libsodium` landed as full CI jobs this slice, on the
+      base image, with NO dependency on the credential-blocked sello-dev
+      image at all (the archive was never touched).
+
+      **The plain<->libsodium delta, reviewed.** Generated both dumps in
+      the same scratch container and diffed them directly (Python set
+      difference, not eyeballed): exactly 10 lines only-in-plain and 11
+      only-in-libsodium -- the 10 are `signing.keypair`/`public`/`sign`
+      (x2)/`toSeed`/`toSeedBytes`/`wipe` (x2)'s plain-config
+      `{.raises.}` pragma text, replaced one-for-one in the libsodium
+      dump by the identical entries with `SodiumInitError` folded into
+      their `raises` list, PLUS one genuinely new entry,
+      `private/backend_sodium.SodiumInitError` itself. Exactly the
+      expected shape (SodiumInitError plus widened raises effects only,
+      per this slice's own task text) -- no escalation triggered.
+
+      **`scripts/lib/baseline.sh` placement swap.** RFC-005 Part B
+      assigns this shared library to slice 17 (the coverage ratchet),
+      "its interface proof-spiked against the disasm gate's needs...
+      before freezing on coverage alone" -- slice 17 remains BLOCKED on
+      the same Corey-owned ghcr credential as slices 10/14/15 (confirmed:
+      the coverage ratchet's own instrumented-build mechanics need the
+      packages `scripts/lib/image-pins.txt`'s `sello-dev` section
+      records, not yet published), so it could not land first as the
+      RFC's own slice numbering implies. Slice 18 is this file's actual
+      FIRST consumer and lands the full contract unchanged from the RFC's
+      own text (`baseline_check`/`baseline_update`, `#`-prefixed header
+      with kind/generator/regeneration-command/image-digest/
+      compiler-version, `--update` hard-failing under `$CI`) -- slice 17
+      is expected to `source` this file exactly as slice 18 does, not
+      fork or duplicate it. **A second, unplanned spike finding inside
+      this file's own diff-printing path:** the pinned base image ships
+      NEITHER `diff` NOR `cmp` at all (confirmed: `ls /usr/bin | grep -E
+      '^diff|^cmp'` -> empty) -- `baseline_check`'s diff-on-failure
+      output falls back to Python's `difflib` (the same image DOES ship
+      `python3`, already relied on by `scripts/lib/milpa-install.sh`),
+      exercised for real by every CI run of the red demo below (the
+      captured job logs show a real unified diff, not a `diff: command
+      not found` failure). **CI-guard demo, done locally before ever
+      touching the real gate (per this slice's own dry-run discipline):**
+      `CI=1 scripts/api-surface-check.sh plain --update` (inside the
+      scratch container) printed `REFUSING to run under CI ($CI is set)`
+      and exited 1, confirmed BEFORE the real push -- the guard the RFC's
+      own text calls load-bearing ("without it, a compromised action
+      could run the gate with --update and convert the pin into a
+      self-approving no-op") verified working, not merely present in the
+      source. `scripts/merge-gate.sh --update-baselines` also verified
+      locally: dispatches `scripts/api-surface-check.sh plain --update`
+      and `... selloLibsodium --update` in turn, from a small explicit
+      `baseline_gate_names` array (not every gate understands `--update`,
+      so this is a maintained list, not a blind append across the whole
+      manifest).
+
+      **Committed baselines.** `tests/api-surface/expected/plain.txt` (86
+      body lines) and `.../selloLibsodium.txt` (87), both generated via
+      `scripts/api-surface-check.sh <config> --update` inside the scratch
+      container, copied out via `podman cp`, and committed verbatim (the
+      exact bytes the gate later re-verified against on the real push,
+      not regenerated a second time).
+
+      **Ruleset flow (apply BEFORE push, per this slice's own instruction
+      and slice 16's precedent -- the target push is a scratch branch,
+      not `main`, so applying early carries no risk):** dry run first
+      (`scripts/ruleset-apply.sh`, confirmed the diff was EXACTLY the two
+      new `context` entries, `api-surface`/`api-surface-libsodium`,
+      nothing else), then `--apply` for real, updating the live `main`
+      ruleset's required-check array to the 16-check set generated from
+      `scripts/lib/gates.txt`.
+
+      **Green run (first push, all 16 jobs, no fix cycle needed):**
+      branch `rfc-005-slice18`, commit `ad24138`, run `32789905370` --
+      ALL SIXTEEN jobs green on the first push, including both new ones
+      (`api-surface` 29s, `api-surface-libsodium` 32s -- both well under
+      the property jobs' own ~9-9.5-minute critical path, no wall-clock
+      -budget concern raised). Fast-forwarded to `main` (`8807592..ad24138`);
+      post-fast-forward `main` run `32790641521` also green, all sixteen
+      jobs. Branch `rfc-005-slice18` deleted (locally and on `origin`),
+      confirmed 404.
+
+      **Red demo, isolated scratch branch (`rfc-005-slice18-red-demo`,
+      never merged to `main`) -- the crown-jewel security-event case, per
+      this slice's own task text ("exporting `ristrettoUnchecked` caught
+      red would be the crown-jewel demo").** Added one line to
+      `src/sello.nim`: `export ristretto.ristrettoUnchecked` (commit
+      `ec1fde2`) -- the exact deliberately-unexported symbol CLAUDE.md
+      names by name as a security boundary. Pushed; run `32791377243`:
+      BOTH `api-surface` (job `97633446839`, RED in ~29s) AND
+      `api-surface-libsodium` went RED in the SAME run (confirmed via
+      `gh run view --json jobs`: `{"conclusion":"failure"}` for exactly
+      those two, `"conclusion":"success"` for all fourteen others,
+      including `unit-linux-amd64-gcc`/`property-linux-amd64-gcc`/etc. --
+      the plant is real-facade-wide, so BOTH configs' dumps pick it up
+      independently, exactly as expected for a symbol with no `when
+      defined(selloLibsodium)` guard on it). Captured the real log line
+      via `gh run view --job ... --log`:
+      `+ristretto.ristrettoUnchecked :: skProc :: func ristrettoUnchecked(p: GeP3): RistrettoPoint {.inline, raises: [], gcsafe, tags: [], forbids: [].}`
+      -- the gate's own diff output naming the exact leaked symbol and
+      its full signature, not a generic failure. Reverted (`git revert
+      --no-edit`, commit `eee808c`); pushed; run `32792093479`: all
+      SIXTEEN jobs green again. Scratch branch deleted (locally and on
+      `origin`) without ever touching `main` -- the planted export
+      existed only on this now-deleted branch/commit history, confirmed
+      404.
+
+      **Escalation check (per the task's own rule):** no discrepancy was
+      found between the facade's actual reachable surface and CLAUDE.md's
+      own enumerated-export description -- the spike's only surprises
+      (the `nim doc` CSS gap, the SIGPIPE test-harness artifact, the
+      SodiumInitError two-hop corpus gap, the missing `diff`/`cmp`
+      binaries, the libsodium-devel absence resolved by a mechanism
+      -level finding rather than the credential fork) were all tooling
+      -level, not surface-level. No escalation triggered.
+
+      **Wall-clock note:** both new jobs' own time (29-32s) is small
+      relative to the run's overall critical path, which stays dominated
+      by the ~9-9.5-minute property jobs as before -- no wall-clock
+      -budget concern raised by this slice, matching slice 16's own
+      build-smoke finding.
+
+      **CLAUDE.md** updated in the same commit as the code (`ad24138`):
+      job count fourteen -> sixteen (three occurrences), a new
+      "API-surface gate" paragraph in the CI section (spike outcome,
+      mechanism, recorded blind spots, dual-baseline verdict, the
+      plain<->libsodium delta, the `baseline.sh` placement-swap note),
+      and a `--update-baselines` mention added to the existing
+      `scripts/merge-gate.sh` paragraph.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
