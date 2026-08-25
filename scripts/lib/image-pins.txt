@@ -85,3 +85,47 @@ ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890
 # push happens.
 
 sello-dev 806abfce49ffbbe88798043770b2698fc8ca1b7e88558946bc8c077d07ede932 ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+
+# === Production toolchain versions (informational, RFC-005 slice 26) =======
+# A6's toolchain canary (.github/workflows/toolchain-canary.yml)
+# watches Nim devel/latest-stable and the newest packaged gcc/clang for
+# DRIFT relative to what this project's own PINNED, production toolchain
+# actually is -- the RFC's own text: "All compiler pins (Nim + gcc +
+# clang versions, image digest) are recorded in a committed file." The
+# Nim version and image digest already have their own authoritative
+# record elsewhere (this file's base-image section, above, plus every
+# workflow's own `container:` field) -- this section adds the one
+# missing piece: the gcc/clang version strings actually observed INSIDE
+# that pinned image, so a maintainer reading the canary's nightly log can
+# compare its observed "newest" version against a committed baseline
+# without re-deriving it by hand each time.
+#
+# NOT a live/mechanical diff target (the canary workflow does not parse
+# or compare against this section programmatically -- see that
+# workflow's own header comment on why the leg's OWN rolling-baseline
+# design, not a diff against this file, is what actually alerts on
+# drift): this is the human-readable reference record the RFC's text
+# asks for, refreshed by hand at repin time (i.e. whenever the
+# base-image section's digest above is updated), the same "informational,
+# hand-verified" register as the Containerfile's own header-comment
+# package table.
+#
+# Observed by running `gcc --version` / `clang --version` /
+# `cat /etc/os-release` / `nim --version` inside a real (no-mount)
+# `podman run` of the EXACT digest recorded in this file's base-image
+# section above, on 2026-08-25 (RFC-005 slice 26):
+#
+#   gcc:    gcc (SUSE Linux) 16.1.1 20260731
+#   clang:  clang version 22.1.8
+#   os:     openSUSE Tumbleweed, VERSION="20260806"
+#   nim:    Nim Compiler Version 2.2.10 [Linux: amd64], compiled 2026-08-09
+#
+# For comparison, the SAME observation taken the SAME day against a bare,
+# unpinned `opensuse/tumbleweed:latest` pull (i.e. exactly what
+# toolchain-canary.yml's `newest-gcc`/`newest-clang` legs run against) --
+# gcc had already drifted forward from this image's pinned snapshot, clang
+# had not (yet):
+#
+#   gcc:    gcc (SUSE Linux) 16.2.0            (pinned image: 16.1.1)
+#   clang:  clang version 22.1.8               (pinned image: 22.1.8, unchanged)
+#   os:     openSUSE Tumbleweed, VERSION="20260822"

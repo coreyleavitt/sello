@@ -85,7 +85,24 @@
 # compiler-less; `scripts/lib/mingw-pin.txt` is the separate, dedicated
 # pin for the MinGW-w64 toolchain this leg needs on top.
 #
+# RFC-005 slice 26 adds the `linux-x86_64` row below, again the SAME
+# nightlies release/source commit as every other row -- consumed by
+# .github/workflows/toolchain-canary.yml's `newest-gcc`/`newest-clang`
+# legs (A6). Those legs run inside a DELIBERATELY UNPINNED, live
+# `opensuse/tumbleweed:latest` container (the whole point is watching the
+# newest packaged gcc/clang drift -- see that workflow's own header for
+# the rationale), which ships no Nim toolchain of its own -- this row
+# gives those legs the SAME pinned, stable Nim every other amd64 job
+# runs, so the one variable under test on those legs is genuinely the C
+# compiler alone, not also a moving Nim version. Verified the same way
+# slice 12 independently re-verified its own darwin-arm64 row: downloaded
+# the asset fresh from the exact dated release tag (NOT `latest-*`, which
+# are the deliberately-moving tags the canary legs read directly instead
+# -- see scripts/lib/nim-canary-install.sh) and computed its SHA-256
+# locally before recording it here.
+#
 # platform-key      release-tag                                                       asset-name                          sha256
 linux-aarch64        2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_arm64.tar.xz       cd86a6e2bcbf029c4870aa51df5c0169345dbf9959889112fd15d403c13ae33a
 darwin-arm64         2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-macosx_arm64.tar.xz      9a3b012d0680d11d6163dd2f145470b090c1045f5e634f42daf119bea1cb2b5e
 windows-x86_64       2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-windows_x64.zip          fe0686a9b298e5b13d0a983df37e002a8c6320f8b16cc45a51d15cf4046a109f
+linux-x86_64         2026-04-24-version-2-2-bfeb3146d1638b39f69007a4ae5a23e23ae4e5ef    nim-2.2.10-linux_x64.tar.xz         0a3a38752e97e9d44aa479b3a7b37336dfe0176daf22ee5b5218ad0991ecd211

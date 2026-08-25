@@ -1,6 +1,7 @@
 # sello
 
 [![merge-gate](https://github.com/coreyleavitt/sello/actions/workflows/merge-gate.yml/badge.svg?branch=main)](https://github.com/coreyleavitt/sello/actions/workflows/merge-gate.yml?query=branch%3Amain)
+[![nightly](https://github.com/coreyleavitt/sello/actions/workflows/nightly.yml/badge.svg?branch=main)](https://github.com/coreyleavitt/sello/actions/workflows/nightly.yml?query=branch%3Amain)
 
 Pure-Nim ed25519 (EdDSA, RFC 8032) signing and verification, plus X25519
 (ECDH, RFC 7748) key exchange -- the Curve25519 family. **No FFI in the
@@ -478,10 +479,20 @@ full boundary.
 
 ## Validation
 
-The badge above reflects the status of `main`'s required CI checks (see
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the current gate list and how to
-run the same checks locally). The evidence backing the claims made
-throughout this README --
+The `merge-gate` badge above reflects the status of `main`'s required CI
+checks (see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the current gate
+list and how to run the same checks locally). The `nightly` badge
+reflects a separate, NON-required, non-gating workflow: long-running
+fuzz campaigns with a persisted corpus and property suites at a cranked
+example count -- deeper evidence than fits a per-push gate, run on a
+schedule rather than blocking a merge; a red `nightly` badge means one
+of those deeper runs needs attention, not that `main` is broken. (A
+third, unbadged workflow, `toolchain-canary`, watches Nim
+devel/newest-stable, the newest packaged gcc/clang, and milpa's own
+`main` HEAD for drift against this project's pinned toolchain --
+advisory-only by design, so it deliberately carries no badge of its own;
+see CLAUDE.md's CI section for the full nightly/canary design.) The
+evidence backing the claims made throughout this README --
 RFC 8032/RFC 7748 vector conformance, Wycheproof adversarial vectors, the
 dudect timing harness, mutation testing, differential testing against
 libsodium, property-based testing, coverage-guided fuzzing, and the Z3

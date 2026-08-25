@@ -10,6 +10,7 @@ import std/[unittest]
 import proptest
 import sello/signing
 import sello/ed25519
+import ./property_crank
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -20,9 +21,10 @@ proc seedBytes32(): Strategy[array[32, byte]] =
 proc settingsWithExamples(n: int): Settings =
   ## RFC-002 slice 3 item 3: `coverageGuided` also flipped on here -- see
   ## test_properties_field.nim's `covSettings` doc comment for the full
-  ## rationale (not repeated here).
+  ## rationale (not repeated here). `n` routed through `cranked()`
+  ## (RFC-005 slice 26) -- see tests/unit/property_crank.nim.
   result = defaultSettings()
-  result.maxExamples = n
+  result.maxExamples = cranked(n)
   result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)

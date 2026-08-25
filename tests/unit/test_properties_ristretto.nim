@@ -24,6 +24,7 @@ import proptest
 import sello/ristretto
 import sello/field
 import sello/scalar
+import ./property_crank
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -91,9 +92,16 @@ proc settingsWithExamples(n: int): Settings =
   ## used for anything drawing `randomRistrettoPoints()` -- see
   ## `settingsForPoints`'s doc comment just below for why that generator
   ## needs a different settings proc entirely.
+  ##
+  ## `n` routed through `cranked()` (RFC-005 slice 26) BEFORE computing
+  ## `maxRejections`, not after -- the rejection budget must scale with
+  ## the CRANKED example count, or a cranked run would exhaust its
+  ## rejection headroom well before reaching its (now larger) target
+  ## `maxExamples`. See tests/unit/property_crank.nim.
+  let nCranked = cranked(n)
   result = defaultSettings()
-  result.maxExamples = n
-  result.maxRejections = max(1000, n * 64)
+  result.maxExamples = nCranked
+  result.maxRejections = max(1000, nCranked * 64)
   result.coverageGuided = true
 
 proc settingsForPoints(n: int): Settings =
@@ -115,9 +123,14 @@ proc settingsForPoints(n: int): Settings =
   ## properties, still coverage-guided, unchanged) since its
   ## `.filter()`-over-`arrays[32,byte]` shape is exactly what the
   ## coverage-guided engine's assumptions fit.
+  ##
+  ## `n` routed through `cranked()` the same way `settingsWithExamples`
+  ## does, immediately above (RFC-005 slice 26) -- see
+  ## tests/unit/property_crank.nim.
+  let nCranked = cranked(n)
   result = defaultSettings()
-  result.maxExamples = n
-  result.maxRejections = max(1000, n * 64)
+  result.maxExamples = nCranked
+  result.maxRejections = max(1000, nCranked * 64)
   result.coverageGuided = false
 
 let propertySettings50 = settingsWithExamples(50)

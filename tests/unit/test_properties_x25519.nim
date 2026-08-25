@@ -14,6 +14,7 @@
 import std/[unittest, options]
 import proptest
 import sello/x25519
+import ./property_crank
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -29,9 +30,10 @@ proc settingsWithExamples(n: int): Settings =
   ## `defaultSettings()` (fixed seed, reproducible) with `maxExamples`
   ## dialed down for the costlier Montgomery-ladder properties in this
   ## suite -- same rationale as test_properties_scalar.nim's
-  ## `settingsWithExamples`.
+  ## `settingsWithExamples`. `n` routed through `cranked()` (RFC-005
+  ## slice 26) -- see tests/unit/property_crank.nim.
   result = defaultSettings()
-  result.maxExamples = n
+  result.maxExamples = cranked(n)
   result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)

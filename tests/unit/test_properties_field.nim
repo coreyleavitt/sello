@@ -33,6 +33,7 @@
 import std/unittest
 import proptest
 import sello/field
+import ./property_crank
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -49,7 +50,13 @@ proc covSettings(): Settings =
   ## these properties' call graphs, so `__coverage__` scores stay empty),
   ## whose value grows once source-level `{.cover.}` instrumentation
   ## exists to feed it. See docs/rfc-002-audit-remediation.md Slice 3.
+  ##
+  ## `maxExamples` routed through `cranked()` (RFC-005 slice 26): a no-op
+  ## multiply-by-1 for every existing caller (SELLO_PROPERTY_CRANK unset),
+  ## and the nightly `cranked-properties` job's hook for real -- see
+  ## tests/unit/property_crank.nim's own doc comment for the full design.
   result = defaultSettings()
+  result.maxExamples = cranked(result.maxExamples)
   result.coverageGuided = true
 
 # ---------------------------------------------------------------------------

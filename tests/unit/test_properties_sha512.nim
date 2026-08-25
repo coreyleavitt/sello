@@ -23,12 +23,15 @@
 import std/unittest
 import proptest
 import sello/private/sha512
+import ./property_crank
 
 proc settingsWithExamples(n: int): Settings =
   ## `defaultSettings()` (fixed seed, reproducible) -- same rationale as
-  ## test_properties_scalar.nim's `settingsWithExamples`.
+  ## test_properties_scalar.nim's `settingsWithExamples`. `n` routed
+  ## through `cranked()` (RFC-005 slice 26) -- see
+  ## tests/unit/property_crank.nim.
   result = defaultSettings()
-  result.maxExamples = n
+  result.maxExamples = cranked(n)
   result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)

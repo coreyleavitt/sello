@@ -16,6 +16,7 @@ import proptest
 import sello/field
 import sello/scalar
 import sello/ed25519
+import ./property_crank
 
 proc randByte(): Strategy[byte] =
   integers(0, 255).map(proc(x: int): byte = byte(x))
@@ -41,8 +42,11 @@ proc reducedScalar(): Strategy[array[32, byte]] =
 proc covSettings(): Settings =
   ## RFC-002 slice 3 item 3: `Settings.coverageGuided` enabled for the
   ## property suites -- see test_properties_field.nim's `covSettings`
-  ## doc comment for the full rationale (not repeated here).
+  ## doc comment for the full rationale (not repeated here). `maxExamples`
+  ## routed through `cranked()` (RFC-005 slice 26) -- see
+  ## tests/unit/property_crank.nim.
   result = defaultSettings()
+  result.maxExamples = cranked(result.maxExamples)
   result.coverageGuided = true
 
 # ---------------------------------------------------------------------------
@@ -211,9 +215,10 @@ proc settingsWithExamples(n: int): Settings =
   ## suite -- keeps the added wall time bounded without disabling the
   ## engine's other defaults (shrinking, autoLabels, etc.). Also flips
   ## `coverageGuided` on (RFC-002 slice 3 item 3 -- see `covSettings`'s
-  ## doc comment above).
+  ## doc comment above). `n` routed through `cranked()` (RFC-005 slice 26)
+  ## -- see tests/unit/property_crank.nim.
   result = defaultSettings()
-  result.maxExamples = n
+  result.maxExamples = cranked(n)
   result.coverageGuided = true
 
 let propertySettings50 = settingsWithExamples(50)

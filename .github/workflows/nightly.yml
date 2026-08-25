@@ -1,37 +1,58 @@
 name: nightly
 
-# RFC-005 slice 24 (Nightly part 1: fuzz continuity, A5) -- the first job
-# in what RFC-005 Part B calls the "Nightly" workflow (scheduled,
-# NON-BLOCKING: not a required check, not in scripts/lib/gates.txt, not
-# yet badged -- the nightly badge is slice 26's own deliverable, once the
-# canary/notification jobs land alongside this one in the same file).
-# Later RFC-005 slices (25: s390x/A4; 26: toolchain canaries/A6, cranked
-# properties, untainted memcheck/A9, pinned-issue notifications) ADD jobs
-# to this same workflow rather than forking a new one, mirroring
-# merge-gate.yml's own one-workflow-keeps-widening convention -- see A6's
-# own text for the ONE deliberate exception (the toolchain canary gets
-# its OWN workflow, specifically so its advisory, never-gate contract can
-# never taint this workflow's own pass/fail badge).
+# RFC-005 slice 24 (Nightly part 1: fuzz continuity, A5) landed the first
+# job in what RFC-005 Part B calls the "Nightly" workflow (scheduled,
+# NON-BLOCKING: not a required check, not in scripts/lib/gates.txt).
+# Slice 26 (Nightly part 3: canaries + notifications) adds the
+# `cranked-properties` job and the `notify` job to this same file, plus
+# the nightly badge in README.md -- both ADDED here rather than forked
+# into a new workflow, mirroring merge-gate.yml's own one-workflow-
+# keeps-widening convention. The ONE deliberate exception (per A6's own
+# text) is the toolchain/resolver-drift canary
+# (.github/workflows/toolchain-canary.yml, also new in slice 26): its own
+# workflow file, specifically so its advisory, never-gate contract can
+# never taint THIS workflow's own pass/fail badge -- see that file's own
+# header comment. Slice 25 (s390x, A4) and the A9 untainted-memcheck job
+# (also slice 26's own nominal scope, per the RFC's slice list) both
+# remain BLOCKED on the same Corey-owned ghcr `write:packages` credential
+# already blocking slices 10/14/15/17/19-23 (the `sello-dev` image push --
+# see scripts/lib/image-pins.txt's own sello-dev section and the handoff
+# doc's slice 7 entry for the exact unblock steps): s390x needs
+# `sello-dev`'s cross-s390x-gcc16/qemu-linux-user packages, and A9
+# memcheck needs its `valgrind` package -- neither package exists in the
+# always-available base `ghcr.io/coreyleavitt/nim` image this workflow's
+# `fuzz`/`cranked-properties` jobs already run inside. Recorded as blocked
+# extensions of this same file (extend in place once the credential
+# lands), not attempted via a workaround (e.g. `apt-get install valgrind`
+# on a bare `ubuntu-latest` runner would diverge from this project's
+# pinned-image posture -- the suite must run inside the pinned container,
+# and hosted ubuntu cannot run that container WITH valgrind inside without
+# the `sello-dev` image existing).
 #
-# Reordering note (recorded per this slice's own task instruction):
-# slices 10/14/15/17/19-23/25 remain blocked on a Corey-owned ghcr
-# `write:packages` credential (the `sello-dev` image push -- see
-# scripts/lib/image-pins.txt's own sello-dev section and the handoff
-# doc's slice 7 entry for the exact unblock steps), and slice 27 is
-# Corey-physical (the quiet-box timing runner). This slice needs only the
+# Reordering note (recorded per RFC-005's own out-of-order-landing
+# convention, restated for this slice): slice 26 needs only the
 # always-available base `ghcr.io/coreyleavitt/nim` image plus the
-# already-public proptest dependency, so it was pulled forward ahead of
-# 25 -- the identical "needed only the base image" reasoning that already
-# pulled slices 16 and 18 forward in the merge-gate track (see their own
-# handoff entries).
+# already-public proptest dependency for its two in-scope deliverables
+# (cranked properties, notification wiring) -- the SAME "needed only the
+# base image" reasoning that already pulled slices 16/18/24 forward -- so
+# it lands ahead of slice 25 and ahead of its own A9 sub-item, exactly as
+# slice 24's own header predicted ("slice 26 is partially blocked... A6
+# canary + notifications doable" -- see the handoff doc's slice-24
+# control-loop note).
 #
 # Trigger: `schedule` (cron, quiet UTC hour -- see below) + manual
-# `workflow_dispatch` with three optional inputs, all of which exist
-# SPECIFICALLY so this slice's own DoD demonstrations (a real green run,
-# a continuity-proof second run, a staleness-canary red run, a crash-
-# artifact-upload demo) can be driven on demand rather than waiting on
-# the cron -- scripts/nightly-fuzz.sh's own header comment has the full
-# per-input design (defaults, threshold semantics, cold-start opt-in).
+# `workflow_dispatch`. The first three inputs (slice 24) exist so that
+# slice's own DoD demonstrations (a real green run, a continuity-proof
+# second run, a staleness-canary red run, a crash-artifact-upload demo)
+# can be driven on demand rather than waiting on the cron --
+# scripts/nightly-fuzz.sh's own header comment has the full per-input
+# design (defaults, threshold semantics, cold-start opt-in). Slice 26
+# adds three more, all in the identical spirit (a permanent, always-off-
+# by-default dispatch knob is cheaper and more honest than a plant-then-
+# revert scratch commit for a mechanism this workflow is expected to need
+# again): `property_crank`, `force_failure`, and `timeout_demo` -- see
+# each input's own description below and the `cranked-properties`/
+# `notify`/`timeout-demo` jobs' own comments for how each is consumed.
 #
 # 03:17 UTC: an intentionally NON-round time (GitHub's own scheduling
 # guidance: workflows scheduled for the top of the hour, or other popular
@@ -68,6 +89,39 @@ on:
           ordinary run (including the cron); only the true first-ever
           run of this feature (or a deliberate cache reset) should set
           this.
+        required: false
+        type: boolean
+        default: false
+      property_crank:
+        description: >-
+          Override SELLO_PROPERTY_CRANK for the cranked-properties job
+          (a positive integer multiplier applied to every
+          test_properties_*.nim suite's own tuned maxExamples -- see
+          tests/unit/property_crank.nim). Leave blank for the job's own
+          nightly default (10x -- see the cranked-properties job's own
+          comment for the recorded factor and its measured wall-clock
+          cost). Use a small value (e.g. 2) for a fast demo/iteration run.
+        required: false
+        type: string
+      force_failure:
+        description: >-
+          RFC-005 slice 26 DoD demo knob: when true, the fuzz job fails
+          immediately (before running any real campaign) so the `notify`
+          job's pinned-issue wiring can be exercised on demand without
+          waiting for a genuine crash or staleness trip. Leave OFF for
+          every ordinary run.
+        required: false
+        type: boolean
+        default: false
+      timeout_demo:
+        description: >-
+          RFC-005 slice 26 DoD demo knob: when true, an additional
+          `timeout-demo` job runs with a deliberately tiny
+          timeout-minutes so its own conclusion is genuinely `timed_out`
+          (not `failure`/`cancelled`) -- proving the notify job's
+          timeout-vs-failure text distinction against a REAL timed-out
+          job, not merely a described one. Leave OFF for every ordinary
+          run (including the cron) -- this job never runs otherwise.
         required: false
         type: boolean
         default: false
@@ -118,6 +172,22 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # --- RFC-005 slice 26 DoD demo knob -----------------------------------
+      #
+      # `force_failure`: fails this job immediately, before any real
+      # campaign work, so the `notify` job's pinned-issue wiring can be
+      # exercised on demand (workflow_dispatch) without waiting for a
+      # genuine crash or a genuine staleness trip. Off by default and on
+      # every scheduled (cron) run -- this step is a no-op unless someone
+      # deliberately dispatches with the input set. See
+      # docs/rfc-005-validation-infra.handoff.md's slice 26 entry for the
+      # real demo run id and the resulting issue URL.
+      - name: forced failure (slice 26 notification demo only)
+        if: ${{ inputs.force_failure == true }}
+        run: |
+          echo "::error::forced failure requested via workflow_dispatch input 'force_failure' (RFC-005 slice 26 notification-wiring demo -- not a real finding)"
+          exit 1
 
       # --- Corpus carry: restore ------------------------------------------
       #
@@ -229,3 +299,199 @@ jobs:
           path: build/fuzz-crashes
           if-no-files-found: ignore
           retention-days: 30
+
+  # RFC-005 slice 26 (Nightly part 3): the property suites at a CRANKED
+  # example count -- "more examples per property than the merge-gate's
+  # own property-linux-amd64-{gcc,clang} jobs run, deep enough to be worth
+  # a dedicated nightly slot, cheap enough to still finish well inside a
+  # single hosted job." Independent of (does not `need:`) the `fuzz` job
+  # above -- RFC-005 Part B's own nightly-budget paragraph: "nightly jobs
+  # run as parallel independent jobs, each under its own limit."
+  #
+  # Mechanism (investigated before writing any code, per this slice's own
+  # task instruction): proptest exposes NO external "run at Nx examples"
+  # knob of its own -- `Settings.maxExamples` is a plain `int` field each
+  # `test_properties_*.nim` file's own per-suite settings constructor
+  # already sets (verified by reading `_deps/proptest/src/proptest/
+  # engine/types.nim`'s `defaultSettings()`, whose baseline is 100, and
+  # all six `test_properties_*.nim` files' own `covSettings`/
+  # `settingsWithExamples`/`settingsForPoints` constructors). Per this
+  # slice's own task text ("a small env-var hook in the test files'
+  # settings construction is acceptable -- touch tests only, no src/
+  # changes"), `tests/unit/property_crank.nim` is a new, small, TEST-ONLY
+  # helper (`propertyCrankFactor()`/`cranked()`) that every one of those
+  # six files' settings constructors now routes its own base example
+  # count through -- a positive integer multiplier read from
+  # SELLO_PROPERTY_CRANK, default 1 (a no-op) for every OTHER caller
+  # (a maintainer's plain scripts/test.sh, the required
+  # property-linux-amd64-{gcc,clang}/property-linux-arm64-gcc merge-gate
+  # jobs) so this mechanism carries zero cost or behavior change anywhere
+  # except this one job, which sets it explicitly below.
+  #
+  # CRANK FACTOR: 10x (SELLO_PROPERTY_CRANK=10), recorded here as the
+  # nightly default per this slice's own task instruction ("the crank
+  # factor must be SPECIFIED AND RECORDED... not left as an adjective").
+  # `property_crank` (workflow_dispatch input, above) overrides it for
+  # faster demo/iteration runs -- every DoD demo run for this job used a
+  # SMALLER override purely for turnaround speed; the unmodified 10x
+  # default is what the `schedule:` cron actually runs. MEASURED WALL
+  # CLOCK at the real 10x factor: see
+  # docs/rfc-005-validation-infra.handoff.md's slice 26 entry for the
+  # cited run id and duration (recorded there, not duplicated here, per
+  # this project's own "measured, not estimated" convention -- see e.g.
+  # the `fuzz` job's own header, which does the same).
+  #
+  # Same digest-pinned base image + `scripts/ci-property.sh` build path as
+  # the required `property-linux-amd64-gcc` merge-gate job (RFC-005 Part
+  # B's build-path invariant) -- SELLO_PROPERTY_CRANK is a bare
+  # environment variable, so no plumbing beyond this one `env:` line is
+  # needed: `ci-property.sh` forwards its own environment untouched into
+  # `scripts/test.sh` and the `nim c -r` processes it spawns, and every
+  # `test_properties_*.nim` file reads the variable independently at its
+  # own settings-construction call sites.
+  cranked-properties:
+    name: cranked-properties
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    # Safety net, not the expected runtime -- see the `fuzz` job's own
+    # comment for the identical reasoning. 180 minutes: a 10x crank over
+    # the required property job's own ~9.5-minute wall clock is not
+    # naively 10x the TIME (proptest's own fixed per-property overhead --
+    # process startup, shrinking search, DB I/O -- does not scale with
+    # maxExamples), but budgeting generously here costs nothing (this job
+    # runs nightly, not per-push) and keeps real headroom under GitHub's
+    # 360-minute hard limit.
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: run property suites at a cranked example count
+        env:
+          SELLO_IN_CONTAINER: '1'
+          SELLO_PROPERTY_CRANK: ${{ inputs.property_crank || '10' }}
+        run: scripts/ci-property.sh
+
+  # RFC-005 slice 26 DoD demo job: proves the `notify` job's TIMEOUT-vs-
+  # FAILURE text distinction against a REAL `timed_out` job conclusion,
+  # not merely a described one. NEVER runs on the cron or on an ordinary
+  # dispatch -- gated entirely behind the `timeout_demo` input (default
+  # false), same permanent-off-by-default-knob posture as
+  # `force_failure` above. `timeout-minutes: 1` plus a 90-second sleep
+  # guarantees GitHub kills this job for exceeding its own timeout,
+  # producing conclusion `timed_out` (a value distinct from both
+  # `failure` and `cancelled` -- see the `notify` job's own comment for
+  # the investigation confirming this against the real Jobs API, and why
+  # the `needs.<job>.result` EXPRESSION CONTEXT this job's own `if:`
+  # trigger relies on cannot see that distinction itself and must query
+  # the API directly instead).
+  timeout-demo:
+    name: timeout-demo
+    if: ${{ inputs.timeout_demo == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: deliberately exceed timeout-minutes (slice 26 timeout-vs-failure demo only)
+        run: |
+          echo "sleeping 90s against a 1-minute job timeout -- this job is EXPECTED to be killed with conclusion 'timed_out', not fail on its own terms."
+          sleep 90
+
+  # RFC-005 slice 26 (Nightly part 3): pinned-issue notification wiring
+  # (RFC-005 Part B: "a failure step opens/updates a pinned GitHub issue
+  # -- publicly visible, self-documenting, immune to email-settings
+  # drift"). `needs:` every gating job in this workflow (NOT
+  # `timeout-demo`, which is advisory-demo-only and never gates anything
+  # of its own) and runs whenever ANY of them did not succeed --
+  # `if: always()` (so this job runs even though one of its dependencies
+  # failed, which `needs:` alone would otherwise skip) combined with an
+  # explicit result check over the `needs.<job>.result` EXPRESSION
+  # CONTEXT, whose only four possible values are `success`/`failure`/
+  # `cancelled`/`skipped` (verified against GitHub's own documented
+  # context reference before writing this condition) -- note `timed_out`
+  # is NOT one of the four: a job killed by `timeout-minutes` reports
+  # `failure` in THIS context, collapsing the distinction this job's own
+  # message body then has to recover a different way (see below).
+  #
+  # Timeout-vs-failure distinction, INVESTIGATED AND VERIFIED EMPIRICALLY
+  # this slice (per the task's own instruction, not merely asserted from
+  # docs): the REST "list jobs for a workflow run" endpoint
+  # (`GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`) reports each
+  # job's real `conclusion` field from a LARGER enum than the `needs`
+  # expression context exposes --
+  # success/failure/neutral/cancelled/skipped/timed_out/action_required/
+  # null -- confirmed against GitHub's own REST API reference and, for
+  # `timed_out` specifically, against a REAL run of the `timeout-demo`
+  # job above (see docs/rfc-005-validation-infra.handoff.md's slice 26
+  # entry for the cited run id and the observed `conclusion` value). The
+  # detection mechanism this job actually uses: query that Jobs API
+  # directly (below) and inspect each job's real `conclusion`, rather
+  # than trusting the collapsed `needs.<job>.result` value for anything
+  # beyond "should this notify job run at all."
+  #
+  # Permissions: workflow-level `permissions:` above stays `contents:
+  # read` (unchanged) -- this job alone widens, via its OWN job-level
+  # `permissions:` block (a complete redefinition for this job, not an
+  # additive union with the workflow-level default -- GitHub's own
+  # documented job-permissions semantics), to also carry `issues: write`
+  # (open/comment on the notification issue) and `actions: read` (the
+  # Jobs API query above -- `contents: read` is repeated here rather than
+  # dropped, since this job also checks out the repo for
+  # scripts/lib/notify-failure.sh).
+  notify:
+    name: notify-on-failure
+    # `timeout-demo` is included here (not just `fuzz`/`cranked-properties`)
+    # so a `timeout_demo`-dispatched run's own timed-out job is visible to
+    # this job's trigger condition and its own per-job conclusion table --
+    # on every ORDINARY run `timeout-demo` is skipped (its own `if:` is
+    # false), and a skipped `needs:` dependency does not itself trigger
+    # this job (result 'skipped' matches neither arm of the condition
+    # below), so this addition is a no-op except when the demo input is
+    # actually set.
+    needs: [fuzz, cranked-properties, timeout-demo]
+    if: >-
+      always() &&
+      (needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled' ||
+       needs.cranked-properties.result == 'failure' || needs.cranked-properties.result == 'cancelled' ||
+       needs.timeout-demo.result == 'failure' || needs.timeout-demo.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: build failure summary (real per-job conclusions, timeout distinguished)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate > build/nightly-jobs.json
+
+          {
+            echo "Nightly workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo "| job | conclusion |"
+            echo "|---|---|"
+            jq -r '.jobs[] | select(.name != "notify-on-failure") | "| \(.name) | \(.conclusion) |"' build/nightly-jobs.json
+            echo ""
+            if jq -e '.jobs[] | select(.conclusion == "timed_out")' build/nightly-jobs.json >/dev/null; then
+              echo "**TIMEOUT** -- at least one job above hit its \`timeout-minutes\` limit (conclusion: \`timed_out\`). This reads as a wall-clock/infrastructure event, not a code regression -- investigate speed, not correctness, first (RFC-005 Part B: a job timeout must not read as a finding)."
+              echo ""
+            fi
+            if jq -e '.jobs[] | select(.conclusion == "failure")' build/nightly-jobs.json >/dev/null; then
+              echo "**FAILURE** -- at least one job above genuinely failed (conclusion: \`failure\`, not a timeout). Investigate that job's own log for a real finding."
+              echo ""
+            fi
+            if jq -e '.jobs[] | select(.conclusion == "cancelled")' build/nightly-jobs.json >/dev/null; then
+              echo "**CANCELLED** -- at least one job above was cancelled (not a timeout, not an assertion failure -- e.g. a concurrent run superseding this one, or a manual cancel)."
+              echo ""
+            fi
+          } > build/nightly-notify-body.md
+          cat build/nightly-notify-body.md
+
+      - name: open or update pinned nightly-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/lib/notify-failure.sh nightly-failure "sello nightly workflow is failing" build/nightly-notify-body.md

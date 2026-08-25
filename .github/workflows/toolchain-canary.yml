@@ -1,0 +1,312 @@
+name: toolchain-canary
+
+# RFC-005 slice 26 (Nightly part 3, A6): the toolchain/resolver-drift
+# canary. Watches four independently-moving targets this project's own
+# pinned toolchain does NOT track day-to-day -- Nim devel, Nim's newest
+# stable release series, the newest packaged gcc, the newest packaged
+# clang -- plus a fifth, milpa@HEAD (the resolver every job's own
+# integrity ultimately routes through). ADVISORY ONLY: this workflow is
+# NOT in scripts/lib/gates.txt, NOT a merge-gate.yml job, NOT badged in
+# README.md, and NEVER gates a push -- per A6's own text, "failures
+# notify, never gate -- the pins are bumped only by deliberate commit."
+#
+# OWN WORKFLOW FILE, deliberately NOT a job folded into nightly.yml (A6's
+# own text, restated in nightly.yml's own header comment): "in its own
+# [workflow] ... so the nightly badge never presents advisory canary
+# state as failure." nightly.yml's `fuzz`/`cranked-properties` jobs are
+# RELEASE-QUALIFYING evidence (RFC-005 Part B's nightly paragraph names
+# fuzz/s390x/memcheck/cranked-properties as the release-qualification
+# subset, "explicitly excluding the toolchain canary"); this workflow is
+# the opposite in kind, not just in schedule -- a red leg here is
+# information about the outside world drifting, never a claim about this
+# codebase's own correctness.
+#
+# Schedule: `43 4 * * *` -- one hour and 26 minutes after nightly.yml's
+# own `17 3 * * *`, both non-round UTC offsets (GitHub's own scheduling-
+# contention guidance, restated from that workflow) staggered from each
+# other so the two workflows' hosted-runner demand does not collide, with
+# this canary's own run starting comfortably after nightly.yml's shorter
+# jobs (fuzz, cranked-properties) would ordinarily have finished, in case
+# a future maintainer ever wants to eyeball both in sequence.
+on:
+  schedule:
+    - cron: '43 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force_failure:
+        description: >-
+          RFC-005 slice 26 DoD demo knob: when true, the milpa-head leg
+          fails immediately (before doing any real resolver work) so the
+          `notify` job's pinned-issue wiring can be exercised on demand.
+          Leave OFF for every ordinary run.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Per-workflow (not per-ref) concurrency, matching nightly.yml's own
+# rationale: a cron fire racing a manual dispatch should queue, not race,
+# even though none of these legs mutate shared state the way nightly.yml's
+# fuzz corpus cache does -- consistency with the sibling workflow's own
+# posture, and it costs nothing (this workflow runs once a day).
+concurrency:
+  group: toolchain-canary
+  cancel-in-progress: false
+
+jobs:
+  # --- Nim devel / Nim latest-stable --------------------------------------
+  #
+  # Bare `ubuntu-latest`, no `container:` (mirrors the linux/arm64 and
+  # macOS/Windows hosted-residual legs' own "no digest-pinnable image, so
+  # SELLO_IN_CONTAINER=1 selects the direct-run code path on a bare
+  # runner" convention -- see scripts/lib/gates.txt's own comments for
+  # those legs). scripts/lib/nim-canary-install.sh (own header has the
+  # full mechanism) installs an UNPINNED Nim from the named nightlies
+  # rolling tag onto $HOME/.sello-nim-canary/current, which this job then
+  # prepends to PATH itself (that script does not touch PATH -- matching
+  # every other RFC-005 toolchain-install script's on-disk-convention
+  # posture). `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh`
+  # is the exact command the RFC's own A6 text names for these two legs.
+  #
+  # gcc: ubuntu-latest's hosted runner image ships build-essential
+  # pre-installed (GitHub's own documented runner-image contents) --
+  # verified sufficient rather than assumed by this job's own first real
+  # run (see the handoff doc's slice 26 entry). These two legs test Nim
+  # VERSION drift specifically, not compiler drift (that is the
+  # `newest-gcc`/`newest-clang` legs' own job, below) -- using whatever
+  # gcc ubuntu-latest ships keeps that one variable out of this leg's own
+  # result.
+  nim-devel:
+    name: nim-devel
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: install Nim devel (UNPINNED -- see scripts/lib/nim-canary-install.sh)
+        run: |
+          scripts/lib/nim-canary-install.sh latest-devel nim-devel
+          echo "$HOME/.sello-nim-canary/current/bin" >> "$GITHUB_PATH"
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+
+  nim-latest-stable:
+    name: nim-latest-stable
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: install Nim latest-stable (UNPINNED -- nightlies' newest STABLE series, 2.4 as of this slice, ahead of this project's own pinned 2.2.10)
+        run: |
+          scripts/lib/nim-canary-install.sh latest-version-2-4 nim-latest-stable
+          echo "$HOME/.sello-nim-canary/current/bin" >> "$GITHUB_PATH"
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+
+  # --- newest-gcc / newest-clang -------------------------------------------
+  #
+  # Mechanism decision (recorded per this slice's own task instruction --
+  # two options investigated: "ubuntu-latest's newest packaged versions"
+  # vs. "a rolling container like opensuse/tumbleweed"): a DELIBERATELY
+  # UNPINNED `opensuse/tumbleweed:latest` container -- Tumbleweed is a
+  # genuinely rolling-release distribution (unlike ubuntu-latest's own
+  # apt repos, which track a fixed Ubuntu release's own package versions,
+  # not "whatever the newest upstream release is"), and it is the SAME
+  # distro family this project's own pinned `ghcr.io/coreyleavitt/nim`
+  # image and `sello-dev` Containerfile already build on -- reusing a
+  # distro this project already trusts for its own pinned image isolates
+  # the ONE variable this leg exists to watch (a compiler version bump)
+  # instead of ALSO introducing a second distro's own independent
+  # packaging/toolchain quirks as a confound. No `@sha256:` digest on
+  # this `image:` line -- deliberate (see the divergence-from-pin-
+  # everything note on scripts/lib/nim-canary-install.sh, the identical
+  # posture one level up): `scripts/policy-lint.sh`'s "container: digests
+  # match a committed pin file" assertion only matches `image:` values
+  # that themselves carry an `@sha256:` digest (verified by reading that
+  # assertion's own regex before relying on this), so a plain `:latest`
+  # tag here is correctly OUT of that check's scope rather than a
+  # violation of it.
+  #
+  # This container ships no Nim toolchain of its own -- `scripts/ci-nim-
+  # setup.sh --expect-arch x86_64` installs the SAME pinned Nim every
+  # other amd64 job runs (scripts/lib/nim-pin.txt's new `linux-x86_64`
+  # row, RFC-005 slice 26 -- see that file's own comment on why these
+  # legs get a PINNED Nim despite living in an otherwise-unpinned canary
+  # workflow: isolating the compiler-drift variable from a second,
+  # independent Nim-version variable).
+  #
+  # zypper package names (`gcc gcc-c++ clang`) verified against the real,
+  # live `opensuse/tumbleweed:latest` image before this workflow was
+  # written (podman run, no committed pin -- see the handoff doc's slice
+  # 26 entry for the observed versions on that run).
+  #
+  # BLOCKED EXTENSION, recorded honestly rather than attempted (per this
+  # slice's own task instruction): A6's own text asks that these two legs
+  # run "through the disasm gate" with a PER-COMPILER ROLLING BASELINE
+  # (round-2 semantics: alert only on root-level conditional-branch-count
+  # INCREASES relative to that SAME compiler's own previous canary
+  # profile, first-run bootstrap recorded as such) -- the disasm gate
+  # itself does not exist in this repository yet (RFC-005 slice 23,
+  # itself blocked on the same Corey-owned ghcr `write:packages`
+  # credential blocking slices 10/14/15/17/19-22/25). Per the slice-16
+  # build-smoke precedent ("covers exactly the harnesses that exist
+  # today"), these two legs land here as plain suite-build/run jobs NOW;
+  # slice 23 extends THIS SAME workflow/these same two jobs in place with
+  # the rolling-baseline disasm semantics once the disasm gate lands --
+  # not a new job, not a new workflow, not attempted here as a
+  # placeholder mechanism of its own.
+  newest-gcc:
+    name: newest-gcc
+    runs-on: ubuntu-latest
+    container:
+      image: opensuse/tumbleweed:latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
+        run: |
+          zypper --non-interactive --gpg-auto-import-keys refresh
+          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip
+          gcc --version
+      - name: install pinned Nim (isolates the gcc-version variable)
+        run: scripts/ci-nim-setup.sh --expect-arch x86_64
+      # scripts/test.sh itself already checks for and prepends
+      # $HOME/.sello-nim/current/bin (see its own header) -- no manual PATH
+      # plumbing needed here, matching the nim-devel/nim-latest-stable
+      # legs' own plain `ci-setup.sh && ... test.sh` shape exactly.
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+
+  newest-clang:
+    name: newest-clang
+    runs-on: ubuntu-latest
+    container:
+      image: opensuse/tumbleweed:latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
+        run: |
+          zypper --non-interactive --gpg-auto-import-keys refresh
+          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip
+          clang --version
+      - name: install pinned Nim (isolates the clang-version variable)
+        run: scripts/ci-nim-setup.sh --expect-arch x86_64
+      # See the newest-gcc job's own comment: scripts/test.sh handles the
+      # $HOME/.sello-nim PATH prepend itself.
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang
+
+  # --- milpa@HEAD -----------------------------------------------------------
+  #
+  # The resolver drift watcher (A6, round-2): builds milpa from its own
+  # `main` HEAD, DELIBERATELY WITHOUT scripts/lib/milpa-pin.txt's pinned
+  # commit (that pin is exactly what
+  # every OTHER job's milpa install uses -- this leg exists to watch what
+  # HEAD would do instead). Reuses the digest-pinned base image (this leg
+  # watches the resolver, not the C toolchain, so the pinned image is the
+  # right constant to hold everything else against) but does NOT source
+  # scripts/lib/milpa-install.sh (that helper is hardwired to the pinned
+  # SHA in milpa-pin.txt by design -- see its own header) -- a small
+  # inline install instead, mirroring that script's own venv mechanism
+  # exactly (python3 -m venv + pip install from the git subdirectory) but
+  # pointed at `main` instead of a SHA.
+  milpa-head:
+    name: milpa-head
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # RFC-005 slice 26 DoD demo knob -- see nightly.yml's own
+      # `force_failure` step for the identical rationale (a permanent,
+      # always-off dispatch knob rather than a plant-then-revert scratch
+      # commit).
+      - name: forced failure (slice 26 notification demo only)
+        if: ${{ inputs.force_failure == true }}
+        run: |
+          echo "::error::forced failure requested via workflow_dispatch input 'force_failure' (RFC-005 slice 26 notification-wiring demo -- not a real finding)"
+          exit 1
+
+      - name: build milpa from main HEAD (deliberately UNPINNED -- see this job's own comment)
+        run: |
+          python3 -m venv build/milpa-venv-head
+          build/milpa-venv-head/bin/pip install --quiet "git+https://github.com/coreyleavitt/milpa.git@main#subdirectory=impls/python"
+          build/milpa-venv-head/bin/milpa --version
+
+      - name: milpa@HEAD fetch --locked against this repo's committed milpa.lock
+        run: build/milpa-venv-head/bin/milpa fetch --features proptest --locked
+
+  # --- notify ----------------------------------------------------------------
+  #
+  # Same shared scripts/lib/notify-failure.sh primitive nightly.yml's own
+  # `notify` job uses (RFC-005 Part B's build-path invariant, extended to
+  # the notification path) -- SEPARATE issue/label from nightly.yml's
+  # `nightly-failure` (this slice's own "own issue or a shared one, your
+  # call" decision, made explicit here): nightly.yml's failures are
+  # release-qualifying evidence going stale or red (a genuine finding
+  # worth urgent attention); this workflow's failures are, by A6's own
+  # design, sometimes EXPECTED ("Nim devel may genuinely fail against a
+  # moving devel compiler -- that is a valid canary result, not a
+  # project defect"). Mixing both failure classes into one pinned issue
+  # would bury genuine nightly regressions under routine "devel branch
+  # broke something today" noise, or the reverse -- so this workflow
+  # gets its OWN label/issue (`toolchain-canary-failure`), with the
+  # per-leg conclusion table in the body making clear ATTRIBUTION (which
+  # of the five legs failed) either way.
+  notify:
+    name: notify-on-failure
+    needs: [nim-devel, nim-latest-stable, newest-gcc, newest-clang, milpa-head]
+    if: >-
+      always() &&
+      (needs.nim-devel.result == 'failure' || needs.nim-devel.result == 'cancelled' ||
+       needs.nim-latest-stable.result == 'failure' || needs.nim-latest-stable.result == 'cancelled' ||
+       needs.newest-gcc.result == 'failure' || needs.newest-gcc.result == 'cancelled' ||
+       needs.newest-clang.result == 'failure' || needs.newest-clang.result == 'cancelled' ||
+       needs.milpa-head.result == 'failure' || needs.milpa-head.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: build failure summary (real per-job conclusions, timeout distinguished)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" --paginate > build/canary-jobs.json
+
+          {
+            echo "toolchain-canary workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo ""
+            echo "ADVISORY ONLY -- this workflow never gates a push. A red leg here is a"
+            echo "finding about the outside world (Nim devel, a newer gcc/clang, milpa@HEAD),"
+            echo "not necessarily a defect in this codebase. Nim devel/latest-stable failing"
+            echo "is itself a VALID canary result, not automatically a bug."
+            echo ""
+            echo "| job | conclusion |"
+            echo "|---|---|"
+            jq -r '.jobs[] | select(.name != "notify-on-failure") | "| \(.name) | \(.conclusion) |"' build/canary-jobs.json
+            echo ""
+            if jq -e '.jobs[] | select(.conclusion == "timed_out")' build/canary-jobs.json >/dev/null; then
+              echo "**TIMEOUT** -- at least one leg above hit its \`timeout-minutes\` limit (conclusion: \`timed_out\`)."
+              echo ""
+            fi
+            if jq -e '.jobs[] | select(.conclusion == "failure")' build/canary-jobs.json >/dev/null; then
+              echo "**FAILURE** -- at least one leg above genuinely failed (conclusion: \`failure\`, not a timeout)."
+              echo ""
+            fi
+            if jq -e '.jobs[] | select(.conclusion == "cancelled")' build/canary-jobs.json >/dev/null; then
+              echo "**CANCELLED** -- at least one leg above was cancelled."
+              echo ""
+            fi
+          } > build/canary-notify-body.md
+          cat build/canary-notify-body.md
+
+      - name: open or update pinned toolchain-canary-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/lib/notify-failure.sh toolchain-canary-failure "sello toolchain canary found drift" build/canary-notify-body.md

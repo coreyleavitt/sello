@@ -72,9 +72,12 @@
 # real, run-id-cited numbers.
 #
 # Staleness canary (this slice's own literal deliverable text: "fail the
-# JOB (only -- no notifications yet, slice 26 wires those) if the
-# restored corpus is older than a documented threshold or absent when it
-# should exist"):
+# JOB if the restored corpus is older than a documented threshold or
+# absent when it should exist" -- as of RFC-005 slice 26, a JOB failure
+# from this canary is no longer the end of the story: .github/workflows/
+# nightly.yml's own `notify` job picks up any non-success `fuzz` job
+# conclusion, this one included, and opens/updates a pinned GitHub issue
+# -- see that job's own comment for the full notification design):
 #   - Marker file: `<corpus-dir>/.last-success`, a Unix timestamp (seconds)
 #     written ONLY after a campaign completes with exit 0 (a crash or a
 #     coverage-gate failure does NOT refresh it -- a failed run's partial
@@ -113,10 +116,13 @@
 #     the literal, mechanical freshness check the task text describes --
 #     NOT the richer "uncommitted corpus growth > N nightlies since the
 #     last human snapshot-commit" canary the RFC's own A5 prose also
-#     mentions (that one needs the notification channel slice 26 wires;
-#     this script only ever FAILS THE JOB, matching the RFC's own
-#     "fails-the-job-only until slice 26" phrasing verbatim). See
-#     CLAUDE.md's nightly-workflow paragraph and the snapshot-commit
+#     mentions (that richer canary remains out of scope even after
+#     RFC-005 slice 26's notification wiring; this script still only ever
+#     FAILS THE JOB on the mechanical freshness check above -- slice 26's
+#     addition is that a job failure from THIS canary now also reaches a
+#     human, via nightly.yml's own `notify` job, not a change to what this
+#     script itself decides). See CLAUDE.md's nightly-workflow paragraph
+#     and the snapshot-commit
 #     ritual note in tests/fuzz/README for how the two relate.
 #
 # Corpus-delta summary: already emitted by tests/fuzz/fuzz_common.nim's
@@ -230,7 +236,7 @@ run_in_container() {
   echo "nightly-fuzz:   campaign exit status: $campaign_status"
   if [[ "$stale" -eq 1 ]]; then
     echo "nightly-fuzz:   !!! STALENESS CANARY: FAILED -- $stale_reason !!!"
-    echo "nightly-fuzz:   (fails the job only -- no notification channel exists yet; slice 26 wires that. See this script's own header comment.)"
+    echo "nightly-fuzz:   (this job failure reaches nightly.yml's own notify job -- RFC-005 slice 26 -- which opens/updates a pinned GitHub issue. See this script's own header comment.)"
   else
     echo "nightly-fuzz:   staleness canary: OK"
   fi
