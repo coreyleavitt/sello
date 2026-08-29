@@ -41,7 +41,10 @@
   implies -- slice 11 has no such dependency (nim-lang/nightlies and
   GitHub-hosted `ubuntu-24.04-arm` are both immediately available), so it
   was pulled forward rather than blocking the whole matrix phase on one
-  credential. Slice 12 (DONE 2026-08-24) landed the macOS-arm64 leg --
+  credential. **(Slice 10 itself later landed DONE on 2026-08-29, once
+  the credential unblocked -- see the Resolved forks entry and slice 10's
+  own full-record entry below; twelve required jobs total as of that
+  slice.)** Slice 12 (DONE 2026-08-24) landed the macOS-arm64 leg --
   `unit-macos-arm64-clang` on `runs-on: macos-15`, no `container:` field
   (no digest-pinnable image exists on macOS runners at all), reusing
   `scripts/ci-nim-setup.sh`'s arch/OS-parametric toolchain install (a new
@@ -876,7 +879,7 @@ Phase 1 — matrix (7 first, then 8–13 independent):
       overflow), revert+doc commit `<this commit>`. See the full slice
       entry below (after slice 8's) for mechanism design, canary evidence,
       and the red-then-green sequence.
-- [ ] 10. --cpu:i386 job (canary: 4-byte pointers) -- BLOCKED on a Corey-owned ghcr write:packages credential for the 32-bit sello-dev image; deliberately skipped past, see slice 11's own entry and Open forks.
+- [x] 10. --cpu:i386 job (canary: 4-byte pointers) -- DONE 2026-08-29, once the ghcr write:packages credential landed (see Resolved forks). Code `4e28648` (mechanism + job), red demo `87e729b` (dropped -m32, run `33269737967`), revert `c3580f4`, ruleset re-trigger `4237152` (run `33269816587`, all 18 required checks green). See the full slice entry below for mechanism design, the reproduced NIM_STATIC_ASSERT finding, the unit-only-vs-property wall-clock finding, and run ids.
 - [x] 11. linux/arm64 job -- DONE 2026-08-24 (taken out of order ahead of slice 10, see that slice's note and CLAUDE.md). Code `4c0de09` (mechanism + jobs), fix `90d285c` (ci-setup.sh wiring gap, found on the first push), red demo `a721ef1`, revert `a122818`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
 - [x] 12. macOS-arm64 job (pin story explicit; proptest-skip PRESENT) -- DONE 2026-08-24. Code `e2ea0d1` (darwin-arm64 pin row, BSD portability fixes, `--expect-proptest-skip` mechanism, toolchain-canary version echo, the `unit-macos-arm64-clang` job + gates.txt entry -- prepared by a first session, reviewed and pushed by a second, see the Process note in this file's header and the full slice entry below), red demo `18ef02b`, revert `ea7f2f0`. See the full slice entry below for mechanism design, run ids, canary evidence, and the red-then-green sequence.
 - [x] 13. Windows/MinGW job (shell: bash; MinGW pinned) -- DONE 2026-08-24.
@@ -1018,49 +1021,6 @@ Phase 4 — nightly, timing, release:
   mechanics are identical and worth recording once — slice 28 should
   reuse this playbook, not rediscover it.
 
-- **`ghcr.io/coreyleavitt/sello-dev` push (filed 2026-08-24, slice 7).**
-  No push-capable credential exists in this session: `gh auth status`
-  scopes are `delete_repo, gist, read:org, repo, workflow` -- no
-  `write:packages`; no `podman login ghcr.io` session either. The image
-  is fully built, verified, and its real publish digest already computed
-  (via a disposable scratch registry, not a placeholder --
-  `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`,
-  recorded in `scripts/lib/image-pins.txt`), and preserved EXACTLY (not
-  just its Containerfile) as a portable artifact so the eventual real
-  push reproduces this same digest byte-for-byte rather than depending on
-  a fresh rebuild (builds aren't reproducible):
-  `/home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar`
-  (710 MB, untracked, outside the repo).
-
-  **To unblock, either:**
-  1. `gh auth refresh -h github.com -s write:packages` (interactive --
-     needs a browser/device-code approval only Corey can complete), then
-     `echo "$(gh auth token)" | podman login ghcr.io -u coreyleavitt
-     --password-stdin`, or
-  2. Create a classic PAT (or fine-grained token) scoped to
-     `write:packages` only and `podman login ghcr.io` with it directly
-     (per SECURITY.md's existing trust-root guidance: minimally scoped,
-     periodically rotated -- this would be the FIRST credential of this
-     specific kind on record; flag it for the trust-root list alongside
-     the existing open ghcr-PAT-custody confirmation request from slice
-     5, since it's the same category of secret that entry already
-     covers, not a new one).
-
-  **Once either exists, the exact unblock command (do not rebuild):**
-  ```sh
-  podman load -i /home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar
-  podman tag localhost/sello-dev:latest ghcr.io/coreyleavitt/sello-dev:latest
-  podman push ghcr.io/coreyleavitt/sello-dev:latest
-  ```
-  Then confirm the pushed digest matches the pin file's recorded
-  `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`
-  exactly (`podman image inspect
-  ghcr.io/coreyleavitt/sello-dev:latest --format '{{.Digest}}'` after the
-  push, or read `docker-content-digest` off a manifest `GET`) -- if it
-  does not match, something about the push path altered the manifest
-  (e.g. a registry-side re-tag/re-manifest step) and `image-pins.txt`
-  needs the ACTUAL resulting digest, not the one recorded here.
-
 - **`scripts/test-libsodium.sh`/`scripts/bmc.sh` "runs green locally" DoD
   legs (filed 2026-08-24, slice 7).** Blocked by a newly-discovered,
   thoroughly-isolated environment limitation distinct from the
@@ -1089,6 +1049,42 @@ Phase 4 — nightly, timing, release:
   a one-session fluke -- report back either way.
 
 ## Resolved forks
+- **`ghcr.io/coreyleavitt/sello-dev` push (filed 2026-08-24, slice 7;
+  resolved 2026-08-29, slice 10).** Corey granted `write:packages`
+  (`gh auth status` now shows that scope alongside the pre-existing
+  `delete_repo, gist, read:org, repo, workflow`). Unblock command run
+  verbatim per slice 7's own recorded instructions (no rebuild):
+  ```sh
+  podman load -i /home/corey/.cache/sello-dev-image/sello-dev-806abfce.oci-archive.tar
+  podman tag localhost/sello-dev:latest ghcr.io/coreyleavitt/sello-dev:latest
+  podman push ghcr.io/coreyleavitt/sello-dev:latest
+  ```
+  The resulting published digest,
+  `sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4`,
+  matched `scripts/lib/image-pins.txt` line 87 EXACTLY -- no repin
+  needed, confirming the preserved oci-archive route (not a fresh
+  rebuild) reproduces the recorded digest byte-for-byte, as slice 7's
+  own note predicted. Corey then made the package PUBLIC; verified via
+  an anonymous (no `Authorization` header on the initial request, a
+  standard anonymous-pull bearer token from `ghcr.io/token` on the
+  retry) pull-by-digest against ghcr.io's own registry v2 API, returning
+  HTTP 200 with `docker-content-digest` matching exactly. The image is
+  also loaded into a local alt-root podman store
+  (`--root /home/corey/.podman-push --runroot
+  /run/user/1000/podman-push`, tagged
+  `ghcr.io/coreyleavitt/sello-dev:latest`, digest confirmed matching) for
+  local slice-10 validation, working around this host's default-store
+  `/home`-mode-555 mount trap (below) via no-mount `podman create`/`cp`/
+  `exec` rather than `-v` bind mounts. `scripts/lib/image-pins.txt` and
+  CLAUDE.md's sello-dev paragraph updated in slice 10's own mechanism
+  commit to drop the "NOT YET LIVE" language. Slice 10's
+  `unit-linux-i386-gcc` is the first CI job that actually pulls this
+  image (confirmed green in a real merge-gate run, see that slice's own
+  entry below) -- this also serves as slice 7's own long-deferred "pull
+  succeeds in CI" confirmation, one slice later than its own numbering
+  but exercising the identical pull-by-digest path
+  `scripts/lib/sello-dev-image.sh` already implemented.
+
 - **GitHub Actions billing gate (2026-08-24):** resolved by Corey's
   direction to make the repo public (public repos get free hosted
   minutes). Flip executed 2026-08-24 with the RFC's pre-flip safety
@@ -1776,6 +1772,157 @@ Phase 4 — nightly, timing, release:
     end-to-end on whatever host is available BEFORE trusting a real
     macOS runner's first CI run to be the first real test of the
     download/checksum path.
+
+### Slice 10 (--cpu:i386 32-bit job) -- full record
+
+2026-08-29: slice 10 DONE end-to-end, once the ghcr `write:packages`
+credential landed (see Resolved forks) unblocked the `sello-dev` push
+this slice depends on for its 32-bit multilib packages. No genuine
+32-bit core-arithmetic bug surfaced (the escalation rule was not
+triggered) -- every real finding this slice hit was in the
+`--cpu:i386`/build-tooling composition, not sello's field/scalar code.
+
+**Local verification, per this slice's own task brief instruction to
+validate before pushing.** This host's default rootless podman store
+hits the same `/home`-mode-555 mount trap the slice-7 Open forks entry
+already recorded for `scripts/test-libsodium.sh`/`scripts/bmc.sh` -- so
+local validation used the alt-root store
+(`--root /home/corey/.podman-push --runroot
+/run/user/1000/podman-push`, where the pushed `sello-dev` image was
+already loaded matching the live digest exactly) with no-mount `podman
+create`/`cp`/`exec` rather than `-v` bind mounts, copying the repo tree
+(`tar --no-same-owner`, working around a UID-mismatch `chown` failure
+under rootless podman's user-namespace mapping) and the resolved
+`_deps/proptest`/`_deps/z3`/`_deps/softlink` CAS symlink TARGETS
+(`tar -czh`, dereferencing, since the raw symlinks point at a host-
+absolute `.cache/milpa` path that doesn't exist inside the container)
+in as needed.
+
+**`--cpu:i386` alone is not sufficient -- reproduced, not assumed.**
+`nim --cpu:i386 --listCmd -f -r tests/unit/test_field.nim` inside
+`sello-dev` (no `--passC`/`--passL`) compiles every C file with no
+`-m32` on the gcc invocation line, and fails downstream at LINK/compile
+time with `nimbase.h`'s own `NIM_STATIC_ASSERT` on `sizeof(NI) ==
+sizeof(void*)` ("Pointer size mismatch between Nim and C/C++ backend").
+Adding `--passC:-m32 --passL:-m32` alongside `--cpu:i386` fixed this
+immediately -- confirmed via the same `--listCmd` capture, now showing
+`-m32` on every `gcc -c` line and a clean link. This finding is what
+`scripts/test.sh --cpu i386`'s own header comment and
+`scripts/lib/gates.txt`'s slice-10 comment record, and is the exact
+condition the red demo (below) re-exercises for real in CI.
+
+**Full local suite run, unit-only, real 32-bit (not qemu):** all 12
+unit-suite files (`test_field`, `test_scalar`, `test_ct`,
+`test_signing`, `test_ed25519`, `test_facade`, `test_x25519`,
+`test_ristretto`, `test_wycheproof`, `test_wycheproof_x25519`,
+`test_libsodium_interop` (skips, as expected without
+`-d:selloLibsodium`), `test_sha512`) compiled and passed clean under
+`--cpu:i386 --passC:-m32 --passL:-m32` inside `sello-dev`, including the
+full NIST CAVP SHAVS corpus and its 100-checkpoint Monte Carlo chain.
+No arithmetic divergence anywhere -- the field core's `int64`
+intermediates becoming register-pair operations under `-m32` (the exact
+risk A4 names) produced bit-identical results to the amd64-native run.
+
+**Unit-only scope, a confident call recorded, not merely asserted by
+analogy to the ASan/UBSan leg's own unit-only scoping.** The property
+suite WAS tried under the same real `--cpu:i386` build (all six
+`_deps/proptest`/`_deps/z3`/`_deps/softlink` CAS targets copied in) and
+DOES compile and pass -- `test_properties_field.nim` completed in ~56s
+wall clock, unremarkable -- but `test_properties_scalar.nim` alone
+measured **196s** wall clock (its `geScalarmultBase`/`scMulAdd`-heavy
+generated examples run as register-pair `int64` arithmetic under
+`-m32`, several times slower than the same file's amd64-native run),
+and `test_properties_signing.nim` was still running past 135s when the
+background probe was killed after that finding was already conclusive.
+Six property files at this per-file cost would push a
+`property-linux-i386-gcc` sibling well past the wall clock the merge
+gate's existing `property-linux-amd64-gcc` job already spends (~9m35s
+in this slice's own real CI run, see below) -- so, per the task brief's
+own "confident call either way, recorded" instruction, this leg ships
+UNIT-ONLY, `unit-linux-i386-gcc`, no property sibling. `scripts/lib/
+gates.txt`'s own slice-10 comment and CLAUDE.md's "32-bit
+(`--cpu:i386`) leg" paragraph both carry this finding.
+
+**Identity canary design, a genuinely different shape from every prior
+canary in this codebase.** RFC-005 Part B names this leg's canary
+literally ("Identity canary: pointers are 4 bytes") -- a RUNTIME fact,
+not something `--listCmd` text alone can establish the way compiler
+identity (`toolchain-canary.sh`) or a `-fsanitize=` flag
+(`sanitizer-canary.sh`) can. `scripts/lib/cpu-canary.sh` therefore
+compiles AND RUNS a throwaway probe (regenerated every invocation, not
+part of the committed suite) asserting `sizeof(pointer) == 4` and
+`sizeof(int) == 4` via a real `doAssert`, layered with the same
+`--listCmd`-grep proof every other canary uses (compiler name + `-m32`
+both present on the real C compile line). Runs ONCE, before the
+per-file suite loop, rather than riding the first unit file's own
+compile -- confirmed working exactly as designed in the local run (`cpu
+canary probe: sizeof(pointer)=4 sizeof(int)=4`, both `--listCmd`
+assertions PASS) and in the real CI run below.
+
+**sello-dev image resolution, host-mode.** `scripts/test.sh`'s
+non-`SELLO_IN_CONTAINER` branch now sources `scripts/lib/
+sello-dev-image.sh` and resolves `sello-dev` by digest instead of the
+base `ghcr.io/coreyleavitt/nim` image whenever `--cpu` is set (the base
+image has no 32-bit multilib packages at all) -- the same pull-by-digest
+mechanism `scripts/test-libsodium.sh`/`scripts/bmc.sh` already use, so
+`scripts/lib/gates.txt`'s `unit-linux-i386-gcc` entry stays the plain,
+host-runnable `scripts/test.sh --cpu i386` the manifest's own convention
+requires, with no new logic needed in `merge-gate.sh` itself.
+
+**`scripts/policy-lint.sh` extension.** `unit-linux-i386-gcc` is the
+FIRST merge-gate job whose `container:` pins to `sello-dev` rather than
+the base image -- the container-digest assertion's prior comparison
+(only the base-image section of `scripts/lib/image-pins.txt`) would
+have rejected it outright. Extended minimally: the assertion now checks
+the UNION of the base-image section and the `sello-dev` line's own
+`image@sha256:...` field (third whitespace-separated column), still a
+straight set-membership comparison, no structural change to either
+section. Verified locally (`bash scripts/policy-lint.sh`) before
+pushing.
+
+**Real CI run-by-run record (branch `rfc-005-slice10`):**
+  - Push 1 (mechanism, commit `4e28648`): run `33269324511`. All
+    seventeen pre-existing checks green, `unit-linux-i386-gcc` green in
+    74s (`18:50:22`-`18:51:36`), and -- exactly as expected per the
+    standing check-adding flow, since the live `main` ruleset had not
+    yet been updated -- `ruleset-sync` red (missing `unit-linux-i386-gcc`
+    from the live required-check set). No other job affected.
+  - Push 2 (red demo, commit `87e729b`): run `33269737967`. Dropped
+    `--passC:-m32 --passL:-m32` from `--cpu i386`'s composed flags in
+    `scripts/test.sh`. Job `unit-linux-i386-gcc` (id `99145969191`)
+    failed for real, at exactly `scripts/lib/cpu-canary.sh`'s own probe
+    compile -- log line `cpu canary: FAIL -- the probe compile/run
+    itself failed`, followed by the reproduced `nimbase.h`
+    `NIM_STATIC_ASSERT` pointer-size-mismatch error (confirmed via `gh
+    api repos/coreyleavitt/sello/actions/jobs/99145969191/logs`, fetched
+    before the run was cancelled by the next push's concurrency group --
+    the job itself had already completed as a real failure). This is
+    the real defect condition, not a canary-script bug: the canary
+    caught the exact composition gap the mechanism commit's own header
+    comment documents.
+  - Push 3 (revert, commit `c3580f4`): restored the flags; run
+    `33269797587` was cancelled by push 4's concurrency group before
+    completing (harmless -- superseded by the next push, same pattern
+    every prior slice's red-then-green sequence follows).
+  - `scripts/ruleset-apply.sh` (dry run, then `--apply`): diff showed
+    exactly one addition, `"context": "unit-linux-i386-gcc"`, to the
+    `main` ruleset's required-check array (generated from
+    `scripts/lib/gates.txt`, 18 checks) -- applied for real,
+    `evidence`/`main`/`tags` all `UPDATED` (the first two were already
+    no-op diffs; `main`'s update landed the new check).
+  - Push 4 (re-trigger, commit `4237152`): run `33269816587`. ALL 18
+    required checks green, including `ruleset-sync` (now matching the
+    updated live ruleset) and `unit-linux-i386-gcc` (75s,
+    `19:02:16`-`19:03:31`). This is the branch's final green state
+    fast-forwarded to `main`.
+
+**Wall-clock summary:** `unit-linux-i386-gcc` costs ~75s per run (two
+independent real-CI measurements: 74s and 75s), in the same range as
+the other Linux unit legs (`unit-linux-amd64-gcc` 45s,
+`unit-linux-amd64-clang` 52s, `unit-linux-arm64-gcc` 36s,
+`unit-linux-amd64-gcc-asan-ubsan` 84s) -- the `sello-dev` image pull
+adds negligible overhead over the base-image jobs on a GitHub-hosted
+runner's cache-warm path.
 
 ### Slice 12 (macOS-arm64 job) -- full record
 
@@ -3267,9 +3414,22 @@ Phase 4 — nightly, timing, release:
   reduced qualification subset (fuzz + cranked properties only), which
   would let 30's workflow land now at the cost of a release gate weaker
   than the RFC's own round-2 text -- not recommended.
-- GRIND STATE (2026-08-25, end of unattended window): 17/32 done; every
-  remaining slice (10, 14, 15, 17, 19-23, 25, 27, 28, 29, 30, 32, plus
-  A9) is blocked on Corey -- the ghcr write:packages credential, the
-  physical timing box, or a dependency chain ending in one of those. The
-  /loop grind is PAUSED; nothing further is launchable unattended.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, push the archived sello-dev image (slice 7's open-fork instructions), then resume RFC order at slice 10.
+- GRIND STATE (2026-08-29, UNBLOCKED -- supersedes the 2026-08-25 pause):
+  Corey granted `write:packages` on 2026-08-29; the control loop pushed the
+  archived oci-archive (no rebuild) to `ghcr.io/coreyleavitt/sello-dev`,
+  the registry-side digest matches `scripts/lib/image-pins.txt` line 87
+  EXACTLY (`sha256:dc39f87a...`, no repin), and Corey flipped the package
+  to PUBLIC (anonymous pull-by-digest verified HTTP 200). The image is
+  also loaded in a local alt-root podman store
+  (`--root /home/corey/.podman-push --runroot /run/user/1000/podman-push`,
+  tagged `ghcr.io/coreyleavitt/sello-dev:latest`) for local validation.
+  Slice 10 is DONE (2026-08-29 -- see its own full-record entry above and
+  the Resolved forks entry for the sello-dev push): `unit-linux-i386-gcc`
+  landed, unit-only (a recorded wall-clock finding ruled out a property
+  sibling), red demo + revert + ruleset-apply + green re-trigger all
+  confirmed via real CI runs, fast-forwarded to `main`. Remaining launch
+  order: 14, 15, 17, 19-23, 25 (all formerly credential-blocked), then
+  the A9 memcheck extension of nightly.yml, then slice 30 (see the
+  deferral bullet above -- its producers exist once 25 + A9 land), then
+  32. Slices 27-29 stay Corey-physical. 18/32 done at this note.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 14.
