@@ -328,12 +328,23 @@ jobs:
   bmc-symex:
     name: bmc-symex
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Calibrated from a real hosted measurement (RFC-005 slice 15's
+    # measurement push, run 33274740413/job bmc-symex): 2m47s (167s) total,
+    # including the in-container milpa-from-source build, the
+    # proptest+z3+softlink fetch, and all four symex_*.nim compiles+proofs
+    # -- see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph for the
+    # full record. The script's own internal `timeout --signal=KILL`
+    # argument (450s, below) is the real Z3-hang guard; this job-level
+    # ceiling is deliberately a bit above that (10min > 7.5min) so a hung
+    # solver hits the script's own timeout (which prints a diagnosis and
+    # exits 137) rather than GitHub's own harsher, less informative
+    # job-timeout cancellation.
+    timeout-minutes: 10
     container:
       image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - run: SELLO_IN_CONTAINER=1 scripts/bmc.sh 600
+      - run: SELLO_IN_CONTAINER=1 scripts/bmc.sh 450
 
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds

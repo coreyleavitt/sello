@@ -104,7 +104,25 @@ import subprocess
 import sys
 import time
 
-REPO_ROOT = pathlib.Path("/workspace")
+# REPO_ROOT used to be hardcoded to pathlib.Path("/workspace") -- correct
+# under scripts/mutation.sh's host-mode podman wrapper (`-v $PWD:/workspace
+# -w /workspace`), where that path always exists, but WRONG under the
+# RFC-005 slice 15 SELLO_IN_CONTAINER=1 CI path: GitHub Actions' own
+# `container:` mechanism checks the repo out to `/__w/<repo>/<repo>` (e.g.
+# `/__w/sello/sello`), never `/workspace` -- there is no podman wrap left
+# to create that mount point. Caught by the first real CI run of the new
+# `mutation` job (RFC-005 slice 15): `run_mutation: no *.mutant files
+# found under /workspace/tests/mutation/mutants`, a hard exit, in well
+# under a minute (nowhere near the catalog's own multi-minute cost),
+# because /workspace simply doesn't exist inside that job's container.
+# Fixed by deriving REPO_ROOT from this file's own location instead of a
+# path that only exists in one of the two invocation modes -- this file
+# is always invoked as `python3 tests/mutation/run_mutation.py ...` with
+# the repo root as cwd (both scripts/mutation.sh's host branch and its
+# SELLO_IN_CONTAINER=1 branch preserve this), so `__file__` resolves
+# identically (`.../tests/mutation/run_mutation.py`) regardless of what
+# absolute path the repo happens to be checked out under.
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRATCH = pathlib.Path("/tmp/sello-mutation-src")
 MUTANTS_DIR = REPO_ROOT / "tests/mutation/mutants"
 REPORT_PATH = REPO_ROOT / "docs/mutation-results.md"
