@@ -59,15 +59,47 @@
 # cranked nightly-only example count.
 #
 # DETERMINISM CHECK (A3's own DoD: "build+run twice, identical numbers"):
-# this script runs its ENTIRE build-run-capture-merge-extract-compute
+# this script CAN run its ENTIRE build-run-capture-merge-extract-compute
 # pipeline TWICE, into two independent working directories
-# (build/coverage/run1, build/coverage/run2), and asserts the two
+# (build/coverage/run1, build/coverage/run2), and assert the two
 # resulting text dumps are byte-identical before treating either as "the
-# fresh dump" fed to the regenerable-baseline idiom below. This is the
-# literal, full-strength reading of the DoD text (a real second build,
-# not a cheaper "rerun the same binaries" shortcut) -- see this slice's
-# own handoff-doc entry for the measured real wall-clock cost this
-# doubling adds and the resulting heavy-gate placement decision.
+# fresh dump" fed to the regenerable-baseline idiom below -- the literal,
+# full-strength reading of the DoD text (a real second build, not a
+# cheaper "rerun the same binaries" shortcut).
+#
+# WALL-CLOCK DECISION (measured, not guessed -- RFC-005 slice 17's own
+# "measure first, decide with a recommendation, record" instruction):
+# the FIRST real hosted run of this job (a measurement push, mirroring
+# slice 15's own precedent) ran the double pass unconditionally and
+# measured a real ~26-minute job (two ~12.5-minute passes plus ~1 minute
+# of checkout/milpa/proptest-fetch overhead) -- well past the merge
+# gate's ~15-minute aim, and by a wide margin the new long pole (the
+# previous heaviest required check, property-linux-amd64-gcc, sits at
+# ~9.5 minutes). That SAME run's determinism check PASSED (both passes
+# produced byte-identical dumps) -- real, positive evidence the pipeline
+# IS deterministic (fixed proptest seeds -- see the FIXED SEEDS section
+# below -- plus deterministic gcov capture/merge/extract), not merely
+# assumed. Rather than build a branch-pattern or sharding fallback (the
+# RFC's own pre-authorized escape hatch, `docs/rfc-005-validation-infra.md`'s
+# "Ordering & risks" section) for a job this project's own branch model
+# (every push, every branch, no path filter, no branch filter -- see
+# CLAUDE.md's "No-path-filter rule") has no natural way to narrow, the
+# decision recorded here is CHEAPER and just as sound: run a SINGLE pass
+# by default (this is what CI's own `coverage-ratchet` job invokes, no
+# flags) -- roughly HALF the wall-clock, landing this job close to (not
+# under) the previous long pole rather than nearly 3x past it -- and
+# reserve the double-pass determinism re-verification for the two moments
+# it actually matters: (1) every `--update` (baseline.sh's own "local,
+# deliberate act" doctrine already keeps this off the per-push CI path,
+# so paying the extra pass there costs nothing in CI wall-clock -- see
+# below), and (2) an explicit `--verify-determinism` flag for a
+# maintainer who wants to re-confirm the property without regenerating
+# the baseline. A regression that made the suite's OWN covered set
+# non-deterministic (e.g. a property test accidentally reading real
+# entropy) would still surface indirectly on the very next `--update` a
+# maintainer runs (a suite that flakes under `--verify-determinism`
+# there fails loud, per the block below) -- this is a real, if slightly
+# delayed, backstop, not a silently dropped guarantee.
 #
 # THE REGENERABLE-BASELINE IDIOM (scripts/lib/baseline.sh, RFC-005 Part
 # B) governs the RAISE path exactly like every other baseline-consuming
@@ -104,9 +136,10 @@
 # entry."
 #
 # Usage:
-#   scripts/coverage.sh                # check (CI's own mode)
-#   scripts/coverage.sh --update       # regenerate the committed baseline (local only -- hard-fails under $CI)
-#   SELLO_IN_CONTAINER=1 scripts/coverage.sh [--update]
+#   scripts/coverage.sh                     # check, single pass (CI's own mode)
+#   scripts/coverage.sh --verify-determinism  # check, but double-pass (build+run twice, assert identical)
+#   scripts/coverage.sh --update            # regenerate the committed baseline -- ALWAYS double-pass (see WALL-CLOCK DECISION above); local only -- hard-fails under $CI
+#   SELLO_IN_CONTAINER=1 scripts/coverage.sh [--update] [--verify-determinism]
 #     # already inside the pinned sello-dev image (CI, or a maintainer's
 #     # own already-in-container shell)
 #
@@ -119,13 +152,32 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 update_mode=0
-if [[ "${1:-}" == "--update" ]]; then
-  update_mode=1
-  shift
-fi
-if [[ $# -gt 0 ]]; then
-  echo "scripts/coverage.sh: usage: scripts/coverage.sh [--update]" >&2
-  exit 2
+verify_determinism=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --update)
+      update_mode=1
+      shift
+      ;;
+    --verify-determinism)
+      verify_determinism=1
+      shift
+      ;;
+    *)
+      echo "scripts/coverage.sh: usage: scripts/coverage.sh [--update] [--verify-determinism]" >&2
+      exit 2
+      ;;
+  esac
+done
+# --update always double-runs (see the WALL-CLOCK DECISION section of
+# this script's own header comment): a baseline regeneration is exactly
+# the moment a maintainer wants the strongest evidence the new pinned
+# numbers are reproducible, and --update is already a deliberate,
+# infrequent, local-only act (baseline.sh's own CI hard-fail already
+# keeps it off the per-push path), so paying the extra pass there is
+# free in the sense that matters -- it never touches CI wall-clock.
+if [[ "$update_mode" -eq 1 ]]; then
+  verify_determinism=1
 fi
 
 # ---------------------------------------------------------------------
@@ -209,23 +261,27 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
     exit 1
   fi
 
-  echo "coverage: === run 1/2 (determinism check) ===" >&2
-  run1_out="$(run_coverage_once build/coverage/run1)" || exit 1
-  echo "coverage: === run 2/2 (determinism check) ===" >&2
-  run2_out="$(run_coverage_once build/coverage/run2)" || exit 1
+  if [[ "$verify_determinism" -eq 1 ]]; then
+    echo "coverage: === run 1/2 (determinism check) ===" >&2
+    run1_out="$(run_coverage_once build/coverage/run1)" || exit 1
+    echo "coverage: === run 2/2 (determinism check) ===" >&2
+    run2_out="$(run_coverage_once build/coverage/run2)" || exit 1
 
-  if [[ "$run1_out" != "$run2_out" ]]; then
-    echo "" >&2
-    echo "coverage: FAIL -- determinism check: two independent build+run passes produced" >&2
-    echo "coverage: DIFFERENT coverage numbers. This gate requires the suite's covered set" >&2
-    echo "coverage: to be reproducible (fixed proptest seeds, deterministic gcov merge) --" >&2
-    echo "coverage: investigate before trusting either run's numbers. Diff (run1 -> run2):" >&2
-    diff <(printf '%s\n' "$run1_out") <(printf '%s\n' "$run2_out") >&2 || true
-    exit 1
+    if [[ "$run1_out" != "$run2_out" ]]; then
+      echo "" >&2
+      echo "coverage: FAIL -- determinism check: two independent build+run passes produced" >&2
+      echo "coverage: DIFFERENT coverage numbers. This gate requires the suite's covered set" >&2
+      echo "coverage: to be reproducible (fixed proptest seeds, deterministic gcov merge) --" >&2
+      echo "coverage: investigate before trusting either run's numbers. Diff (run1 -> run2):" >&2
+      diff <(printf '%s\n' "$run1_out") <(printf '%s\n' "$run2_out") >&2 || true
+      exit 1
+    fi
+    echo "coverage: determinism check OK -- both runs produced identical numbers." >&2
+    fresh_body="$run1_out"
+  else
+    echo "coverage: === single pass (determinism re-verified via --update/--verify-determinism, not every push -- see this script's own header comment) ===" >&2
+    fresh_body="$(run_coverage_once build/coverage/run1)" || exit 1
   fi
-  echo "coverage: determinism check OK -- both runs produced identical numbers." >&2
-
-  fresh_body="$run1_out"
   fresh_file="$(mktemp)"
   printf '%s\n' "$fresh_body" > "$fresh_file"
   trap 'rm -f "$fresh_file"' EXIT
@@ -250,8 +306,9 @@ else
   source "$(dirname "$0")/lib/sello-dev-image.sh"
   resolve_sello_dev_image || exit 1
 
-  extra_arg=""
-  [[ "$update_mode" -eq 1 ]] && extra_arg=" --update"
+  extra_args=""
+  [[ "$update_mode" -eq 1 ]] && extra_args+=" --update"
+  [[ "$verify_determinism" -eq 1 ]] && extra_args+=" --verify-determinism"
   podman run --rm \
     -e CI \
     -v "$PWD:/workspace" \
@@ -259,6 +316,6 @@ else
     -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
     -w /workspace \
     "$img" \
-    bash -c "SELLO_IN_CONTAINER=1 scripts/coverage.sh$extra_arg"
+    bash -c "SELLO_IN_CONTAINER=1 scripts/coverage.sh$extra_args"
   exit $?
 fi

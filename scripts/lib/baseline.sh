@@ -88,12 +88,25 @@ _baseline_body_of_file() {
 # capturing it here once means no per-caller boilerplate; a future
 # non-image-based gate simply gets a header with no `image:` line.
 _baseline_header_meta() {
-  local nim_version image_pin
+  local nim_version image_pin sello_dev_pin
   nim_version="$(nim --version 2>/dev/null | head -n1 || echo 'nim --version unavailable')"
   image_pin="$(grep -E '^ghcr\.io/coreyleavitt/nim@sha256:' "$(dirname "${BASH_SOURCE[0]}")/image-pins.txt" 2>/dev/null | head -n1 || true)"
+  # RFC-005 slice 17: the coverage ratchet is the first baseline-
+  # consuming gate that runs on sello-dev rather than the base image --
+  # a header with only the base-image line would misdescribe the real
+  # environment a sello-dev-run baseline was generated under. Additive,
+  # not a replacement: emitted alongside "image:" (which stays accurate
+  # for api-surface/api-surface-libsodium, still base-image-run) whenever
+  # scripts/lib/image-pins.txt carries a sello-dev line at all -- this is
+  # header metadata only, never diffed by baseline_check, so an extra
+  # line here is harmless for a gate that doesn't need it.
+  sello_dev_pin="$(grep -E '^sello-dev[[:space:]]' "$(dirname "${BASH_SOURCE[0]}")/image-pins.txt" 2>/dev/null | awk '{print $3}' || true)"
   echo "compiler: $nim_version"
   if [[ -n "$image_pin" ]]; then
     echo "image: $image_pin"
+  fi
+  if [[ -n "$sello_dev_pin" ]]; then
+    echo "sello-dev-image: $sello_dev_pin"
   fi
 }
 
