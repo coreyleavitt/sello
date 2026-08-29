@@ -285,7 +285,7 @@ while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" |
           # above for the reproduced NIM_STATIC_ASSERT failure this
           # composition closes.
           cpu_flag="--cpu:i386"
-          cpu_nim_args='--passC:-m32 --passL:-m32'
+          cpu_nim_args='' # RFC-005 slice 10 RED DEMO -- -m32 deliberately dropped to show the platform-identity canary fail for real; reverted immediately after.
           ;;
         *)
           echo "scripts/test.sh: unknown --cpu value '$cpu_name' (supported: i386)" >&2
