@@ -16,6 +16,15 @@
 # actual file list a run compiled.
 print_tier_summary() {
   local invoked_as="$1" # e.g. "scripts/test.sh" or "scripts/test-libsodium.sh (-d:selloLibsodium)"
+  # Optional second argument (RFC-005 slice 14): overrides the default
+  # "proptest not fetched" reason text below. scripts/test-libsodium.sh
+  # passes its own reason -- it ALWAYS excludes the standalone
+  # test_properties_*.nim files from its own compiled set (a scope
+  # decision, see that script's own header comment), independent of
+  # whether proptest is actually fetched (it always is, under that
+  # script's SELLO_IN_CONTAINER=1 body), so the default wording here
+  # would be actively misleading for that caller.
+  local property_skip_reason="${2:-proptest not fetched (${#skipped_property_files[@]} file(s); run: milpa fetch --features proptest)}"
 
   local property_count=0 f
   for f in "${unit_test_files[@]}"; do
@@ -26,7 +35,7 @@ print_tier_summary() {
 
   local property_status
   if [ "${#skipped_property_files[@]}" -gt 0 ]; then
-    property_status="SKIPPED -- proptest not fetched (${#skipped_property_files[@]} file(s); run: milpa fetch --features proptest)"
+    property_status="SKIPPED -- $property_skip_reason"
   else
     property_status="RAN ($property_count file(s))"
   fi
