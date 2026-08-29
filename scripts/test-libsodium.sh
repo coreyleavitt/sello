@@ -119,7 +119,7 @@ cmd="set -e"
 cmd+=$'\n'"export SELLO_REQUIRE_LIBSODIUM=1"
 for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
-  cmd+=$'\n'"nim c -d:selloLibsodium -r $f"
+  cmd+=$'\n'"nim c -r $f"
 done
 # Standalone property-suite files -- always skipped by this script (see
 # the header comment above), one uniform, always-accurate banner
