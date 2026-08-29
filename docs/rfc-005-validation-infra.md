@@ -1178,10 +1178,22 @@ every leg: identity canary + demonstrated red):**
   physical-world dependency and can slide without blocking anything
   except 30's timing-freshness gate — which the recorded degraded mode
   covers if the box is the blocker.
-- **Merge-gate wall clock:** mutation at 553s local × 2–4× hosted is
-  20–35 min against the ≤15-min aim — slice 15 measures and decides the
-  branch-pattern placement; recorded here so the decision point cannot
-  float.
+- **Merge-gate wall clock:** mutation at 553s local × 2–4× hosted was
+  projected at 20–35 min against the ≤15-min aim — slice 15 measured the
+  real hosted cost instead of trusting the projection, and the
+  projection did not hold: `mutation` (84-mutant catalog, cold nimcache,
+  the full checkout+milpa+proptest+catalog run) completed in 475s
+  (7m55s) on a real GitHub-hosted runner, and `bmc-symex` (all four Z3
+  symex proof files) completed in ~165s (two consistent runs: 164s and
+  167s) — both comfortably inside the 15-minute budget with real margin
+  to spare. Both land as PLAIN, UNCONDITIONAL required checks; neither
+  the matrix-sharded `mutation-{i}of{N}` remedy nor the branch-pattern
+  (`rfc-*`/`release-*`-only) fallback was needed. The sharding mechanism
+  (`tests/mutation/run_mutation.py --shard i/N`, a deterministic
+  round-robin catalog partition) was still built and is kept in reserve,
+  unwired from any job, for a future catalog-growth push that revisits
+  this budget — see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph
+  and the handoff doc's slice 15 entry for the full run-id record.
 - **Disasm-gate brittleness:** Nim's symbol mangling is convention, not
   contract — mitigated by resolving from nimcache C per-signature with
   the at-gate-time source-relocate step, clone-suffix matching, and

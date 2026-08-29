@@ -254,9 +254,10 @@
 # retrofit to both scripts) makes that work locally exactly the way every
 # other entry in this manifest already does. `bmc-symex`'s script-
 # invocation column carries an explicit timeout argument
-# (`scripts/bmc.sh 600`), matching the merge-gate workflow's own job step
+# (`scripts/bmc.sh 450`), matching the merge-gate workflow's own job step
 # exactly -- see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph for
-# the calibrated value and the timeout-triage policy.
+# the calibrated value (measured hosted: 2m47s real wall clock) and the
+# timeout-triage policy.
 #
 # check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
@@ -279,4 +280,4 @@ policy-lint                         scripts/policy-lint.sh
 build-smoke                         scripts/build-smoke.sh
 validation-map                      scripts/validation-map-check.sh
 mutation                            scripts/mutation.sh
-bmc-symex                           scripts/bmc.sh 600
+bmc-symex                           scripts/bmc.sh 450
