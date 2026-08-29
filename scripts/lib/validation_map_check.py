@@ -115,11 +115,12 @@ EXPECTED_COLUMNS = 6  # Claim | Category | Mechanism | Freshness canary | Carve-
 # manual-ritual to required-check (unit-linux-amd64-gcc-libsodium), which
 # carries no Freshness-canary cell at all (required-check rows are
 # asserted "n/a" -- see check_table_rows below), so it no longer needs an
-# entry here.
-NONE_BY_DESIGN_ROWKEYS = {
-    "mutation-catalog",
-    "bmc-symex",
-}
+# entry here. mutation-catalog and bmc-symex LEFT this set the same way in
+# RFC-005 slice 15: both rows moved from manual-ritual to required-check
+# (`mutation` and `bmc-symex` respectively), once each gate's own real
+# hosted wall-clock cost was measured and its heavy-gate placement decided
+# (see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph).
+NONE_BY_DESIGN_ROWKEYS = set()
 
 errors: list[str] = []
 

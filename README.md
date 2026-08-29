@@ -536,7 +536,7 @@ claimed:
 | Pass Google Wycheproof adversarial vectors (ed25519 + X25519) | required-check | `unit-linux-amd64-gcc` (same unit suite; no Wycheproof corpus exists for ristretto255 -- RFC 9496 App. A plus fuzzing plus the libsodium differential suite carry that weight instead) | n/a | none | wycheproof |
 | dudect timing harness -- compiles cleanly, no verdict | required-check | `build-smoke` (compiles `tests/ct/ct_main.nim`, never runs it) | n/a | none | dudect-compile-smoke |
 | dudect timing harness -- real worst-case t-statistic verdict, ten targets | manual-ritual | `scripts/ct.sh` (maintainer-run, `-d:release`, roughly 1e6 samples/class) | pending slice 28 | `docs/ct-results.md` | dudect-full-battery |
-| Mutation testing of the highest-risk arithmetic/boundary logic (84/84 killed) | manual-ritual | `scripts/mutation.sh` | none (by design) | `docs/mutation-results.md` | mutation-catalog |
+| Mutation testing of the highest-risk arithmetic/boundary logic (84/84 killed) | required-check | `mutation` (`scripts/mutation.sh`, full catalog, unsharded) | n/a | `docs/mutation-results.md` | mutation-catalog |
 | Audited alternative implementation builds cleanly (`-d:selloLibsodium`) | required-check | `api-surface-libsodium` (facade compiles and its surface diff is pinned under this config; does not itself run the interop suite below) | n/a | none | libsodium-build |
 | Differential adversarial testing against libsodium, bidirectional interop | required-check | `unit-linux-amd64-gcc-libsodium` (recompiles the unit suite with `-d:selloLibsodium`; `SELLO_REQUIRE_LIBSODIUM=1` makes any skip fatal, so it can never silently degrade to a no-op suite) | n/a | none | libsodium-interop |
 | Property-based testing of field/scalar/ristretto/sha512 primitives | required-check | `property-linux-amd64-gcc` (and `property-linux-amd64-clang`, `property-linux-arm64-gcc`) | n/a | none | property-merge-gate |
@@ -544,7 +544,7 @@ claimed:
 | Coverage-guided fuzzing -- target and driver compile, one iteration run | required-check | `build-smoke` (real SanitizerCoverage instrumentation; one deterministic known-valid input, not a campaign) | n/a | none | fuzz-compile-smoke |
 | Coverage-guided fuzzing -- real campaign with cross-run corpus continuity | nightly | `fuzz` (450s/target default, persisted corpus via proptest's `directoryBasedDatabase`) | n/a | none | fuzz-nightly-campaign |
 | Coverage-guided fuzzing -- periodic corpus snapshot promoted into the committed seed corpus | manual-ritual | hand-curation of interesting entries into `fuzz_common.nim`'s `*Seeds()` procs (the one standing manual duty the no-bots rule imposes) | `scripts/nightly-fuzz.sh` (its corpus staleness canary is the compensating control) | none | fuzz-snapshot-ritual |
-| Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | manual-ritual | `scripts/bmc.sh` (needs the `sello-dev` image; blocked on the same ghcr credential as RFC-005 slice 15) | none (by design) | none | bmc-symex |
+| Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | required-check | `bmc-symex` (`scripts/bmc.sh`, needs the `sello-dev` image) | n/a | none | bmc-symex |
 <!-- VALIDATION-MAP:TABLE END -->
 
 **Platform support.** <!-- VALIDATION-MAP:PLATFORM START -->The required

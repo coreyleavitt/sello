@@ -97,6 +97,7 @@ invocation, instead of paying their full compile cost once per mutant.
 """
 import os
 import pathlib
+import re
 import shutil
 import signal
 import subprocess
@@ -186,6 +187,38 @@ class Mutant:
                 f"exact spot; fix {self.path.name})"
             )
         target_path.write_text(src.replace(self.old, self.new, 1))
+
+
+def parse_shard(arg: str) -> tuple[int, int]:
+    """Parse a '--shard i/N' value (as the string 'i/N') into (i, N), both
+    1-indexed. Used by main() to select a deterministic subset of the
+    catalog for one matrix shard (RFC-005 slice 15's heavy-gate placement
+    decision -- see scripts/mutation.sh's own header comment for why
+    sharding exists at all)."""
+    m = re.fullmatch(r"(\d+)/(\d+)", arg)
+    if not m:
+        sys.exit(f"run_mutation: malformed --shard value {arg!r} -- want 'i/N' (1-indexed, e.g. --shard 2/4)")
+    i, n = int(m.group(1)), int(m.group(2))
+    if n < 1 or i < 1 or i > n:
+        sys.exit(f"run_mutation: invalid --shard value {arg!r} -- want 1 <= i <= N, N >= 1")
+    return i, n
+
+
+def shard_catalog(catalog, shard: tuple[int, int] | None):
+    """Deterministic partition: catalog is already sorted by path, which
+    (verified against the real tests/mutation/mutants/ filenames) sorts
+    identically to sorting by mutant `id` -- every mutant's filename is
+    prefixed with its own id (e.g. `B01_...`, `F05_...`), so a plain
+    lexicographic path sort IS an id sort with no separate key needed.
+    Shard i/N (1-indexed) gets every mutant whose zero-based catalog index
+    is congruent to (i-1) mod N -- a round-robin split, not a contiguous
+    slice, so no single shard is disproportionately loaded by mutants that
+    happen to cluster (by target file, e.g. the twelve-mutant H01-H12
+    sha512.nim run) next to each other in sorted order."""
+    if shard is None:
+        return catalog
+    i, n = shard
+    return [m for idx, m in enumerate(catalog) if idx % n == (i - 1)]
 
 
 def load_catalog():
@@ -305,7 +338,7 @@ def run_mutant(mutant: Mutant, unit_test_files, log_dir: pathlib.Path):
     return "SURVIVED", None
 
 
-def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent):
+def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent, shard=None):
     total = len(catalog)
     killed_test = sum(1 for r in results.values() if r[0] == "KILLED (test)")
     killed_compile = sum(1 for r in results.values() if r[0] == "KILLED (compile-error)")
@@ -324,6 +357,20 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
         "run -- this file is a build artifact of that script, not "
         "hand-maintained."
     )
+    if shard is not None:
+        i, n = shard
+        lines.append("")
+        lines.append(
+            f"**PARTIAL SHARD {i}/{n}** -- this run covered only a "
+            f"round-robin {total}-mutant subset of the full catalog "
+            "(RFC-005 slice 15's `mutation-{i}of{n}` merge-gate shards). "
+            "The counts below describe this shard alone, not the whole "
+            "catalog -- this file is never diffed against the committed "
+            "copy by any CI job (see scripts/mutation.sh's own header "
+            "comment); the committed docs/mutation-results.md remains the "
+            "full-catalog record from a maintainer's own unsharded "
+            "`scripts/mutation.sh` run."
+        )
     lines.append("")
     lines.append("## Summary")
     lines.append("")
@@ -477,14 +524,32 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
 
 
 def main():
-    unit_test_files = sys.argv[1:]
+    args = sys.argv[1:]
+    shard = None
+    if args and args[0] == "--shard":
+        if len(args) < 2:
+            sys.exit("usage: run_mutation.py [--shard i/N] <unit-test-file> [<unit-test-file> ...]")
+        shard = parse_shard(args[1])
+        args = args[2:]
+    unit_test_files = args
     if not unit_test_files:
-        sys.exit("usage: run_mutation.py <unit-test-file> [<unit-test-file> ...]")
+        sys.exit("usage: run_mutation.py [--shard i/N] <unit-test-file> [<unit-test-file> ...]")
 
-    catalog = load_catalog()
+    full_catalog = load_catalog()
+    catalog = shard_catalog(full_catalog, shard)
     equivalent = load_equivalent()
-    all_targets = sorted({m.target for m in catalog})
+    # Reset every target the FULL catalog can touch, not just this shard's
+    # own subset -- the scratch copy is fresh per invocation (one shard,
+    # one container), so this is a no-op in practice today, but keeping
+    # it keyed off full_catalog (not catalog) means a future change that
+    # reuses one scratch tree across shards can't silently leave another
+    # shard's target file mutated.
+    all_targets = sorted({m.target for m in full_catalog})
 
+    if shard is not None:
+        i, n = shard
+        print(f"run_mutation: SHARD {i}/{n} -- {len(catalog)}/{len(full_catalog)} mutants selected"
+              f" (round-robin partition of the full catalog)")
     print(f"run_mutation: {len(catalog)} mutants, {len(unit_test_files)} unit test files"
           f" ({len(equivalent)} retired-equivalent, not run)")
     print(f"run_mutation: preparing scratch copy at {SCRATCH} ...")
@@ -508,7 +573,7 @@ def main():
     reset_targets(all_targets)
 
     elapsed = time.monotonic() - start
-    render_report(catalog, results, elapsed, unit_test_files, equivalent)
+    render_report(catalog, results, elapsed, unit_test_files, equivalent, shard)
 
     survived = [m.id for m in catalog if results[m.id][0] == "SURVIVED"]
     killed_compile = sum(1 for m in catalog if results[m.id][0] == "KILLED (compile-error)")

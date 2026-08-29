@@ -244,6 +244,20 @@
 # `[SKIPPED]`-marker grep) -- the mechanism that makes this job's own
 # silent-skip-must-be-red DoD hold.
 #
+# RFC-005 slice 15 (mutation + bmc jobs, taken in numeric order once the
+# ghcr write:packages credential unblocked slice 14): `mutation` needs
+# only the base ghcr.io/coreyleavitt/nim image (scripts/mutation.sh's own
+# header comment has the "why not sello-dev" rationale); `bmc-symex` needs
+# sello-dev (z3-devel). Both entries are the plain, unwrapped
+# scripts/<name>.sh invocation, per this file's own standing convention --
+# each script's own SELLO_IN_CONTAINER dual-mode split (RFC-005 slice 15's
+# retrofit to both scripts) makes that work locally exactly the way every
+# other entry in this manifest already does. `bmc-symex`'s script-
+# invocation column carries an explicit timeout argument
+# (`scripts/bmc.sh 600`), matching the merge-gate workflow's own job step
+# exactly -- see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph for
+# the calibrated value and the timeout-triage policy.
+#
 # check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
@@ -264,3 +278,5 @@ ruleset-sync                        scripts/ruleset-sync-check.sh
 policy-lint                         scripts/policy-lint.sh
 build-smoke                         scripts/build-smoke.sh
 validation-map                      scripts/validation-map-check.sh
+mutation                            scripts/mutation.sh
+bmc-symex                           scripts/bmc.sh 600

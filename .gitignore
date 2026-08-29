@@ -11,3 +11,4 @@ nim.cfg
 
 # agent sandbox state
 .amoxtli/
+__pycache__/
