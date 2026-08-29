@@ -179,6 +179,39 @@
 # gate this slice, not deferred to the sello-dev credential fork the way
 # slices 10/14/15/17 are.
 #
+# RFC-005 slice 10 (--cpu:i386 32-bit leg): unit suite only, per the same
+# "matches the sanitizer leg's own scoping" register `--sanitize
+# asan-ubsan` above already established -- verified in-slice, not merely
+# assumed by analogy: the full property suite DOES compile and pass under
+# a real (non-emulated) --cpu:i386 build inside sello-dev, but its
+# generative-example wall clock runs several times slower than the same
+# suite's amd64 native run (int64 arithmetic becoming register-pair
+# operations under -m32 is directly on the hot path of every property
+# file's generated examples, not just this leg's identity canary), enough
+# to threaten the merge-gate wall-clock budget property-linux-amd64-gcc
+# already sits close to -- so, per this slice's own "confident call either
+# way, recorded" instruction, this leg stays unit-only, with no
+# property-linux-i386-gcc sibling. `scripts/test.sh --cpu i386`'s own
+# header comment has the full `--cpu:i386` + `--passC:-m32 --passL:-m32`
+# mechanism (an empirically REPRODUCED finding, not assumed: `--cpu:i386`
+# alone is not enough -- gcc happily emits a 64-bit object under a Nim
+# frontend that believes it targeted i386 unless `-m32` is threaded
+# explicitly, caught downstream only by nimbase.h's own
+# `NIM_STATIC_ASSERT` on pointer/NI size agreement) and
+# scripts/lib/cpu-canary.sh's own header has the platform-identity canary
+# design ("Identity canary: pointers are 4 bytes" -- RFC-005 Part B's own
+# text for this leg, verified via a REAL `doAssert` at runtime, not
+# merely inferred from --listCmd text the way every other canary in this
+# file does it). This is the first entry in this manifest whose plain,
+# unwrapped script-invocation column resolves a DIFFERENT container image
+# than the base `ghcr.io/coreyleavitt/nim` one on a maintainer's host --
+# `scripts/test.sh`'s own `--cpu` handling sources
+# scripts/lib/sello-dev-image.sh and pulls `sello-dev` by digest instead,
+# since only that image carries the `gcc-32bit`/`glibc-devel-32bit`/
+# `libstdc++6-32bit` packages this leg needs (Containerfile, RFC-005
+# slice 7) -- the manifest's own "plain, host-runnable command" convention
+# still holds with no new logic needed in merge-gate.sh itself.
+#
 # RFC-005 slice 31 (README evidence table + drift check): a pure text
 # scan over README.md's validation-map table plus its badge/platform/
 # CT-scope sections (round-2 corrections (i)-(iii) to the Part B
@@ -195,6 +228,7 @@ unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
 unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan
 unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+unit-linux-i386-gcc                 scripts/test.sh --cpu i386
 property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh

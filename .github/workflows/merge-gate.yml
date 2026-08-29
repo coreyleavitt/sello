@@ -184,6 +184,55 @@ jobs:
       - run: scripts/ci-nim-setup.sh --expect-arch aarch64
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
 
+  # RFC-005 slice 10: the --cpu:i386 32-bit leg -- the FIRST merge-gate
+  # job whose `container:` is `sello-dev`, not the base
+  # ghcr.io/coreyleavitt/nim image (pinned to
+  # scripts/lib/image-pins.txt's `sello-dev` line, RFC-005 slice 7's
+  # (Containerfile-hash, digest) pair -- the base image carries no 32-bit
+  # multilib support at all; sello-dev's `gcc-32bit`/`glibc-devel-32bit`/
+  # `libstdc++6-32bit` packages, added to the Containerfile specifically
+  # for this slice, are what make `-m32` linkable here). Unit suite only
+  # -- see scripts/lib/gates.txt's own slice-10 comment for the recorded
+  # wall-clock finding that ruled out a property-linux-i386-gcc sibling
+  # (the property suite DOES compile and pass under a real, non-emulated
+  # --cpu:i386 build, but several times slower than its amd64 native
+  # run -- one file alone measured well past what the merge gate's
+  # existing property-job wall-clock budget has room for).
+  # `--cpu:i386` alone is NOT sufficient for a real 32-bit build --
+  # empirically reproduced inside sello-dev, not assumed: without an
+  # explicit `-m32` on the C compile/link lines, gcc happily emits a
+  # 64-bit object under a Nim frontend that believes it targeted i386,
+  # caught only downstream by nimbase.h's own `NIM_STATIC_ASSERT` on
+  # pointer/NI size agreement -- scripts/test.sh's `--cpu i386` handling
+  # threads `--passC:-m32 --passL:-m32` alongside `--cpu:i386` for exactly
+  # this reason (that script's own header comment has the full writeup).
+  # The identity canary RFC-005 Part B names literally for this leg
+  # ("pointers are 4 bytes") is scripts/lib/cpu-canary.sh -- a genuinely
+  # different shape from toolchain-canary.sh/sanitizer-canary.sh: it
+  # compiles and RUNS a throwaway probe asserting, via a real `doAssert`
+  # at runtime, that `sizeof(pointer) == 4` and `sizeof(int) == 4`, rather
+  # than only inferring a fact from Nim's own --listCmd text (that
+  # script's own header comment has the full rationale for why a
+  # runtime check is needed here specifically) -- plus the same
+  # --listCmd-grep proof every other canary uses, confirming the real C
+  # compile line actually carried `-m32`.
+  unit-linux-i386-gcc:
+    name: unit-linux-i386-gcc
+    runs-on: ubuntu-latest
+    # Pinned by digest to the sello-dev image, not the base
+    # ghcr.io/coreyleavitt/nim one -- see scripts/lib/image-pins.txt's
+    # `sello-dev` line (RFC-005 slice 7's (Containerfile-hash, digest)
+    # pair) for the repin ritual. Published 2026-08-29 (RFC-005 slice 10):
+    # the real ghcr push blocked at slice 7's authoring time (see
+    # CLAUDE.md's sello-dev paragraph) completed once a write:packages
+    # credential existed, and the resulting digest matched this pin
+    # exactly -- no repin needed.
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cpu i386
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the

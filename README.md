@@ -532,7 +532,7 @@ claimed:
 <!-- VALIDATION-MAP:TABLE START -->
 | Claim | Category | Mechanism | Freshness canary | Carve-out doc | Row key |
 |---|---|---|---|---|---|
-| Bit-exact pass of RFC 8032 (ed25519) and RFC 7748 (X25519) vectors | required-check | `unit-linux-amd64-gcc` (and its five sibling `unit-*` legs across the CI matrix) | n/a | none | rfc-vectors |
+| Bit-exact pass of RFC 8032 (ed25519) and RFC 7748 (X25519) vectors | required-check | `unit-linux-amd64-gcc` (and its six sibling `unit-*` legs across the CI matrix) | n/a | none | rfc-vectors |
 | Pass Google Wycheproof adversarial vectors (ed25519 + X25519) | required-check | `unit-linux-amd64-gcc` (same unit suite; no Wycheproof corpus exists for ristretto255 -- RFC 9496 App. A plus fuzzing plus the libsodium differential suite carry that weight instead) | n/a | none | wycheproof |
 | dudect timing harness -- compiles cleanly, no verdict | required-check | `build-smoke` (compiles `tests/ct/ct_main.nim`, never runs it) | n/a | none | dudect-compile-smoke |
 | dudect timing harness -- real worst-case t-statistic verdict, ten targets | manual-ritual | `scripts/ct.sh` (maintainer-run, `-d:release`, roughly 1e6 samples/class) | pending slice 28 | `docs/ct-results.md` | dudect-full-battery |
@@ -549,7 +549,8 @@ claimed:
 
 **Platform support.** <!-- VALIDATION-MAP:PLATFORM START -->The required
 CI matrix builds and tests sello on: linux amd64 (`unit-linux-amd64-gcc`,
-`unit-linux-amd64-clang`, `unit-linux-amd64-gcc-asan-ubsan`), linux arm64
+`unit-linux-amd64-clang`, `unit-linux-amd64-gcc-asan-ubsan`), linux i386
+(`unit-linux-i386-gcc`, 32-bit multilib, unit suite only), linux arm64
 (`unit-linux-arm64-gcc`), macOS arm64 (`unit-macos-arm64-clang`), and
 Windows amd64 (`unit-windows-amd64-gcc`, MinGW-w64 gcc). MSVC (`vcc`) is
 not a supported build target: the constant-time signer's secret-wipe

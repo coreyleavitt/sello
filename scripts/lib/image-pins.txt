@@ -67,22 +67,29 @@ ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890
 # together in the same commit as the Containerfile change -- never one
 # without the other.
 #
-# Recorded 2026-08-24 (RFC-005 slice 7). NOT YET LIVE at ghcr.io: the
-# real push is blocked on ghcr `write:packages` credentials at authoring
-# time (no scope on the session's gh token, no podman ghcr.io login --
-# see the handoff doc's open-forks entry for the exact unblock steps).
-# The digest below is not a placeholder: it was computed by building this
-# exact, already-committed Containerfile and pushing the resulting image
-# to a disposable scratch registry (verifying push/pull mechanics and the
-# digest computation end to end without needing a real credential), then
-# preserving that EXACT image -- not rebuilding it -- as a portable
-# oci-archive at /home/corey/.cache/sello-dev-image/ (untracked, outside
-# the repo) for the eventual real publish. Loading and pushing that exact
-# archive (rather than re-running `podman build`) reproduces this digest
+# Recorded 2026-08-24 (RFC-005 slice 7). The digest below is not a
+# placeholder: it was computed by building this exact, already-committed
+# Containerfile and pushing the resulting image to a disposable scratch
+# registry (verifying push/pull mechanics and the digest computation end
+# to end without needing a real credential), then preserving that EXACT
+# image -- not rebuilding it -- as a portable oci-archive at
+# /home/corey/.cache/sello-dev-image/ (untracked, outside the repo) for
+# the eventual real publish. Loading and pushing that exact archive
+# (rather than re-running `podman build`) reproduces this digest
 # byte-for-byte; a fresh rebuild might not (container builds are not
-# reproducible -- see this section's own note above), so the archive,
-# not the Containerfile alone, is the artifact of record until the real
-# push happens.
+# reproducible -- see this section's own note above), so the archive, not
+# the Containerfile alone, was the artifact of record until the real push
+# happened.
+#
+# LIVE at ghcr.io as of 2026-08-29 (RFC-005 slice 10): the real push
+# (blocked at slice 7's authoring time on a ghcr `write:packages`
+# credential -- see the handoff doc's Resolved forks entry) completed
+# once that credential existed, loading and pushing the preserved
+# oci-archive above unmodified. The resulting published digest matched
+# this line's `sha256:dc39f87a...` exactly -- no repin needed -- and the
+# package was made PUBLIC; verified via an anonymous (no-auth) pull-by-
+# digest against ghcr.io's own registry API returning HTTP 200 for this
+# exact digest.
 
 sello-dev 806abfce49ffbbe88798043770b2698fc8ca1b7e88558946bc8c077d07ede932 ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
 

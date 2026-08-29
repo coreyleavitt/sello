@@ -20,7 +20,17 @@
 #      pin file records the pair... CI fails if the Containerfile hash
 #      changed without a digest bump" -- this check is the workflow-side
 #      half: the workflow's own image references must match the pin
-#      file, whichever direction drifted).
+#      file, whichever direction drifted). RFC-005 slice 10 extended this
+#      from a base-image-section-only comparison to ALSO accept the
+#      sello-dev section's own `image@sha256:...` field (third
+#      whitespace-separated column on the `sello-dev` line) -- slice 10's
+#      `unit-linux-i386-gcc` is the first workflow job whose `container:`
+#      pins to sello-dev rather than the base
+#      ghcr.io/coreyleavitt/nim image, so this assertion's prior
+#      single-section comparison would otherwise reject it outright. The
+#      check itself stays a straight set-membership comparison -- just
+#      against the UNION of both sections' image references, not a
+#      structural change to how either section is read.
 #   5. (RFC-005 slice 7, sello-dev section) the committed root
 #      `Containerfile`'s content hash matches the hash recorded on the
 #      `sello-dev` line of scripts/lib/image-pins.txt -- the other half
@@ -140,14 +150,24 @@ for wf in .github/workflows/*.yml; do
     wf_status=1
   fi
 
-  # 4. every container: image digest matches scripts/lib/image-pins.txt.
+  # 4. every container: image digest matches scripts/lib/image-pins.txt --
+  #    either the base-image section (one bare `image@sha256:...` line
+  #    per entry) or the sello-dev section's own `image@sha256:...` field
+  #    (third whitespace-separated column of the `sello-dev` line;
+  #    RFC-005 slice 10 -- see this script's own header comment for why
+  #    the union of both sections, not the base-image section alone, is
+  #    now the right comparison set).
   while IFS= read -r image; do
     [[ -z "$image" ]] && continue
-    if ! grep -qxF "$image" scripts/lib/image-pins.txt; then
-      echo "policy-lint: FAIL -- $wf: container image '$image' has no matching line in scripts/lib/image-pins.txt." >&2
-      status=1
-      wf_status=1
+    if grep -qxF "$image" scripts/lib/image-pins.txt; then
+      continue
     fi
+    if grep -E '^sello-dev[[:space:]]' scripts/lib/image-pins.txt | awk '{print $3}' | grep -qxF "$image"; then
+      continue
+    fi
+    echo "policy-lint: FAIL -- $wf: container image '$image' has no matching line in scripts/lib/image-pins.txt (checked both the base-image section and the sello-dev line's own image field)." >&2
+    status=1
+    wf_status=1
   done < <(grep -oE 'image:[[:space:]]*[^[:space:]]+@sha256:[0-9a-f]+' "$wf" | sed 's/^image:[[:space:]]*//')
 
   if [[ "$wf_status" -eq 0 ]]; then

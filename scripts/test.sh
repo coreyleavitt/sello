@@ -11,6 +11,7 @@
 #         scripts/test.sh --cc clang   # compile with clang instead of gcc (RFC-005 slice 8)
 #         scripts/test.sh --sanitize asan-ubsan   # ASan/UBSan build of the unit suite (RFC-005 slice 9)
 #         scripts/test.sh --expect-proptest-skip   # assert the proptest SKIPPED banner appears (RFC-005 slice 12)
+#         scripts/test.sh --cpu i386   # 32-bit multilib build, unit+property suite (RFC-005 slice 10)
 #         scripts/test.sh --cc clang -d:release   # leading flags compose with defines
 #         scripts/test.sh --sanitize asan-ubsan --cc clang   # leading flags compose with each other too
 #
@@ -100,13 +101,40 @@
 # scripts/ invocation per job, no separate wrapper script needed for one
 # grep).
 #
-# All three flags are parsed by a small leading-argument loop (still not a
-# general getopts parser -- this script has exactly three optional
-# leading flags, two taking a value and one boolean, and every other
+# --cpu <name> (RFC-005 slice 10, the --cpu:i386 32-bit matrix leg):
+# today's only supported name is `i386`. Threads `--cpu:i386` PLUS the C
+# flags a real 32-bit build needs (`--passC:-m32 --passL:-m32`) into every
+# `nim c` invocation below. `--cpu:i386` alone is NOT enough -- verified
+# empirically inside sello-dev via `nim --cpu:i386 --listCmd`, not
+# assumed: without an explicit `-m32` on the C compile/link lines, gcc
+# happily compiles a 64-bit object under a Nim frontend that believes it
+# targeted i386, and the mismatch is caught only downstream by nimbase.h's
+# own `NIM_STATIC_ASSERT` on `sizeof(NI) == sizeof(void*)` -- a real,
+# reproduced failure mode, not a hypothetical one, that composing
+# `--passC:-m32 --passL:-m32` alongside `--cpu:i386` closes. This leg
+# needs the `sello-dev` image (Containerfile's `gcc-32bit`/
+# `glibc-devel-32bit`/`libstdc++6-32bit` packages, RFC-005 slice 7), not
+# the base `ghcr.io/coreyleavitt/nim` image -- neither this script nor
+# `scripts/lib/cpu-canary.sh` enforces that (both are plain image-agnostic
+# `nim c`/gcc invocations); the image choice lives in the CALLER
+# (`unit-linux-i386-gcc`'s own `container:` pin in merge-gate.yml).
+# Composes with `--cc`/`--sanitize` the same way those two already compose
+# with each other, though today's one caller (`scripts/lib/gates.txt`'s
+# `unit-linux-i386-gcc` entry) passes `--cpu i386` alone, on the default
+# gcc backend. `scripts/lib/cpu-canary.sh` is a genuinely different
+# canary shape from `toolchain-canary.sh`/`sanitizer-canary.sh` -- see its
+# own header comment for why (a runtime `doAssert sizeof(pointer) == 4`
+# probe, not merely a `--listCmd` text inference) -- and runs once, BEFORE
+# the per-file loop below, rather than riding the first unit test file's
+# own compile the way the other two canaries do.
+#
+# All four flags are parsed by a small leading-argument loop (still not a
+# general getopts parser -- this script has exactly four optional
+# leading flags, three taking a value and one boolean, and every other
 # argument stays an opaque pass-through define as before), so any of them,
 # in any order, may lead the argument list; the loop stops at the first
-# argument that isn't `--cc`/`--sanitize`/`--expect-proptest-skip`, and
-# everything from there on is forwarded verbatim as a define. The FIRST
+# argument that isn't `--cc`/`--sanitize`/`--cpu`/`--expect-proptest-skip`,
+# and everything from there on is forwarded verbatim as a define. The FIRST
 # unit test file's compile is additionally run
 # through a canary: scripts/lib/toolchain-canary.sh (compiler identity
 # only) when `--sanitize` is unset, or scripts/lib/sanitizer-canary.sh
@@ -114,12 +142,17 @@
 # compile -- see that script's own header) when it is set. Both prove
 # their claim via Nim's own `--listCmd` output -- not merely that a flag
 # was accepted -- see either script's header for why a bare `clang
-# --version`-style sanity check alone would not be enough. One code path:
-# `cc_flag`/`cc_name`/`sanitize_name`/`sanitize_nim_args` are plain bash
-# variables consumed while building the `cmd` string below, so both
-# entrypoints (SELLO_IN_CONTAINER=1 and the podman-wrapped host branch)
-# get identical flag/canary behavior with no branch-specific handling of
-# either.
+# --version`-style sanity check alone would not be enough. When `--cpu` is
+# set, `scripts/lib/cpu-canary.sh` runs first (see above), and the
+# per-file canary (toolchain- or sanitizer-) still runs too, now composed
+# with the `--cpu`/`-m32` flags like every other compile in the run -- a
+# second, incidental confirmation that the real suite's own first file
+# also built 32-bit, on top of the dedicated probe's runtime proof. One
+# code path: `cc_flag`/`cc_name`/`sanitize_name`/`sanitize_nim_args`/
+# `cpu_name`/`cpu_flag`/`cpu_nim_args` are plain bash variables consumed
+# while building the `cmd` string below, so both entrypoints
+# (SELLO_IN_CONTAINER=1 and the podman-wrapped host branch) get identical
+# flag/canary behavior with no branch-specific handling of either.
 #
 # Mounts: the project + the milpa CAS (at both the canonical path and its
 # host-absolute path, so milpa's absolute dep symlinks under _deps/
@@ -200,8 +233,11 @@ cc_name="gcc"
 cc_flag=""
 sanitize_name=""
 sanitize_nim_args=""
+cpu_name=""
+cpu_flag=""
+cpu_nim_args=""
 expect_proptest_skip=0
-while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--expect-proptest-skip" ]]; do
+while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" || "${1:-}" == "--expect-proptest-skip" ]]; do
   case "$1" in
     --cc)
       if [[ -z "${2:-}" ]]; then
@@ -232,6 +268,27 @@ while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--expect
           ;;
         *)
           echo "scripts/test.sh: unknown --sanitize value '$sanitize_name' (supported: asan-ubsan)" >&2
+          exit 2
+          ;;
+      esac
+      shift 2
+      ;;
+    --cpu)
+      if [[ -z "${2:-}" ]]; then
+        echo "scripts/test.sh: --cpu requires a target name, e.g. --cpu i386" >&2
+        exit 2
+      fi
+      cpu_name="$2"
+      case "$cpu_name" in
+        i386)
+          # --cpu:i386 alone is not enough -- see the header comment
+          # above for the reproduced NIM_STATIC_ASSERT failure this
+          # composition closes.
+          cpu_flag="--cpu:i386"
+          cpu_nim_args='--passC:-m32 --passL:-m32'
+          ;;
+        *)
+          echo "scripts/test.sh: unknown --cpu value '$cpu_name' (supported: i386)" >&2
           exit 2
           ;;
       esac
@@ -269,6 +326,15 @@ if [[ -n "$sanitize_name" ]]; then
   # a plain (non-sanitized) run's environment is untouched.
   cmd+=$'\n'"export ASAN_OPTIONS=detect_leaks=0"
 fi
+# scripts/lib/cpu-canary.sh (RFC-005 slice 10) runs BEFORE the per-file
+# loop below, once, rather than riding the first file's own compile --
+# see that script's own header comment for why (it proves a RUNTIME
+# fact -- sizeof(pointer) == 4 -- that a --listCmd text inference alone
+# cannot establish).
+if [[ -n "$cpu_name" ]]; then
+  cmd+=$'\n'"echo '=== cpu-canary ($cpu_name) ==='"
+  cmd+=$'\n'"scripts/lib/cpu-canary.sh $cc_name nim c $cc_flag $cpu_flag $cpu_nim_args"
+fi
 canary_done=0
 for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
@@ -280,15 +346,19 @@ for f in "${unit_test_files[@]}"; do
     # compile+run (`-r`), not an extra throwaway build -- the sanitizer
     # variant (when --sanitize is set) checks BOTH compiler identity and
     # sanitizer-flag presence from this one compile, rather than
-    # composing two separate canary compiles of the same file.
+    # composing two separate canary compiles of the same file. When
+    # --cpu is set (RFC-005 slice 10), this canary's own compile is ALSO
+    # composed with the --cpu/-m32 flags -- a second, incidental
+    # confirmation the real suite's own first file built 32-bit too, on
+    # top of scripts/lib/cpu-canary.sh's dedicated runtime probe above.
     if [[ -n "$sanitize_name" ]]; then
-      cmd+=$'\n'"scripts/lib/sanitizer-canary.sh $cc_name nim c $cc_flag $sanitize_nim_args ${extra_defines[*]:-} --listCmd -f -r $f"
+      cmd+=$'\n'"scripts/lib/sanitizer-canary.sh $cc_name nim c $cc_flag $sanitize_nim_args $cpu_flag $cpu_nim_args ${extra_defines[*]:-} --listCmd -f -r $f"
     else
-      cmd+=$'\n'"scripts/lib/toolchain-canary.sh $cc_name nim c $cc_flag ${extra_defines[*]:-} --listCmd -f -r $f"
+      cmd+=$'\n'"scripts/lib/toolchain-canary.sh $cc_name nim c $cc_flag $cpu_flag $cpu_nim_args ${extra_defines[*]:-} --listCmd -f -r $f"
     fi
     canary_done=1
   else
-    cmd+=$'\n'"nim c $cc_flag $sanitize_nim_args ${extra_defines[*]:-} -r $f"
+    cmd+=$'\n'"nim c $cc_flag $sanitize_nim_args $cpu_flag $cpu_nim_args ${extra_defines[*]:-} -r $f"
   fi
 done
 # Property suites skipped because _deps/proptest is absent (RFC-003 slice 2
@@ -333,6 +403,22 @@ else
   # gating entry to.
   source "$(dirname "$0")/lib/milpa-preflight.sh"
   milpa_preflight
+
+  # --cpu:i386 (RFC-005 slice 10) needs the 32-bit multilib packages only
+  # `sello-dev` carries (Containerfile: gcc-32bit/glibc-devel-32bit/
+  # libstdc++6-32bit, RFC-005 slice 7) -- the base
+  # ghcr.io/coreyleavitt/nim image has no cross/multilib support at all.
+  # A maintainer's local `scripts/test.sh --cpu i386` run therefore
+  # resolves sello-dev instead, via the SAME pull-by-digest mechanism
+  # scripts/test-libsodium.sh/scripts/bmc.sh already use
+  # (scripts/lib/sello-dev-image.sh's own header has the full mechanism,
+  # escape hatches included). CI itself never reaches this branch --
+  # unit-linux-i386-gcc runs with SELLO_IN_CONTAINER=1, already inside
+  # sello-dev via its own `container:` pin.
+  if [[ -n "$cpu_name" ]]; then
+    source "$(dirname "$0")/lib/sello-dev-image.sh"
+    resolve_sello_dev_image
+  fi
 
   if [[ -n "$run_log" ]]; then
     podman run --rm \
