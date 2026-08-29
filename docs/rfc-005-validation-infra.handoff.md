@@ -892,7 +892,7 @@ Phase 1 — matrix (7 first, then 8–13 independent):
 
 Phase 2 — heavy deterministic gates (independent after 7):
 - [x] 14. libsodium differential job (skip paths fatal under CI env var) -- DONE 2026-08-29, once the ghcr write:packages credential landed (see Resolved forks; taken in numeric order for once, since 10 already unblocked this fork). Code `a0c60f3` (mechanism: unit-linux-amd64-gcc-libsodium job, scripts/test-libsodium.sh dual-mode, SELLO_REQUIRE_LIBSODIUM=1 fatal-skip in test_libsodium_interop.nim, README/CLAUDE.md updates), fix `bfb764c` (a genuine local-verification finding: proptest is REQUIRED, not optional, for this script -- see below), red demo `bc91248` (dropped -d:selloLibsodium, run `33272136700`, job `99152427489`), revert `f5abe89`, ruleset re-trigger (same commit, since ruleset-apply ran before the demo). See the full slice entry below for the proptest finding, mechanism design, and run ids.
-- [ ] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision)
+- [x] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision) -- DONE 2026-08-29. Code `adbc8ec` (mechanism: mutation/bmc-symex jobs, SELLO_IN_CONTAINER dual-mode retrofit to both scripts, --shard i/N added to run_mutation.py but unwired), fix `35f5d8e` (a genuine REPO_ROOT hardcoding bug caught by the first real CI push -- see below), doc commit `88ba28e` (real hosted numbers recorded: mutation 475s, bmc-symex ~165s, both land as PLAIN UNCONDITIONAL required checks -- no sharding, no branch-pattern fallback needed), red demo on scratch branch `rfc-005-slice15-red-demo` (commit `ae65383`, run `33275913747`, jobs `99162471333`/`99162471401`), ruleset re-trigger (`ruleset-sync` job in run `33275374471`, after `scripts/ruleset-apply.sh --apply`). See the full slice entry below for the mechanism bug, the placement-decision numbers, and the two red-demo run/job ids.
 - [x] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error) -- DONE 2026-08-24, taken out of order (see slice 11's precedent and CLAUDE.md). Code `defa505` (mechanism + job), red demo `41a8e2d`, revert `2b3747a`. See the full slice entry below for mechanism design, run ids, and the red-then-green sequence.
 - [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs) -- BLOCKED on the same Corey-owned ghcr write:packages credential as slices 10/14/15 (the sello-dev image); scripts/lib/baseline.sh itself was pulled forward into slice 18 instead (see that slice's own entry and CLAUDE.md's placement-swap note) since slice 18 needed only the base image.
 - [x] 18. API-surface gate A8 (generator verify-first spike; dual baselines) -- DONE 2026-08-24, taken out of order (see slice 11's/16's precedent and CLAUDE.md) -- slices 10/14/15/17 remain blocked on the same Corey-owned ghcr credential; this slice needed only the base image. Code `ad24138` (mechanism, generator, baseline.sh, both jobs, both baselines), red demo `ec1fde2`, revert `eee808c`. See the full slice entry below for mechanism design, spike findings, run ids, and the red-then-green sequence.
@@ -3482,6 +3482,233 @@ long pole -- the property jobs are.
       the API-surface-gate/build-smoke paragraphs' own shape: reordering
       rationale, mechanism, the gate's own assertions, the red demo).
 
+### Slice 15 (mutation + bmc jobs) -- full record
+
+2026-08-29: slice 15 DONE end-to-end, landed in numeric order (unblocked
+by the same `sello-dev` ghcr credential slice 10/14 needed -- see the
+grind-state note below). No genuine core-arithmetic or coverage-gap
+finding surfaced (the whole 84-mutant catalog stayed 84/84 killed and
+all four symex proofs stayed clean on every real, non-demo run) -- the
+one real finding this slice produced was infra/tooling (the REPO_ROOT
+hardcoding bug below), not a defect in sello itself.
+
+**Required reading done first.** CLAUDE.md's CI section (sello-dev
+live+pinned digest, `SELLO_IN_CONTAINER` dual-mode pattern, the
+slice-10/14 sello-dev-job precedents), `docs/rfc-005-validation-infra.md`
+lines 1036-1042 (the slice text), 660-685 (bmc timeout triage policy, the
+merge gate's ≤15-min wall-clock aim, the pre-authorized branch-pattern
+fallback), and the "Ordering & risks" section's own mutation-wall-clock
+bullet (the RFC's own recorded worry: "553s local x 2-4x hosted is
+20-35 min"); the mutation and bmc validation-bar entries; `scripts/mutation.sh`,
+`tests/mutation/run_mutation.py`, `tests/mutation/mutants/`,
+`docs/mutation-results.md`; `scripts/bmc.sh`, `tests/verify/symex_*.nim`;
+`scripts/lib/sello-dev-image.sh`; `.github/workflows/merge-gate.yml`;
+`scripts/lib/gates.txt`; README's validation-map table (the
+`mutation-catalog`/`bmc-symex` rows, both `manual-ritual` before this
+slice).
+
+**Dual-mode retrofit.** Both scripts gained the same `SELLO_IN_CONTAINER=1`
+split every other CI-wired script already has (`scripts/ci-property.sh`'s
+own precedent): CI's own `container:` field already pins the image, so
+that branch skips the podman wrap and, since a bare CI checkout starts
+with none of a maintainer host's pre-fetched `_deps/`, fetches
+milpa+proptest itself (mirroring `scripts/build-smoke.sh`'s in-container
+fetch pattern) -- required for `mutation` specifically so its run
+exercises the SAME full unit+property suite a maintainer's local run
+always has, not a silently reduced catalog. Host mode is unchanged in
+both scripts, per the task's own instruction.
+
+**Image choice, decided and recorded.** `mutation` runs on the base
+`ghcr.io/coreyleavitt/nim` image (mutation testing never links
+libsodium/z3 -- pulling `sello-dev` would only add cold-pull cost with
+no offsetting benefit); `bmc-symex` runs on `sello-dev` (needs
+`z3-devel`). The RFC's own "one image, consolidate" preference was
+read as "don't build a THIRD custom image," not "force every gate onto
+the heaviest available image" -- see `scripts/mutation.sh`'s own header
+comment for the full rationale, written before the numbers came in so
+it stands as a design decision, not a post-hoc justification.
+
+**Genuine finding, not anticipated by the task brief: `run_mutation.py`
+hardcoded `REPO_ROOT = pathlib.Path("/workspace")`.** Correct under
+`scripts/mutation.sh`'s host-mode podman wrapper (`-v $PWD:/workspace -w
+/workspace`), where that path always exists by construction of the
+`podman run` invocation -- but WRONG under the new `SELLO_IN_CONTAINER=1`
+CI path: GitHub Actions' own `container:` mechanism checks the repo out
+to `/__w/<repo>/<repo>` (`/__w/sello/sello` here), never `/workspace` --
+there is no podman wrap left to create that mount point. This was
+invisible to local verification (which exercised the SELLO_IN_CONTAINER=1
+branch via a no-mount podman container with the tree copied to
+`/workspace` by hand -- see below -- accidentally reproducing the exact
+path the bug depended on) and surfaced only on the first real CI push:
+run `33274740363`, job `mutation` (id `99159376215`) failed in 52s (nowhere
+near the catalog's real multi-minute cost) with `run_mutation: no
+*.mutant files found under /workspace/tests/mutation/mutants`. Fixed
+(`35f5d8e`) by deriving `REPO_ROOT` from the script's own file location
+(`pathlib.Path(__file__).resolve().parent.parent.parent`) instead of a
+path that only exists in one of the two invocation modes -- this
+resolves identically under both, since the script is always invoked as
+`python3 tests/mutation/run_mutation.py ...` with the repo root as cwd.
+No other script in the codebase carries the same hardcoding (checked via
+a repo-wide grep for `/workspace` outside `.sh` files before closing this
+finding).
+
+**`--shard i/N` built, decided NOT NEEDED once measured.** Per the task's
+own instruction, the sharding mechanism was built BEFORE the real hosted
+measurement was in hand (`tests/mutation/run_mutation.py`'s
+`parse_shard`/`shard_catalog`, a deterministic round-robin partition of
+the sorted catalog by index mod N -- verified locally against a live 4-way
+split: 84 mutants -> 21/21/21/21, ids spread rather than clustered by
+target file). Once the REPO_ROOT bug was fixed and the job ran for real,
+the RFC's own pessimistic projection did not hold on this runner: `mutation`
+completed in 475s (7m55s) end to end -- checkout, milpa install, proptest
+fetch, and all 84 mutants against a cold nimcache -- comfortably inside
+the 15-minute merge-gate budget with real margin (roughly half the
+ceiling), not the 20-35 min the RFC's own "553s local x 2-4x hosted"
+extrapolation predicted. `bmc-symex` measured ~165s across two consistent
+runs (164s, 167s). **Placement decision (confident, data-driven, matching
+the task's own stated preference order): both land as PLAIN,
+UNCONDITIONAL required checks.** Neither the matrix-sharded
+`mutation-{i}of{N}` remedy nor the `rfc-*`/`release-*`-branch-pattern
+fallback was needed. `--shard` stays in the script, unwired from any job,
+as a real tested capability in reserve for a future catalog-growth push
+(the mutant count has only ever grown across every prior RFC/round) --
+not dead code, a deliberate hedge.
+
+**bmc-symex timeout calibration.** `timeout-minutes: 10` at the GitHub
+Actions job level, `scripts/bmc.sh 450` (7.5-minute internal
+`timeout --signal=KILL`) -- calibrated from the two real measurements
+(~165s actual, ~2.7x headroom on the internal timeout, ~3.7x on the job
+ceiling), matching `scripts/lib/gates.txt`'s own `bmc-symex` entry
+(corrected from an initial provisional `600` to the calibrated `450` in
+the same commit). The job-level ceiling sits deliberately above the
+script's own internal timeout so a genuinely hung Z3 query hits the
+script's own diagnostic-printing kill first, not GitHub's own harsher
+job-timeout cancellation. Timeout-triage policy recorded in both
+CLAUDE.md and `scripts/bmc.sh`'s own header comment: a timeout here is
+TRIAGED, never green-washed -- retry once; a second timeout on the same
+code is investigated as a solver regression. The merge gate carries no
+notify job of its own (unlike `nightly.yml`'s timeout-vs-cancel
+annotation split, RFC-005 slice 26) -- a bmc-symex timeout is simply a
+red required check, and the triage judgment is a maintainer's own call
+on a red run, not a mechanized signal.
+
+**Local verification (per the task's own instruction to validate before
+pushing).** Alt-root podman store, but a DIFFERENT trap than every prior
+slice's recorded `/etc/mtab` fuse-overlayfs poisoning: this session's
+existing `/home/corey/.podman-push` store (loaded in prior sessions) hit
+`Error: creating /etc/mtab symlink: permission denied` on EVERY `podman
+run`/`create`, even freshly created containers, even after abandoning the
+store entirely for a brand-new `/home/corey/.podman-push2` pair -- the
+fix was NOT "use a fresh store" (already tried, still broken) but
+`--storage-driver overlay --storage-opt
+overlay.mount_program=/usr/bin/fuse-overlayfs` passed EXPLICITLY on every
+invocation: this host's `~/.config/containers/storage.conf` DOES declare
+`mount_program = fuse-overlayfs` under `[storage.options.overlay]`, but
+that config's own `graphroot`/`runroot` are the DEFAULT store paths, not
+this session's `--root`/`--runroot` override targets -- podman does not
+apply a config file's driver-option section to an out-of-config
+root/runroot pair unless the same options are also passed on the command
+line. A genuinely new finding (the slice-1/7 handoff notes document the
+poisoned-blob variant of this trap, not this config-doesn't-follow-root-
+override variant) -- recorded here for the next session that hits it.
+Once fixed: no-mount `podman create`/`cp`(tar, `--no-same-owner`)/`exec`
+(the established workaround for this host's rootless-podman UID mapping),
+git/python3/curl/nim all present and network-reachable inside both the
+base `ghcr.io/coreyleavitt/nim:2.2.10` and `sello-dev` images. A local
+4-mutant `scripts/mutation.sh --shard 1/20` run (via the
+`SELLO_IN_CONTAINER=1` in-container body, milpa built from source +
+proptest/z3/softlink fetched over real network) completed clean (5/5
+killed -- the round-robin split gave shard 1/20 five mutants, not four),
+confirming the sharding mechanism before it was ever pushed. A full local
+`scripts/bmc.sh 900` run (`SELLO_IN_CONTAINER=1`, `sello-dev`) completed
+all four symex proof files clean (`symex_recode`/`symex_mask`/
+`symex_reduce`/`symex_equal`, matching every prior slice's own machine-
+checked verdicts) before the mechanism was pushed for real measurement.
+
+**Real CI run-by-run record (branch `rfc-005-slice15`):**
+  - Push 1 (mechanism, commit `adbc8ec`): run `33274740363`. `mutation`
+    FAILED in 52s at the `/workspace` REPO_ROOT bug (job `99159376215`,
+    see above); `bmc-symex` succeeded for real -- FIRST real hosted
+    measurement, 2m47s (167s; started 20:55:58, completed 20:58:45).
+    `ruleset-sync` red as expected (live ruleset not yet updated, the
+    standard first-push shape). Pushing the fix (below) was deliberately
+    delayed until this run's `bmc-symex` job finished, so its measurement
+    wasn't lost to the branch's own `concurrency: cancel-in-progress`.
+  - Push 2 (fix, commit `35f5d8e`): run `33274891485`. `mutation`
+    succeeded for real -- 475s (7m55s; started 21:00:04, completed
+    21:07:59), 84/84 killed, 0 survived, 0 timeouts. `bmc-symex` succeeded
+    again -- SECOND consistent hosted measurement, 2m44s (164s; started
+    21:00:03, completed 21:02:47). This run's overall conclusion was
+    `failure` (ruleset-sync only, still pre-apply) -- both target jobs
+    green.
+  - Doc commit (`88ba28e`, no code change): run `33275374471`. All
+    non-ruleset-sync jobs green (21 total once ruleset-sync re-ran, see
+    below).
+  - `scripts/ruleset-apply.sh` (dry run, then `--apply`): diff showed
+    exactly two additions, `"context": "bmc-symex"` and `"context":
+    "mutation"`, to the `main` ruleset's required-check array (generated
+    from `scripts/lib/gates.txt`, 21 checks) -- applied for real,
+    `evidence`/`main`/`tags` all `UPDATED`. `ruleset-sync` re-run
+    (`gh run rerun --failed` on run `33275374471`, no new commit needed --
+    the check re-queries live ruleset state) went green ~20s later,
+    confirming the applied `main` ruleset already matched the 21-check
+    manifest. Run `33275374471`: 21/21 GREEN -- this is `rfc-005-slice15`'s
+    final green state, fast-forwarded to `main`.
+
+**Red demo (scratch branch `rfc-005-slice15-red-demo`, commit `ae65383`,
+run `33275913747`, never merged -- deleted locally and on origin
+immediately after, confirmed via a 404 from `gh api
+repos/.../branches/rfc-005-slice15-red-demo`).** One push, two
+independent, targeted reds:
+  - `tests/mutation/mutants/ZZZ01_scratch_red_demo_survivor.mutant`: a
+    pure doc-comment edit to `src/sello/field.nim`'s module doc comment
+    (`## GF(2^255 - 19) field arithmetic` -> the same text plus a
+    scratch-demo suffix), zero behavioral effect by construction. Job
+    `mutation` (id `99162471333`) FAILED for real: log line `[85/85]
+    ZZZ01 (src/sello/field.nim): SURVIVED (230.4s)` (the 230s reflects
+    running the FULL 18-file suite with no failure to short-circuit on,
+    unlike every real mutant in the catalog) followed by `run_mutation:
+    85 mutants -- 84 killed (test), 0 killed (compile-error), 0 killed
+    (timeout), 1 survived` and `run_mutation: SURVIVORS: ZZZ01`.
+  - `tests/verify/symex_equal.nim`'s `symexAssert((diff == 0'i32) ==
+    allEqual)` flipped to `!=`. Job `bmc-symex` (id `99162471401`) FAILED
+    for real: log line `UNEXPECTED RAISE in orAccumulateChain (...) --
+    witness: (255, 0, 255, 255, 0, 255, 0, 0, 255, 0, ...)` (the walker's
+    concrete-witness validation pass hit the deliberately-broken assertion
+    and raised, reported via the `sxRaised` branch of `report()` --
+    functionally the same "broken proof, not a hang" outcome the task
+    asked for, discovered via a concrete countermodel rather than the
+    solver returning `sxSat` directly).
+  - Every OTHER job in the same run stayed green (`ruleset-sync`,
+    `validation-map`, `gates-manifest-sync`, `policy-lint`, every
+    `unit-*`/`property-*` leg, `build-smoke`, `api-surface*` --
+    `property-linux-arm64-gcc` was still `in_progress` when the two
+    target jobs were confirmed red and was not separately awaited, since
+    it is unrelated to either demo) -- confirming both reds are targeted,
+    not incidental breakage.
+
+**Escalation check (per the task's own rule):** no core-arithmetic or
+cryptographic finding surfaced this slice -- the two real findings
+(the `REPO_ROOT` hardcoding bug, the `/etc/mtab`
+storage-driver-option-doesn't-follow-root-override local-podman trap) are
+both infra/tooling, not defects in sello's field/scalar/signing code. No
+escalation triggered.
+
+**CLAUDE.md** updated across two commits: `adbc8ec` needed no CLAUDE.md
+paragraph yet (mechanism-only, deliberately pushed before the real
+numbers existed, per the task's own "measure hosted times FIRST"
+instruction); `88ba28e` added the full "Mutation + bmc jobs (RFC-005
+slice 15)" CI-section paragraph (image-choice rationale, the REPO_ROOT
+bug, the sharding-built-but-not-needed decision with both jobs' real
+numbers, the bmc-symex timeout calibration + triage policy), updated the
+job-count line (nineteen -> twenty-one, with a new "slice 15 adds
+`mutation` and `bmc-symex`" clause), and appended "**✅ REQUIRED CHECK as
+of RFC-005 slice 15**" sentences to both the mutation-testing and
+Z3-proof entries in "The validation bar" section. `docs/rfc-005-validation-infra.md`'s
+"Ordering & risks" section's mutation-wall-clock bullet was rewritten
+with the real numbers and the "did not hold" finding, replacing the
+RFC's own pre-slice-15 projection.
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -3594,4 +3821,22 @@ long pole -- the property jobs are.
   then slice 30 (see the deferral bullet above -- its producers exist
   once 25 + A9 land), then 32. Slices 27-29 stay Corey-physical. 19/32
   done at this note.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 15.
+  Slice 15 is DONE (2026-08-29, landed in numeric order -- see its own
+  full-record entry above): `mutation` (84-mutant catalog, base image)
+  and `bmc-symex` (four Z3 symex proof files, `sello-dev` image) landed
+  as PLAIN, UNCONDITIONAL required checks -- the RFC's own pessimistic
+  wall-clock projection (20-35 min hosted) did not hold on this runner;
+  real measured numbers were 475s (mutation) and ~165s (bmc-symex), both
+  comfortably inside the 15-minute budget, so neither the matrix-sharded
+  remedy nor the branch-pattern fallback was needed (the `--shard i/N`
+  mechanism was still built and stays in reserve, unwired, for a future
+  catalog-growth push). One genuine infra finding (`run_mutation.py`'s
+  `REPO_ROOT` hardcoded to `/workspace`, wrong under the new
+  `SELLO_IN_CONTAINER=1` CI path's `/__w/sello/sello` checkout) fixed
+  same-session; no core-arithmetic finding. Both red demos (a surviving
+  mutant, a broken symex query) confirmed via a real CI run on scratch
+  branch `rfc-005-slice15-red-demo`, deleted after. Remaining launch
+  order: 17, 19-23, 25 (all formerly credential-blocked, same as before),
+  then the A9 memcheck extension of nightly.yml, then slice 30, then 32.
+  Slices 27-29 stay Corey-physical. 20/32 done at this note.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 17.
