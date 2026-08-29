@@ -891,7 +891,7 @@ Phase 1 — matrix (7 first, then 8–13 independent):
       red-then-green sequence.
 
 Phase 2 — heavy deterministic gates (independent after 7):
-- [ ] 14. libsodium differential job (skip paths fatal under CI env var)
+- [x] 14. libsodium differential job (skip paths fatal under CI env var) -- DONE 2026-08-29, once the ghcr write:packages credential landed (see Resolved forks; taken in numeric order for once, since 10 already unblocked this fork). Code `a0c60f3` (mechanism: unit-linux-amd64-gcc-libsodium job, scripts/test-libsodium.sh dual-mode, SELLO_REQUIRE_LIBSODIUM=1 fatal-skip in test_libsodium_interop.nim, README/CLAUDE.md updates), fix `bfb764c` (a genuine local-verification finding: proptest is REQUIRED, not optional, for this script -- see below), red demo `bc91248` (dropped -d:selloLibsodium, run `33272136700`, job `99152427489`), revert `f5abe89`, ruleset re-trigger (same commit, since ruleset-apply ran before the demo). See the full slice entry below for the proptest finding, mechanism design, and run ids.
 - [ ] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision)
 - [x] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error) -- DONE 2026-08-24, taken out of order (see slice 11's precedent and CLAUDE.md). Code `defa505` (mechanism + job), red demo `41a8e2d`, revert `2b3747a`. See the full slice entry below for mechanism design, run ids, and the red-then-green sequence.
 - [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs) -- BLOCKED on the same Corey-owned ghcr write:packages credential as slices 10/14/15 (the sello-dev image); scripts/lib/baseline.sh itself was pulled forward into slice 18 instead (see that slice's own entry and CLAUDE.md's placement-swap note) since slice 18 needed only the base image.
@@ -2206,6 +2206,157 @@ runner's cache-warm path.
      preserve that ordering (pinned copy first) or risk silently
      resolving the drifting runner-bundled `gcc` instead.
 
+### Slice 14 (libsodium differential job) -- full record
+
+2026-08-29: slice 14 DONE end-to-end, landed in numeric order for once
+(slice 10 had already unblocked the `sello-dev` credential fork the
+prior session; slice 15 stays independent and was not needed first). No
+genuine backend-disagreement bug surfaced -- every differential/interop
+suite this job runs (bidirectional sign/verify, the full Wycheproof
+ed25519/X25519 cross-verify, the RFC 9496 ristretto255 Appendix A
+cross-checks, the SHA-512 CAVP cross-checks) passed clean against
+libsodium on the first real green run; the escalation rule was not
+triggered.
+
+**Required reading done first.** CLAUDE.md's sello-dev/`SELLO_IN_CONTAINER`
+paragraphs and the slice-10 precedent (most recent sello-dev-pinned job);
+`docs/rfc-005-validation-infra.md` lines 1033-1036 (the slice text) and
+629-640/660-685 (merge-gate set, wall-clock budget, heavy-gate
+placement); the validation-bar's "Differential adversarial testing
+against libsodium" entry; `scripts/test-libsodium.sh`,
+`scripts/lib/unit-test-files.sh`, `tests/unit/test_libsodium_interop.nim`'s
+skip paths, `merge-gate.yml`, `scripts/lib/gates.txt`,
+`scripts/policy-lint.sh` (already extended for a sello-dev-pinned job by
+slice 10), and README's validation-map libsodium rows.
+
+**Genuine finding, not anticipated by the task brief: proptest is
+REQUIRED for this script, not merely optional.** `test_libsodium_interop.nim`'s
+`when defined(selloLibsodium)` branch does an unconditional `import
+proptest` at module scope (needed for its own embedded ristretto255/
+SHA-512 differential random-sweep property checks, not just the
+standalone `test_properties_*.nim` files) -- reproduced directly: a
+first local run of the new job's exact command inside `sello-dev` with
+no proptest fetched failed at COMPILE time (`Error: cannot open file:
+proptest`), not a graceful runtime skip. This was true of
+`scripts/test-libsodium.sh` before this slice too (nothing about this
+slice's own changes introduced it), but had never been exercised from a
+bare checkout before -- the script's prior "optional, for the property
+tests" prerequisite wording was simply wrong for this file. Fixed in a
+follow-up commit (`bfb764c`) rather than folded into the mechanism
+commit, once the local run surfaced it: the `SELLO_IN_CONTAINER=1` body
+now installs milpa and runs `milpa fetch --features proptest --locked`
+itself (mirroring `ci-property.sh`'s/`build-smoke.sh`'s own in-container
+fetch pattern), and host mode preflight-checks `_deps/proptest` and
+fails fast with an actionable message instead of a confusing mid-run
+compile error.
+
+**Scope decision, recorded (a second finding, downstream of the first):**
+once proptest is fetched (mandatory, per the above), `scripts/lib/
+unit-test-files.sh`'s own proptest-presence-driven filter would no
+longer exclude the six standalone `test_properties_*.nim` files --
+meaning, unmodified, this job would silently balloon into running the
+ENTIRE property suite too, under a build config where five of those six
+files (`field`/`scalar`/`x25519`/`ristretto`/`sha512`) exercise
+byte-identical pure-Nim code paths to a plain build (`-d:selloLibsodium`
+affects only `signing.nim`'s backend dispatch -- verified by grepping
+`src/sello/` for the define: only `signing.nim` and the facade branch on
+it), at real wall-clock cost, for zero incremental coverage. Chose to
+ALWAYS exclude the standalone property files from this script's own
+compiled set regardless of proptest presence (`scripts/test-libsodium.sh`
+now force-filters `unit_test_files` a second time after sourcing
+`unit-test-files.sh`), keeping the job's real identity ("unit +
+interop-suite", matching the task brief's own framing, which only ever
+discusses `test_libsodium_interop.nim`) rather than silently becoming a
+`unit-*`-named job that also runs the full property suite (a naming-
+convention violation this codebase's `validation_map_check.py` platform
+block and every existing `unit-*` job's own scope would otherwise be
+inconsistent with). `scripts/lib/tier-summary.sh` gained an optional
+second argument so its own property-suite line states the real reason
+(a scope decision, not proptest absence) instead of reusing the
+misleading default wording.
+
+**Local verification (per the task's own instruction to validate before
+pushing).** Alt-root podman store (`--root /home/corey/.podman-push
+--runroot /run/user/1000/podman-push`, `sello-dev` already loaded,
+matching the live digest), no-mount `podman create`/`cp`/`exec`
+(`tar --no-same-owner`, the same UID-mismatch workaround slice 10's own
+record carries). Two full runs of `scripts/ci-setup.sh &&
+SELLO_IN_CONTAINER=1 scripts/test-libsodium.sh` (cold, with the proptest
+network fetch; warm, cache reused, 71s wall clock) both completed
+`EXITCODE=0` with every suite `[OK]` and no `[SKIPPED]` unittest marker.
+Separately confirmed the `SELLO_REQUIRE_LIBSODIUM=1` fatal path fires
+locally: `nim c -r tests/unit/test_libsodium_interop.nim` (no
+`-d:selloLibsodium`) with `SELLO_REQUIRE_LIBSODIUM=1` set produced the
+exact expected `[FAILED]`/`AssertionDefect`/nonzero-exit sequence.
+
+**Job/env-var/naming decisions.** Job named `unit-linux-amd64-gcc-libsodium`
+(not a `libsodium-*`-prefixed name) -- matches the existing
+`unit-<os>-<arch>-<compiler>[-variant]` axis exactly, the same axis
+`unit-linux-amd64-gcc-asan-ubsan` already established for a build-config
+variant. `SELLO_REQUIRE_LIBSODIUM` (not e.g. `SELLO_CI_LIBSODIUM`) --
+matches this codebase's own naming register for require-vs-optional env
+vars (`SELLO_IN_CONTAINER`, `SELLO_FUZZ_ALLOW_COLD_START`). Two
+independent layers close the silent-skip gap: `test_libsodium_interop.nim`'s
+own `doAssert` in its `else` branch (the primary mechanism -- turns the
+suite's one `skip()` path into a hard `nim c -r` failure) plus
+`scripts/test-libsodium.sh`'s own `[SKIPPED]`-marker grep over the run
+log (a second, independent layer, future-proofing against a skip()
+added anywhere else in the compiled set) -- both live in this slice's
+own paragraph in CLAUDE.md's CI section.
+
+**README validation-map recategorization.** `libsodium-interop` row moved
+from `manual-ritual` (Freshness canary `none (by design)`) to
+`required-check` (Mechanism `unit-linux-amd64-gcc-libsodium`, Freshness
+canary `n/a`); `scripts/lib/validation_map_check.py`'s
+`NONE_BY_DESIGN_ROWKEYS` dropped that row-key accordingly (it no longer
+carries a Freshness-canary cell to validate against that set at all).
+`python3 scripts/lib/validation_map_check.py` confirmed green locally
+before pushing.
+
+**Real CI run-by-run record (branch `rfc-005-slice14`):**
+  - Push 1 (mechanism, commit `a0c60f3`): run `33271684413`. Every other
+    job green; `ruleset-sync` red as expected (live ruleset not yet
+    updated) -- the standard first-push shape every prior slice's
+    check-adding flow produces.
+  - Push 2 (proptest fix, commit `bfb764c`): run not separately watched
+    (superseded by push 3's concurrency group before observation); the
+    fix was verified locally first (see above) and confirmed for real by
+    push 3's own green run.
+  - `scripts/ruleset-apply.sh` (dry run, then `--apply`): diff showed
+    exactly one addition, `"context": "unit-linux-amd64-gcc-libsodium"`,
+    to the `main` ruleset's required-check array (generated from
+    `scripts/lib/gates.txt`, 19 checks) -- applied for real, `evidence`/
+    `main`/`tags` all `UPDATED` (`main`'s update landed the new check).
+  - Push 3 (red demo, commit `bc91248`): dropped `-d:selloLibsodium` from
+    `scripts/test-libsodium.sh`'s own per-file `nim c` line. Run
+    `33272136700`, job `unit-linux-amd64-gcc-libsodium` (id
+    `99152427489`) FAILED for real in 1m42s, at exactly the expected
+    condition -- log line `Unhandled exception: ...(646, 9) \`false\`
+    SELLO_REQUIRE_LIBSODIUM=1 is set, but test_libsodium_interop.nim
+    compiled WITHOUT -d:selloLibsodium ... [AssertionDefect]` followed by
+    `[FAILED] skipped: build with -d:selloLibsodium ...` and `Error:
+    execution of an external program failed` (confirmed via `gh api
+    repos/coreyleavitt/sello/actions/jobs/99152427489/logs`). Every other
+    job in the same run green -- `ruleset-sync` now GREEN too (confirming
+    the applied `main` ruleset already matched the 19-check manifest).
+  - Push 4 (revert, commit `f5abe89`, `git revert --no-edit`): restored
+    the flag. Run `33272577578`: ALL NINETEEN required checks green,
+    `unit-linux-amd64-gcc-libsodium` in 1m55s. This is the branch's final
+    green state, fast-forwarded to `main`.
+  - Post-fast-forward `main` push (same SHA `f5abe89`) -> run
+    `33273022701`: 19/19 GREEN, confirming `main`'s own HEAD
+    independently. `unit-linux-amd64-gcc-libsodium`: 106s.
+
+**Wall-clock summary:** `unit-linux-amd64-gcc-libsodium` costs roughly
+100-115s per real-CI run (three independent measurements: 104s, 113s,
+106s) -- in the same range as the other `sello-dev`-pinned leg
+(`unit-linux-i386-gcc`, ~75s) and well under the heaviest property jobs
+(~9-10 minutes), despite compiling the full unit+interop suite twice
+over conceptually (once per differential suite's own two-backend
+comparison) plus fetching proptest fresh from network every run. Feeds
+slice 15's own heavy-gate placement decision: this job is NOT the
+long pole -- the property jobs are.
+
 - [x] 16. Build-smoke check -- DONE 2026-08-24, taken deliberately out of
       order. Branch `rfc-005-slice16`, code `defa505`.
 
@@ -3427,9 +3578,20 @@ runner's cache-warm path.
   the Resolved forks entry for the sello-dev push): `unit-linux-i386-gcc`
   landed, unit-only (a recorded wall-clock finding ruled out a property
   sibling), red demo + revert + ruleset-apply + green re-trigger all
-  confirmed via real CI runs, fast-forwarded to `main`. Remaining launch
-  order: 14, 15, 17, 19-23, 25 (all formerly credential-blocked), then
-  the A9 memcheck extension of nightly.yml, then slice 30 (see the
-  deferral bullet above -- its producers exist once 25 + A9 land), then
-  32. Slices 27-29 stay Corey-physical. 18/32 done at this note.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 14.
+  confirmed via real CI runs, fast-forwarded to `main`. Slice 14 is also
+  DONE (2026-08-29, landed in numeric order for once -- see its own
+  full-record entry above): `unit-linux-amd64-gcc-libsodium` landed,
+  scoped to unit+interop only (a recorded finding ruled out silently
+  also running the full property suite once proptest became mandatory --
+  see that entry for why proptest turned out required, not optional, for
+  this script), `SELLO_REQUIRE_LIBSODIUM=1`'s two-layer fatal-skip
+  mechanism confirmed both locally and via a real red demo (job
+  `99152427489`), red demo + revert + ruleset-apply + green re-trigger
+  all confirmed via real CI runs (including the post-fast-forward `main`
+  push), fast-forwarded to `main`. No backend-disagreement bug found.
+  Remaining launch order: 15, 17, 19-23, 25 (all formerly
+  credential-blocked), then the A9 memcheck extension of nightly.yml,
+  then slice 30 (see the deferral bullet above -- its producers exist
+  once 25 + A9 land), then 32. Slices 27-29 stay Corey-physical. 19/32
+  done at this note.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 15.
