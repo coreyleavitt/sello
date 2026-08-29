@@ -259,6 +259,19 @@
 # the calibrated value (measured hosted: 2m47s real wall clock) and the
 # timeout-triage policy.
 #
+# RFC-005 slice 17 (coverage ratchet, A3): the plain, unwrapped
+# scripts/coverage.sh invocation -- like unit-linux-i386-gcc/
+# unit-linux-amd64-gcc-libsodium/bmc-symex above, this one resolves the
+# sello-dev image on a maintainer's host (via scripts/lib/sello-dev-image.sh,
+# same mechanism), since only sello-dev carries lcov (Containerfile, this
+# slice's own package addition). scripts/coverage.sh's own header comment
+# has the full mechanism: per-binary nimcache dirs so 18 test binaries'
+# gcov data doesn't collide, an lcov merge+extract to src/sello/* only,
+# a real build+run-twice determinism check, and this slice's own reading
+# of the down-path governance (enforced by `--update`, via
+# scripts/lib/coverage-down-path.sh + tests/coverage/expected/
+# justifications.md -- never by this check itself).
+#
 # check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
@@ -281,3 +294,4 @@ build-smoke                         scripts/build-smoke.sh
 validation-map                      scripts/validation-map-check.sh
 mutation                            scripts/mutation.sh
 bmc-symex                           scripts/bmc.sh 450
+coverage-ratchet                    scripts/coverage.sh

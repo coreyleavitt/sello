@@ -173,7 +173,7 @@ if [[ "${1:-}" == "--update-baselines" ]]; then
   # gate's OWN manifest invocation, with --update appended (each such
   # script accepts --update as its own trailing flag, per
   # scripts/api-surface-check.sh's own usage).
-  baseline_gate_names=(api-surface api-surface-libsodium)
+  baseline_gate_names=(api-surface api-surface-libsodium coverage-ratchet)
   update_rc=0
   for name in "${baseline_gate_names[@]}"; do
     invocation=""

@@ -346,6 +346,31 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/bmc.sh 450
 
+  # RFC-005 slice 17 (coverage ratchet, A3). Builds+runs the full
+  # unit+property suite TWICE (a real determinism check, not a shortcut)
+  # with gcc's --coverage instrumentation, merges/extracts per-file line
+  # coverage via lcov, and diffs the result against the committed
+  # tests/coverage/expected/baseline.txt via the regenerable-baseline
+  # idiom (scripts/lib/baseline.sh) -- see scripts/coverage.sh's own
+  # header comment for the full mechanism, including this slice's own
+  # reading of the down-path governance (tests/coverage/expected/
+  # justifications.md, enforced at `--update` time, not by this check).
+  # Needs sello-dev (lcov -- Containerfile, this slice's own addition;
+  # the base ghcr.io/coreyleavitt/nim image ships gcov via gcc but not
+  # lcov's own report tooling). This job's first push measures its real
+  # hosted wall-clock cost for the heavy-gate placement decision
+  # (CLAUDE.md's own "Coverage ratchet" CI paragraph and the RFC's
+  # "Ordering & risks" section record the number and the resulting
+  # decision -- this comment records the MECHANISM only).
+  coverage-ratchet:
+    name: coverage-ratchet
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: SELLO_IN_CONTAINER=1 scripts/coverage.sh
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the

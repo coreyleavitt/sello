@@ -1,0 +1,15 @@
+# kind: regenerable
+# generator: tests/coverage/coverage_report_gen.py via scripts/coverage.sh (line coverage, aggregate + per-file, floored to one decimal, extracted from a merged lcov .info across the full unit+property suite -- see this script's own header comment)
+# regeneration command: scripts/coverage.sh --update
+# compiler: PLACEHOLDER -- measurement push, see the slice's own handoff-doc entry
+# image: PLACEHOLDER -- measurement push, see the slice's own handoff-doc entry
+#
+# DO NOT HAND-EDIT the body below this line -- run the regeneration
+# command above (never under CI -- see this file's own header comment).
+# PLACEHOLDER BODY, deliberately wrong: this is a measurement push
+# (RFC-005 slice 17, mirroring slice 15's own "mechanism first, real
+# numbers from the first real CI run" precedent) -- the real committed
+# body lands in a follow-up commit once the coverage-ratchet job's first
+# real run reports the actual numbers in its own diff output.
+
+aggregate 0.0
