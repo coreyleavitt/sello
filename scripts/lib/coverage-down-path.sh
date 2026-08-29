@@ -116,13 +116,26 @@ coverage_down_path_guard() {
     return 1
   fi
 
-  # The NEWEST entry is the one at the TOP of the file -- its `Cites:`
-  # line is the first one found scanning from the top (justifications.md's
-  # own header explains why: newest-first is the human-readable
-  # convention this ledger uses, and "the newest entry" is unambiguous
-  # only if there is exactly one place to look first).
+  # The NEWEST entry is the one at the TOP of the file, BELOW the header
+  # comment block (justifications.md's own header is an HTML comment,
+  # `<!-- ... -->`, so its own format-spec prose can freely use the
+  # literal text "Cites: ..." as an example without that example being
+  # mistaken for a real entry) -- skip everything up to and including the
+  # header's closing `-->` line before searching, so a real entry's
+  # `Cites:` line is always the first genuine match, and the header's own
+  # example text is never treated as one (a real bug this slice's own
+  # local down-path demo caught: grep with no header-skip matched the
+  # header's example line first, since it appears earlier in the file
+  # than any real entry ever would).
+  local body_after_header
+  body_after_header="$(awk '
+    BEGIN { in_header = 1 }
+    in_header && /^-->[[:space:]]*$/ { in_header = 0; next }
+    in_header { next }
+    { print }
+  ' "$just_file")"
   local cites_line
-  cites_line="$(grep -m1 '^Cites: ' "$just_file" || true)"
+  cites_line="$(printf '%s\n' "$body_after_header" | grep -m1 '^Cites: ' || true)"
   if [[ -z "$cites_line" ]]; then
     echo "coverage-down-path: FAIL -- $just_file has no 'Cites: ...' line at all (or it isn't the newest entry's -- see that file's format)." >&2
     return 1
