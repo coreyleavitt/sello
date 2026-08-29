@@ -17,6 +17,25 @@
 ## pure-Nim signer and libsodium's audited signer are talking the same
 ## protocol, in both directions, against each other -- not just against
 ## a shared paper spec.
+##
+## SELLO_REQUIRE_LIBSODIUM=1 (RFC-005 slice 14): the `else` branch below
+## is this file's ONLY skip() path -- reached exactly when
+## `-d:selloLibsodium` is absent from the compile. The merge gate's
+## `unit-linux-amd64-gcc-libsodium` job exists specifically to run this
+## suite for real, so a silent skip there (e.g. a future edit to
+## scripts/test-libsodium.sh that accidentally drops -d:selloLibsodium,
+## or the job running against the wrong image/script) must be a red
+## check, not a quietly-degraded no-op -- the same "silent skip is a red
+## check" posture scripts/ci-property.sh's proptest-skip-banner assertion
+## and the macOS/Windows legs' --expect-proptest-skip already hold
+## elsewhere in this codebase. When this env var is set to "1" and the
+## else branch is reached, the skipped test fails loud via doAssert
+## instead of calling skip() -- see that branch, at the bottom of this
+## file, for the exact message. Left unset (every other caller: a plain
+## `scripts/test.sh` run, a maintainer's local `nim c -r` with no
+## -d:selloLibsodium, `scripts/test.sh --cpu i386`'s own
+## test_libsodium_interop.nim compile, etc.), behavior is byte-identical
+## to before this slice -- a quiet, green skip.
 
 import std/unittest
 
@@ -612,6 +631,24 @@ when defined(selloLibsodium):
       ensure scalarmultAgrees(sodiumGot, selloGot)
 
 else:
+  import std/os
+
   suite "libsodium interop (skipped)":
     test "skipped: build with -d:selloLibsodium (scripts/test-libsodium.sh) to run this suite":
+      # RFC-005 slice 14 -- see this file's own module doc comment for the
+      # full rationale. SELLO_REQUIRE_LIBSODIUM=1 is exported by
+      # scripts/test-libsodium.sh itself (both the SELLO_IN_CONTAINER=1
+      # in-container body and the host-mode podman recursion), so a suite
+      # run through that script -- the merge gate's
+      # unit-linux-amd64-gcc-libsodium job included -- can never quietly
+      # land here and still report green.
+      if getEnv("SELLO_REQUIRE_LIBSODIUM", "") == "1":
+        doAssert false,
+          "SELLO_REQUIRE_LIBSODIUM=1 is set, but test_libsodium_interop.nim " &
+          "compiled WITHOUT -d:selloLibsodium -- the libsodium differential " &
+          "job (unit-linux-amd64-gcc-libsodium) must never silently degrade " &
+          "to this no-op skip suite. Investigate why -d:selloLibsodium did " &
+          "not reach this compile (scripts/test-libsodium.sh's own per-file " &
+          "nim c invocation, or the job's container/script wiring) -- do " &
+          "not silence this by unsetting the env var."
       skip()

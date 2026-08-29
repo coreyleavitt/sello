@@ -221,12 +221,36 @@
 # mechanism (parsing, per-category assertions, the CT-scope-vs-
 # image-pins.txt version cross-check).
 #
-# check-name                        script-invocation
+# RFC-005 slice 14 (libsodium differential job): the second entry, after
+# unit-linux-i386-gcc, whose plain, unwrapped script-invocation column
+# resolves the `sello-dev` image rather than the base
+# `ghcr.io/coreyleavitt/nim` one -- scripts/test-libsodium.sh has always
+# pulled sello-dev by digest (RFC-005 slice 7), so unlike --cpu:i386 this
+# needed no new image-resolution logic, only the same
+# SELLO_IN_CONTAINER=1 dual-mode retrofit scripts/test.sh/
+# scripts/ci-property.sh already had. Named `unit-linux-amd64-gcc-libsodium`
+# rather than a `libsodium-*`-prefixed name -- matches the existing
+# job-naming axis exactly (`unit-<os>-<arch>-<compiler>[-variant]`, the
+# same axis `unit-linux-amd64-gcc-asan-ubsan` already established for a
+# build-config variant of the plain gcc leg), rather than inventing a
+# second axis for one job. Unit suite only, no property sibling -- this
+# job fetches no proptest of its own (scripts/test-libsodium.sh never
+# has), so the property files self-skip exactly as they did before this
+# slice, unaffected by SELLO_REQUIRE_LIBSODIUM=1 (a differently-worded,
+# unbracketed banner -- see that script's own header comment for why the
+# two skip registers cannot collide). scripts/test-libsodium.sh's own
+# header comment has the full SELLO_REQUIRE_LIBSODIUM=1 design (the
+# test-file-level doAssert plus this script's own belt-and-suspenders
+# `[SKIPPED]`-marker grep) -- the mechanism that makes this job's own
+# silent-skip-must-be-red DoD hold.
+#
+# check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
 unit-linux-amd64-gcc                scripts/test.sh
 unit-linux-amd64-clang              scripts/test.sh --cc clang
 unit-linux-amd64-gcc-asan-ubsan     scripts/test.sh --sanitize asan-ubsan
+unit-linux-amd64-gcc-libsodium      scripts/test-libsodium.sh
 unit-linux-arm64-gcc                scripts/ci-nim-setup.sh --expect-arch aarch64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
 unit-linux-i386-gcc                 scripts/test.sh --cpu i386
 property-linux-amd64-gcc            scripts/ci-property.sh

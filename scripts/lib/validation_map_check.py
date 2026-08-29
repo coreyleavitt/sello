@@ -101,18 +101,23 @@ EXPECTED_COLUMNS = 6  # Claim | Category | Mechanism | Freshness canary | Carve-
 # (re-read against docs/rfc-005-validation-infra.md's evidence-story text,
 # lines 899-929 and the A5/timing-tier paragraphs it cross-references:
 # only the fuzz corpus (A5) and the dudect timing tier get an explicit
-# freshness-canary requirement). Mutation, the libsodium differential
-# interop suite, and the bmc/symex proof register are all deterministic
-# GIVEN the source tree -- they either match the current code or they
-# don't, with no calendar-staleness concept of their own -- and are
-# re-run per the standing escalation rule (CLAUDE.md: "a surfaced
-# core-arithmetic bug closes the infra slice red... the full affected-gate
-# battery") whenever a change touches their scope, not on a schedule.
-# This is a recorded DESIGN decision, not a placeholder for a future
-# canary -- a row-key landing here says "no canary is owed," full stop.
+# freshness-canary requirement). Mutation and the bmc/symex proof register
+# are both deterministic GIVEN the source tree -- they either match the
+# current code or they don't, with no calendar-staleness concept of their
+# own -- and are re-run per the standing escalation rule (CLAUDE.md: "a
+# surfaced core-arithmetic bug closes the infra slice red... the full
+# affected-gate battery") whenever a change touches their scope, not on a
+# schedule. This is a recorded DESIGN decision, not a placeholder for a
+# future canary -- a row-key landing here says "no canary is owed," full
+# stop.
+#
+# libsodium-interop LEFT this set in RFC-005 slice 14: that row moved from
+# manual-ritual to required-check (unit-linux-amd64-gcc-libsodium), which
+# carries no Freshness-canary cell at all (required-check rows are
+# asserted "n/a" -- see check_table_rows below), so it no longer needs an
+# entry here.
 NONE_BY_DESIGN_ROWKEYS = {
     "mutation-catalog",
-    "libsodium-interop",
     "bmc-symex",
 }
 

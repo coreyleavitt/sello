@@ -233,6 +233,59 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cpu i386
 
+  # RFC-005 slice 14: the libsodium differential job -- recompiles the
+  # unit suite with `-d:selloLibsodium` (scripts/test-libsodium.sh) so
+  # signing.nim dispatches to the libsodium FFI adapter
+  # (private/backend_sodium.nim) and test_libsodium_interop.nim's real
+  # bidirectional interop checks compile in and run: sign→verify and
+  # verify→sign across both backends, plus the full-corpus differential
+  # verdict-agreement suites (Wycheproof ed25519/X25519, RFC 9496
+  # ristretto255 Appendix A vectors, SHA-512 CAVP) against libsodium's own
+  # verifier/scalarmult/hash oracles. Named `unit-linux-amd64-gcc-libsodium`,
+  # not a `libsodium-*`-prefixed name -- matches the existing job-naming
+  # axis exactly (see scripts/lib/gates.txt's own slice-14 comment).
+  # Second job in this workflow (after unit-linux-i386-gcc) whose
+  # `container:` pins to `sello-dev` rather than the base
+  # `ghcr.io/coreyleavitt/nim` image -- only sello-dev carries
+  # libsodium-devel (Containerfile). scripts/test-libsodium.sh gained the
+  # same SELLO_IN_CONTAINER=1 dual-mode split scripts/test.sh/
+  # scripts/ci-property.sh already had (that script's own header comment
+  # has the full mechanics), so this job's run step is the same
+  # `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/<script>` shape
+  # every other unit-suite job in this workflow uses. Unit suite only, no
+  # property sibling -- this script fetches no proptest of its own, so the
+  # property files self-skip exactly as scripts/test.sh's own unit-only
+  # legs do.
+  #
+  # SELLO_REQUIRE_LIBSODIUM=1 (exported by scripts/test-libsodium.sh
+  # itself, in both entrypoints): test_libsodium_interop.nim's ONE skip()
+  # path (reached only when `-d:selloLibsodium` is absent) fails loud via
+  # doAssert instead of silently reporting a green no-op suite when this
+  # env var is set -- the "silent skip must be a red check" posture
+  # scripts/ci-property.sh's proptest-skip-banner assertion and the
+  # macOS/Windows legs' --expect-proptest-skip already hold elsewhere in
+  # this workflow. scripts/test-libsodium.sh additionally greps its own
+  # run log for std/unittest's bracketed `[SKIPPED]` marker as a second,
+  # independent layer (future-proofing against any OTHER skip() a later
+  # change might add to the unit suite) -- see that script's own header
+  # comment and test_libsodium_interop.nim's own module doc comment for
+  # the full design.
+  unit-linux-amd64-gcc-libsodium:
+    name: unit-linux-amd64-gcc-libsodium
+    runs-on: ubuntu-latest
+    # Pinned by digest to the sello-dev image, not the base
+    # ghcr.io/coreyleavitt/nim one -- same pin as unit-linux-i386-gcc
+    # above (scripts/lib/image-pins.txt's `sello-dev` line, RFC-005 slice
+    # 7's (Containerfile-hash, digest) pair). No repin needed for this
+    # slice: the digest already published for slice 10 carries
+    # libsodium-devel too (the same Containerfile, one image serving every
+    # sello-dev-pinned job).
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test-libsodium.sh
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the
