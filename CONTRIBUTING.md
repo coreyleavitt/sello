@@ -93,8 +93,12 @@ Once approved, `pr-unit-linux-amd64-gcc` and `pr-check-readme` run and
 report directly on your PR.
 
 Passing `pr-checks.yml` is a good sign but is not the bar your change
-merges on. The real bar is the full six-job `merge-gate.yml` battery
-(`scripts/merge-gate.sh` above runs the identical set locally) -- the
+merges on. The real bar is the full `merge-gate.yml` battery --
+`scripts/lib/gates.txt` is the source of truth for exactly which checks
+that is and how many (do not trust a hardcoded number here, including
+this sentence's own past versions -- run `scripts/merge-gate.sh --help`
+or `grep -vc '^#\|^$' scripts/lib/gates.txt` for the current count;
+`scripts/merge-gate.sh` above runs the identical set locally) -- the
 maintainer runs that by pushing your accepted branch (or a rebase of it)
 directly to a branch in this repository, which triggers the full gate via
 `push`. That full gate, green, is what actually has to pass before your
@@ -130,6 +134,40 @@ pass":
   `field.nim`/`scalar.nim`. Say in the PR description which of these you
   ran and what the result was; if you couldn't run one (e.g. no access to
   a quiet host for timing), say so instead of omitting it silently.
+- **Several of the instruments above now run as required merge-gate
+  checks rather than maintainer-only rituals (RFC-005) -- a secret-path
+  PR will hit these automatically once it reaches `main`, but running
+  them yourself first (via `scripts/merge-gate.sh <name>`) catches a
+  regression before the maintainer's own push does:**
+  - `taint-ct-linux-amd64-gcc`/`taint-ct-linux-amd64-clang`
+    (`scripts/ct-taint.sh [--cc clang]`) -- a deterministic, per-executed-
+    path Valgrind-memcheck proof that a secret-dependent selection never
+    reaches a branch or an index, on BOTH the gcc and clang backends (the
+    clang leg matters: this project has one real, fixed finding where gcc
+    and clang compiled the identical masked-select source into different
+    code, one of them branching on the secret -- see CLAUDE.md's
+    `private/ct.nim` entry). A new secret-holding target needs a new
+    entry in `tests/registers/secret_targets.nim` (see A7 below) before
+    this instrument can cover it.
+  - `disasm-gate-gcc`/`disasm-gate-clang` (`scripts/disasm-gate.sh [--cc
+    clang]`) -- a per-root conditional-branch-count profile compared
+    against a committed baseline; a new CT-critical function generally
+    needs `{.noinline.}` (so it resolves to one disassemblable C symbol)
+    and a baseline entry.
+  - `secret-target-register` (`scripts/secret-target-register-check.sh`)
+    -- a completeness check: every exported proc accepting a secret-role
+    type, and every exported secret-import constructor, needs an entry in
+    `tests/registers/secret_targets.nim` recording which instrument(s)
+    cover it.
+  - `coverage-ratchet` (`scripts/coverage.sh`) -- per-file line coverage
+    must not regress; a legitimate drop needs an entry in
+    `tests/coverage/expected/justifications.md`.
+  - `mutation` (`scripts/mutation.sh`) -- the full curated catalog now
+    runs on every push (not maintainer-only); see the paragraph above for
+    when to add to it.
+  See CLAUDE.md's CI section (the "Taint CT jobs," "Disasm gate (A2),"
+  "Secret-target register," and "Coverage ratchet" paragraphs) for the
+  full mechanism of each.
 - **`verify`-only changes carry no constant-time obligation** (it touches
   no secret) but do still need RFC/Wycheproof-level scrutiny -- it's the
   part of the library everyone's trust rests on most directly.

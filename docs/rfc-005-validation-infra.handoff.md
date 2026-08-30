@@ -901,8 +901,8 @@ Phase 3 — CT instruments (19→20→21→22→23 chain):
 - [x] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike) -- DONE 2026-08-30. Repin `8cd8441` (go/no-go GO on both halves, sello-dev repinned + republished), mechanism+targets `e9e2eca` (taint_shim.c/taint.nim, three declassify call sites, codegen-unchanged proof, target_sign/target_x25519_static/target_planted_leak, scripts/ct-taint.sh, zero-annotation arc verified by hand via git stash, schema proof-spike verified empirically). See the full slice entry below for transcripts and run ids.
 - [x] 20. Secret-target register A7 (per-instrument columns; dudect retrofit; red demo) -- DONE 2026-08-29/30. `tests/registers/secret_targets.nim` (37 entries, `array[SecretTargetId, SecretTargetEntry]`), `secret_target_check.py` (two-rule completeness, new required check `secret-target-register`), `ct_main.nim`'s compile-time assert-against retrofit, `ct-taint.sh`'s taint-column check, `disasmRoots()` prepared for slice 23, `tests/unit/test_registers.nim`. See the full slice entry below for the design, both real-CI red demos, and run ids.
 - [x] 21. Taint targets (all remaining; both verdict arms; zero-annotation arc per target) -- DONE 2026-08-30. Commit `cc93d71` (six new DeclassIds -- diX25519BasePublicKey, diRistrettoEncodeOutput, diRistrettoEqualVerdict, diRistrettoStaticSecretImportReject, diRistrettoEphemeralZeroVerdict, diSha512DigestKat -- twelve new tests/ct_taint/ targets, 0 PENDING register cells remain (20 direct/11 coveredBy/6 permanent exempt, 37 total), mutants X02/R12/R08 re-synced, docs/mutation-results.md regenerated, real 84/84-killed mutation run). See the full slice entry below for the two genuine design findings (ristrettoEncode/sha512 sharing a secret-path caller -- no interior declassify by design), the codegen-unchanged proof, and all run ids.
-- [ ] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check) -- MECHANISM DONE, BLOCKED on a genuine clang-leg CT finding (escalated per standing orders, not merged to main). See the full slice entry below.
-- [ ] 23. Disasm gate A2 ({.noinline.} roots + full battery refresh; nimcache-C resolver; per-backend baselines) -- MECHANISM DONE AND LOCALLY VERIFIED (both gcc and clang, real sello-dev image by digest, register-containment check passing, `baseline_check` idempotent), landed on branch `rfc-005-slice23`. NOT YET LANDED TO MAIN: `scripts/ruleset-apply.sh --apply` not run (the two `disasm-gate-{gcc,clang}` checks are workflow/gates.txt-defined but not yet live-required), no real hosted-CI dispatch performed, Stage 3's red demo (reintroduce a `feSqrtRatioM1`-class branch on a scratch branch, confirm real-CI red, revert) not attempted, Stage 4's `--canary` toolchain-canary extension exists in `scripts/disasm-gate.sh` but was never dispatched, Stage 5's post-noinline dudect full-battery refresh (hours on this shared host) was not run. See the full slice entry below for the resolver design, local verification transcript, and the exact remaining-work list.
+- [x] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check) -- checkbox flipped 2026-08-30 (slice 32 part 1 audit): DONE. The clang-leg CT finding this bullet describes was escalated, then fixed at its root by fix-slice 22a (`valueBarrier32`); both `taint-ct-linux-amd64-gcc`/`-clang` are live-required, confirmed directly against the live `main` ruleset (id `21282945`) and green on `main`'s latest merge-gate run. See the full slice entry below (and fix-slice 22a's own entry) for the investigation, fix, and run ids.
+- [x] 23. Disasm gate A2 ({.noinline.} roots + full battery refresh; nimcache-C resolver; per-backend baselines) -- checkbox flipped 2026-08-30 (slice 32 part 1 audit, per the prior session's own note that this was pending re-verification, not re-work): DONE. `disasm-gate-gcc`/`disasm-gate-clang` are live-required, confirmed directly against the live `main` ruleset (27/27 check names match `scripts/lib/gates.txt` exactly) and green on `main`'s latest merge-gate run (`33320824230`). `scripts/ruleset-apply.sh --apply` was run (per the slice's own "Landing record" note, CLAUDE.md's "Disasm gate (A2)" paragraph), the Stage 3 red demo (`rfc-005-slice23-red-demo`, a reintroduced `feSqrtRatioM1`-class branch, red on both disasm-gate legs and both taint-ct legs) was performed and reverted, Stage 4's toolchain-canary rolling-baseline wiring landed in `toolchain-canary.yml`, and Stage 5's post-`{.noinline.}` dudect full-battery refresh ran (see `docs/ct-results.md`'s "RFC-005 slice 23" section). See the full slice entry below for the resolver design and complete run/job-id record.
 
 Phase 4 — nightly, timing, release:
 - [x] 24. Nightly fuzz continuity A5 -- DONE 2026-08-25, taken out of order (slices 10/14/15/17/19-23/25 blocked on the Corey-owned ghcr write:packages credential; slice 27 is Corey-physical; this slice needed only the base image + already-public proptest). Code `416f3b7` (corpus persistence in tests/fuzz/, scripts/nightly-fuzz.sh, .github/workflows/nightly.yml, CLAUDE.md), staleness-canary bug fix `ca5fbfe` (hour-truncation bug caught during the slice's own red-path demo). See the full slice entry below for the corpus-carry design, cache-key isolation, the staleness-canary bug, and all six nightly-workflow run ids.
@@ -913,7 +913,13 @@ Phase 4 — nightly, timing, release:
 - [ ] 29. First quiet-box battery + carve-out re-adjudication
 - [x] 30. Release workflow (5 per-clause red demos) -- DONE 2026-08-30, taken out of order (slices 27-29, its own numeric predecessors, remain Corey-physical; slice 30's own prior deferral, dated 2026-08-25, was resolved by slice 25/A9 landing all four nightly-qualification producers -- see that note's own resolution paragraph, and this slice's own entry below for the full design, every real-CI run id, and clause (iii)'s degraded-mode design pending 28/29).
 - [x] 31. README evidence table + drift check -- DONE 2026-08-25, taken out of order (slices 25/27-30 blocked on the Corey-owned ghcr credential or Corey-physical hardware; this slice needed only what already exists in the repo). See the full slice entry below for the table design, the `validation-map` gate, and all run ids.
-- [ ] 32. Registry + close-out audit
+- [ ] 32. Registry + close-out audit -- PART 1 (close-out audit,
+      CLAUDE.md/CHANGELOG/CONTRIBUTING sweep, release-gate dry run,
+      `docs/release-checklist.md`) DONE 2026-08-30, branch
+      `rfc-005-slice32-closeout`. PART 2 (the actual release cut, version
+      bump, nimble registry PR) is a deliberate maintainer-decision
+      deferral -- see "RFC-005 slice 32 part 1: close-out -- full record"
+      below and the Open forks entries it adds.
 
 ## Open forks (awaiting Corey)
 - **Trust-root owner-attestation confirmation (filed 2026-08-24, slice
@@ -1047,6 +1053,89 @@ Phase 4 — nightly, timing, release:
   own follow-up (e.g. patching the base image to ship a writable `/home`,
   or moving these scripts' mount target off `$HOME` entirely) rather than
   a one-session fluke -- report back either way.
+
+- **First-release version decision (filed 2026-08-30, slice 32 part 1).**
+  `sello.nimble`/`milpa.kdl` both read `0.5.0`; `CHANGELOG.md` has an
+  `## [0.5.0] - 2026-08-21` heading -- but `0.5.0` was never tagged (`git
+  tag -l 'v*'` returns nothing real) and is not on the nimble registry.
+  This slice's own `## [Unreleased]` section adds one genuine,
+  user-visible fix on top of that untagged baseline: the clang CT
+  hardening (`valueBarrier32`, fix-slice 22a) -- before this fix, a
+  clang-compiled build had a real secret-dependent branch in
+  `feCMove`/`feCSwap`/`cmovCached`. Two options: (a) release AS `0.5.0`,
+  folding `Unreleased` into the existing heading (the version was never
+  actually shipped, so nothing outside this repository has ever depended
+  on "0.5.0" meaning "without the clang fix"); (b) bump to `0.6.0`,
+  since a real constant-time defect fix landed since that heading was
+  written, and semver-adjacent practice (even under this project's own
+  "spirit not letter" pre-1.0 policy, CHANGELOG.md's own header) would
+  bump for a security-relevant fix regardless of whether the prior
+  version was ever tagged.
+  **Recommendation: (b), bump to 0.6.0.** The untagged/unregistered
+  status of 0.5.0 is a reason bumping costs nothing (no real consumer's
+  version pin breaks either way), but it is not by itself a reason to
+  suppress a real fix's own version signal -- a future security
+  researcher or downstream auditor diffing "0.5.0" against this
+  project's own CHANGELOG should not find a fix folded silently into a
+  version number that predates the fix's own dated slice-22a fix commit.
+  This is a genuine fork, not a forced call -- Corey may reasonably
+  prefer (a) on the grounds that 0.5.0 never shipped and repeated minor
+  bumps for an unreleased line add no real signal; recorded either way.
+
+- **Release-now-via-stale-accept vs. wait-for-timing-tier (filed
+  2026-08-30, slice 32 part 1).** Today's release-gate dry run (see
+  `docs/release-checklist.md`) reads: merge-gate PASS, nightly-
+  qualification PASS, timing-freshness STALE (no `.github/workflows/
+  timing.yml` exists yet -- slices 27-29 are Corey-physical and open),
+  version-consistency PASS. A release can be cut today ONLY via the
+  `--stale-accept` override path (the `timing-evidence: stale` CHANGELOG
+  notation slice 30 built and demonstrated for exactly this situation),
+  or the maintainer can wait for slices 27-29 to land a real, fresh
+  timing-tier verdict first.
+  **Recommendation: wait, don't stale-accept the first release.** The
+  `--stale-accept` path exists for a release that must ship on a
+  deadline despite a temporarily-stale (not missing-by-design) timing
+  verdict -- using it for the VERY FIRST release, where no timing-tier
+  battery has EVER run against a tagged commit, sets the evidence-story
+  precedent this whole RFC exists to avoid: publishing a claim ("this
+  project has a validation bar including timing evidence") whose
+  strongest piece of evidence is, for its inaugural release, an explicit
+  notation admitting it was skipped. sello is pre-1.0 and has no existing
+  registry listing to protect (see the version-decision fork above) --
+  there is no real cost to waiting for slice 27 (Corey-physical
+  provisioning) plus 28/29 before cutting the first tag, versus a real,
+  if modest, cost to the evidence story's own credibility if the first
+  release's own release notes read "timing-evidence: stale." This
+  recommendation is weaker than the version-decision one above, though:
+  if Corey has an external reason to ship now (a downstream consumer
+  waiting, a coordinated announcement), the override path is exactly
+  what slice 30 built it for, and using it once, disclosed, is not a
+  violation of anything -- it is the RFC's own designed escape hatch,
+  not a workaround of it.
+
+- **Registry PR timing (filed 2026-08-30, slice 32 part 1).** The
+  drafted `packages.json` entry lives in `docs/release-checklist.md`,
+  not opened as a PR against `nim-lang/packages` (per this slice's own
+  explicit "do NOT open the PR" instruction). **Recommendation:** open it
+  immediately after the first real (non-scratch) release's `release-
+  publish` job goes green -- the registry entry points at the
+  repository's default branch, not a specific tag, so it technically
+  could be opened before any release exists, but doing so would let a
+  nimble consumer resolve and install a version of sello that has never
+  passed this project's own release gate (a `main`-HEAD checkout, not a
+  gate-passed tag) the moment the registry PR merges, which is the exact
+  "unchecked claim published in the gap" pattern the RFC's go-public
+  slice (5) already declined once for README. Wait for a real tag.
+
+- **Still-open from earlier slices, restated here per this slice's own
+  instruction to record them alongside the new forks rather than let
+  them go unmentioned in the close-out:** the slice-5 SECURITY.md
+  owner-attestation confirmation (hardware-key 2FA, ghcr PAT scope/
+  custody, no other long-lived credential) and the slice-6 fork-PR
+  held-for-approval demo (needs a second GitHub account) are both still
+  open -- see their own entries above in this section for the full ask.
+  Neither was newly investigated by this slice; both remain exactly as
+  filed.
 
 ## Resolved forks
 - **`ghcr.io/coreyleavitt/sello-dev` push (filed 2026-08-24, slice 7;
@@ -5916,6 +6005,26 @@ question this slice does not resolve).
   future session should confirm and flip those two checkboxes rather
   than re-do the work), then 30 (now unblocked, per the note above),
   then 32. Slices 27-29 stay Corey-physical.
+- **Update (2026-08-30, this note's own follow-on): slices 22/23's
+  checkboxes in the "Slices" list above were confirmed live and flipped
+  to `[x]` by the slice 32 part 1 audit** (re-verification only, no
+  re-work, per the instruction immediately above) -- both
+  `taint-ct-linux-amd64-{gcc,clang}` and `disasm-gate-{gcc,clang}` are
+  confirmed live-required directly against the live `main` ruleset (id
+  `21282945`, 27/27 required-check names matching `scripts/lib/gates.txt`
+  exactly) and green on `main`'s latest merge-gate run (`33320824230`).
+  **Slice 30 (release workflow) and slice 31 (README evidence table)
+  landed in this same session, in numeric order, immediately after this
+  note's own preceding entries** -- see their own full-record entries
+  below (slice 31's record is further above, out of file order, having
+  landed out of RFC-numeric order per its own entry's explanation).
+  **Slice 32 PART 1 (close-out audit) is DONE as of 2026-08-30** -- see
+  "RFC-005 slice 32 part 1: close-out -- full record" at the end of this
+  file. 28/32 slices fully done plus slice 32's own part 1 at this note
+  (27, 28, 29 remain Corey-physical; slice 32 part 2 -- the actual
+  release cut, version bump, and nimble registry PR -- is a deliberate
+  maintainer-decision deferral, not a blocked-on-infrastructure one; see
+  the Open forks section for the three recorded forks part 1 files).
 
 ## RFC-005 slice 30: release workflow -- full record
 
@@ -6176,3 +6285,179 @@ check-run by started_at wins" design is correct and intentional (an
 in-flight rerun on the exact tagged SHA should read as not-yet-green),
 and the real fix is procedural (don't gate-check a SHA within seconds of
 its own fast-forward), not a code change.
+
+## RFC-005 slice 32 part 1: close-out -- full record
+
+**Scope landed, unabridged (deliverables (a)-(d), (f); (e) is release
+*preparation* only, no release cut -- see below).** Branch
+`rfc-005-slice32-closeout` from `main` HEAD `d8a893a`.
+
+- **`docs/rfc-005-closeout-audit.md` (new, deliverable (a)).** One row
+  per CLAUDE.md "The validation bar" line (11 lines) and one row per
+  RFC-005 Part A item (A1-A9), each classified against the RFC's own
+  dichotomy text (`docs/rfc-005-validation-infra.md` lines 44-48, quoted
+  verbatim in the audit doc) -- LIVENESS re-verified directly, not
+  trusted from a committed doc's own retelling: the live `main` ruleset
+  (id `21282945`) queried via `gh api` and diffed byte-for-byte against
+  `scripts/lib/gates.txt`'s 27 check names (identical), the latest
+  completed push-triggered `merge-gate` run on `main` (`33320824230`,
+  commit `d48fa8d`) queried for its full 27-job conclusion list (all
+  `success`), the latest `nightly.yml` run (`33316911555`) queried for
+  its `s390x`/`memcheck`/`fuzz`/`cranked-properties` job conclusions, the
+  latest `toolchain-canary.yml` run (`33310308051`) confirmed green,
+  `scripts/validation-map-check.sh` run locally (`OK`), and direct `gh
+  api` confirmation that no `timing.yml` workflow and no `evidence`
+  branch exist yet (both 404/absent, matching slices 27-29's open
+  status). **Two genuine findings surfaced, neither fixed silently (per
+  this slice's own instruction):**
+  1. README's `coverage-ratchet` validation-map row's Mechanism cell
+     still reads "build+run twice for a determinism check" -- stale
+     since slice 17's own recorded wall-clock finding (~26min hosted,
+     past budget) demoted the double pass to an opt-in
+     (`--update`/`--verify-determinism`), never the per-push default.
+     Invisible to `validation-map-check.sh` itself, which does not parse
+     Mechanism-cell prose depth -- a genuine mechanical blind spot,
+     recorded as such in the audit doc alongside the finding.
+  2. A2 (the disassembly gate) has no dedicated row in either CLAUDE.md's
+     validation-bar bullet list or README's validation-map table, despite
+     `disasm-gate-gcc`/`disasm-gate-clang` being real, live-required,
+     fully-enforced checks -- the mirror-image defect of finding 1 (an
+     enforced mechanism with no corresponding claim, rather than a claim
+     outrunning its mechanism), traced to the same root cause (a
+     per-slice doc-rule miss).
+  Both findings are recommendations in the audit doc's own text, not
+  applied to README by this slice -- the task's explicit instruction was
+  "list them; do not fix silently," and README edits were also
+  out-of-scope for the doc-only slice's standing rules beyond what (a)-(f)
+  name.
+
+- **CLAUDE.md sweep (deliverable (b)).** Consistency pass only, no prose
+  rewrite, no history deleted (per the standing rule). Six categories of
+  fix, all found via direct textual/live-state cross-checks, not
+  assumed:
+  1. **Script inventory completeness.** The "Building & testing" code
+     block listed 13 of the repository's 26 `scripts/*.sh` files (`ls
+     scripts` diffed directly against the block's own lines). Added the
+     13 missing entries with one-line purposes drawn from each script's
+     own header comment: `coverage.sh`, `memcheck.sh`,
+     `gates-manifest-check.sh`, `ruleset-sync-check.sh`,
+     `policy-lint.sh`, `api-surface-dump.sh`, `api-surface-check.sh`,
+     `secret-target-register-check.sh`, `ct-taint.sh`, `disasm-gate.sh`,
+     `validation-map-check.sh`, `ci-setup.sh`, `ci-property.sh`,
+     `ci-nim-setup.sh`, `release-gate.sh`,
+     `scripts/lib/version-consistency.sh`.
+  2. **Four stale "remain blocked on the ghcr credential" ordering-
+     rationale parentheticals**, in the Build-smoke, Nightly-fuzz-
+     continuity, Nightly-canaries, and API-surface-gate paragraphs --
+     each explained why a slice was taken out of numeric order by citing
+     slices 10/14/15/17/19-23/25/26's-A9 as CURRENTLY blocked, present
+     tense, even though every one of those slices has since landed
+     (2026-08-29/30, per the grind-state note). Fixed by recasting each
+     clause past-tense ("at the time... were blocked") and appending the
+     resolution date/pointer to the handoff's grind-state note, without
+     deleting the historical rationale for why the reordering happened.
+  3. **A fifth instance of the same pattern**, one level down (the
+     `scripts/lib/baseline.sh` placement-swap sub-paragraph inside the
+     API-surface-gate entry), fixed identically.
+  4. **Three stale job-count numbers**: "twenty-five are live-required...
+     the two disasm-gate jobs... were NOT YET applied to the live
+     ruleset" (now: confirmed all twenty-seven live-required, directly
+     against the ruleset, replacing the "standing next step" language);
+     "distinct from all nineteen `merge-gate.yml` required check names"
+     in the contribution-lane paragraph (now: twenty-seven, with the
+     historical nineteen preserved as "at the time this ... slice
+     landed"); "The full nineteen-job `merge-gate.yml` battery" later in
+     the same paragraph (same fix).
+  5. **One genuine internal contradiction**: the "Implementation status"
+     summary bullet said "84/84 killed, 2 retired-equivalent," while two
+     other CLAUDE.md paragraphs (the mutation-test-inventory entry and
+     the validation-bar mutation-testing bullet) both correctly say 3
+     (`F05`, `F31`, `H07` -- `F31` was added by fix-slice 22a and the
+     summary bullet was never updated to count it). Fixed to match the
+     two already-correct locations.
+  6. Re-confirmed (no fix needed): the `private/taint.nim`/
+     `taint_shim.c`/`ct.nim` `valueBarrier32` module-list entries are
+     present and accurate (11/4/5 occurrences respectively, spot-checked);
+     the secret-target register's "0 PENDING cells remain (20/11/0/6,
+     37 total)" claim is internally consistent across its two mentions.
+
+- **`CHANGELOG.md` `## [Unreleased]` section (deliverable (c)).** Keep-a-
+  Changelog format, no version bump, no dated heading (the version
+  decision is filed as an open fork, below). Three subsections:
+  **Fixed** (the clang CT-hardening fix, stated plainly per this slice's
+  own instruction: "users compiling with clang before this fix had a
+  secret-dependent branch in feCMove/feCSwap/cmovCached" -- not softened
+  into infrastructure-speak); **Changed** (the ten `{.noinline.}` roots,
+  a real shipped-codegen change, disclosed for anyone diffing compiled
+  output); **Infrastructure** (one paragraph on the RFC-005 CI/validation
+  system, pointing at the RFC doc and the new close-out audit rather than
+  re-narrating it); **Unchanged** (zero core dependencies, RFC-006
+  stands). **Parser check:** `python3 scripts/lib/release_gate.py v0.5.0
+  --version-only` run locally both before and after the edit --
+  unaffected (`PASS`, `nimble == CHANGELOG heading == tag == milpa.kdl ==
+  '0.5.0'`), confirming `changelog_heading_version`'s regex
+  (`^## \[<version>\]`) matches the specific version heading directly and
+  is not confused by an `## [Unreleased]` heading appearing above it. No
+  parser change was needed; this was verified empirically, not assumed.
+
+- **`CONTRIBUTING.md` fixes (deliverable (d)).** (1) The stale "full
+  six-job `merge-gate.yml` battery" phrase (already flagged as stale by
+  slice 31's own record) replaced with a reference to
+  `scripts/lib/gates.txt`/`scripts/merge-gate.sh --help` as the live
+  source of truth, so this sentence cannot go stale the same way again.
+  (2) A new bullet in "Crypto contributions specifically" enumerating the
+  five newer required-check instruments a `src/sello/` contributor should
+  know about and can run locally before opening a PR: the two taint-CT
+  legs (gcc + clang, with the clang-vs-gcc divergence explicitly called
+  out as a real, not hypothetical, finding class), the two disasm-gate
+  legs, the secret-target register, the coverage ratchet, and the
+  now-required-on-every-push mutation catalog -- each pointing at its own
+  CLAUDE.md CI-section paragraph rather than re-explaining the mechanism.
+
+- **Release preparation, no release cut (deliverable (e)).** A
+  local-only, unpushed scratch tag (`scratch/v0.5.0-slice32-dryrun`,
+  created with `-m` since `tag.gpgsign=true` is set locally and a bare
+  `git tag <name> <sha>` with no message fails outright under that config
+  -- a real finding worth recording for the actual release ritual, folded
+  into `docs/release-checklist.md`'s own step 4) was pointed at `main`'s
+  `d48fa8d` (the commit whose real `33320824230` merge-gate run is 27/27
+  green) and evaluated via `scripts/release-gate.sh`. Result: merge-gate
+  PASS, nightly-qualification PASS (run `33316911555` -- fuzz/s390x/
+  memcheck/cranked-properties all green on `55aeb41`, an ancestor with no
+  `src/sello/` diff since), timing-freshness STALE (no `timing.yml`
+  exists), version-consistency PASS. Overall FAIL only because
+  `--stale-accept` was not passed (deliberately, to see the unforced
+  clause table first). Tag deleted immediately after
+  (`git tag -d scratch/v0.5.0-slice32-dryrun`), never pushed, no GitHub
+  release created, no `git tag -l` residue. `docs/release-checklist.md`
+  (new) transcribes the exact 8-step first-release ritual from slice 30's
+  own handoff record verbatim, records today's dry-run table, and drafts
+  (but does not open) the `nim-lang/packages` `packages.json` entry --
+  `name`/`url`/`method: "git"`/`tags` (a superset of `sello.nimble`'s own
+  keyword comment, adding `ristretto255`/`ecdh`/`signature`)/
+  `description` (copied verbatim from `sello.nimble`)/`license`/`web`.
+
+- **Handoff record (deliverable (f), this entry).** Slice 32's own
+  checklist line updated to record PART 1 done / PART 2 deferred (not
+  "blocked" -- a maintainer decision, not an infrastructure gap). The
+  grind-state note's own trailing bullet updated: 28/32 slices done plus
+  slice 32's own part 1. Slices 22/23's checkboxes (left unflipped by the
+  session that landed slices 25/A9, per that session's own explicit note
+  asking a future session to confirm and flip them) confirmed live and
+  flipped to `[x]`, re-verification only, no re-work. Three new Open
+  forks filed (version decision, release-now-vs-wait-for-timing-tier,
+  registry-PR-timing), each with a recommendation per this slice's own
+  instruction that a genuine fork with no confident recommendation still
+  gets recorded, not left unresolved without comment.
+
+**Escalations: none.** No wrong-spec discovery. The two close-out
+findings (README's coverage-ratchet mechanism-cell staleness, A2's
+missing validation-bar/README row) are exactly the class of finding this
+audit slice exists to surface -- recorded, not silently patched, per the
+task's own explicit instruction.
+
+**What remains for slice 32 part 2 (a maintainer decision, not filed as
+blocked):** pick the release version (0.5.0 vs. 0.6.0 -- see Open
+forks), decide stale-accept-now vs. wait-for-timing-tier (see Open
+forks), run the ritual in `docs/release-checklist.md`, then open the
+nimble registry PR using the drafted entry in that same doc.

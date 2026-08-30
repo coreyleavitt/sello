@@ -7,6 +7,97 @@ sello is pre-1.0: versioning follows semver's spirit but not its letter --
 a breaking change bumps the minor version (0.x.0), not the major version,
 until 1.0.0.
 
+## [Unreleased]
+
+RFC-005: validation infrastructure (CI, timing/taint/disassembly CT
+instruments, mutation/coverage/fuzz/Z3 required checks, the release
+gate). No `src/sello/` API changed. One item below is a real,
+user-visible constant-time hardening fix to shipped code; the rest is
+build/CI/validation infrastructure.
+
+### Fixed
+
+- **Constant-time hardening: a clang-compiled secret-dependent branch in
+  the masked-select primitive, closed at its root.** Say this plainly:
+  building sello with clang before this fix compiled `feCMove`/`feCSwap`
+  (and, transitively, `geScalarmultBase`'s `cmovCached` and the X25519
+  Montgomery ladder's `feCSwap`) into code containing a branch on the
+  secret selection bit, under clang's `-O3` optimizer specifically — gcc
+  was unaffected. This was found by RFC-005 slice 22's taint-based CT
+  harness (`taint-ct-linux-amd64-clang`, the first time this codebase's
+  CT-critical arithmetic was ever exercised under clang at all): Valgrind
+  memcheck reported 4348 "conditional jump or move depends on
+  uninitialised value(s)" errors from 100 contexts on the `target_sign`
+  taint target alone. Root cause: clang's optimizer proved the mask
+  value is always exactly `0` or `-1` (derived from a `bool`) and
+  re-synthesized the masked-select/masked-swap arithmetic into a branch,
+  defeating the arithmetic-masking discipline `private/ct.nim`'s module
+  doc describes. Fixed by `valueBarrier32` (fix-slice 22a), a
+  BoringSSL/BearSSL-style optimization barrier inserted at mask
+  construction in `field.nim`'s `feCMove`/`feCSwap` and `scalar.nim`'s
+  `cmovCached` — confirmed by disassembly (the branch is gone under both
+  gcc and clang) and by the taint harness itself (0 errors from 0
+  contexts on every previously-affected target, both backends). If you
+  have compiled sello with clang at any point before this fix, the
+  constant-time guarantee on the signing/X25519/ristretto255 secret
+  paths did not hold under that build; gcc builds were never affected.
+  `taint-ct-linux-amd64-gcc`/`-clang` are now required CI checks so this
+  class of regression cannot silently return.
+
+### Changed
+
+- **`{.noinline.}` added to ten arithmetic/decode roots** (shipped
+  codegen change, disclosed for anyone diffing compiled output or timing
+  measurements against a pre-RFC-005 build): `derivePublic`/
+  `signDetached` (`private/backend.nim`), X25519's Montgomery `ladder`
+  (`x25519.nim`), `geScalarmultBase`/`geScalarmultCT` (`scalar.nim`),
+  `ristrettoEncode`/`` `==` `` (`ristretto.nim`), `feSqrtRatioM1`
+  (`field.nim`), and SHA-512's `compress` (`private/sha512.nim`) — joining
+  the pre-existing `feCMove`/`feCSwap`/`cmovCached` trio. These are the
+  RFC-005 slice 23 disassembly-gate (A2) roots: each is now individually
+  resolvable to one C symbol and disassembled on every push, comparing
+  its conditional-branch profile against a committed per-backend
+  baseline. Inlining any of these back into a caller would silently drop
+  it out of that gate's coverage, so `{.noinline.}` here is load-bearing,
+  not cosmetic.
+
+### Infrastructure
+
+- **RFC-005: sello-dev/CI/validation infrastructure.** A from-scratch CI
+  and evidence-publication system: 27 required merge-gate checks (unit
+  suite across seven platform/toolchain legs including linux/i386,
+  linux/arm64, macOS-arm64, and Windows/MinGW; property-based tests on
+  three of those legs; ASan/UBSan; libsodium differential interop;
+  API-surface pinning; the curated mutation catalog and the Z3 symex
+  proofs, both now running on every push rather than as maintainer-only
+  rituals; a coverage ratchet; the taint-based and disassembly-based CT
+  instruments described above; repo-governance drift checks
+  (`gates-manifest-sync`/`ruleset-sync`/`policy-lint`/`validation-map`)),
+  a separate non-required nightly workflow (long-running fuzz campaigns
+  with persisted corpus continuity, cranked property-suite runs, big-endian
+  s390x cross-compile/QEMU testing, untainted Valgrind memcheck, pinned-
+  issue failure notifications), an advisory toolchain-drift canary, and a
+  tag-triggered release workflow gating a cut release on merge-gate
+  freshness, nightly-qualification ancestry, timing-tier freshness (or an
+  explicit, notation-checked stale-accept override), and
+  nimble/CHANGELOG/tag/milpa.kdl version agreement. Every required check
+  is traceable through `scripts/lib/gates.txt`, enforced live on GitHub's
+  branch-protection rulesets, and runnable locally via
+  `scripts/merge-gate.sh`. See `docs/rfc-005-validation-infra.md` for the
+  full design and `docs/rfc-005-closeout-audit.md` for a line-by-line
+  audit of every validation-bar claim against its enforcing mechanism.
+  Three slices remain open, all gated on maintainer-owned physical
+  hardware provisioning rather than further engineering (RFC-005 slices
+  27-29, the self-hosted timing-tier runner) — see the close-out audit's
+  "Degraded-mode summary" for exactly what stays in a disclosed degraded
+  state until that hardware lands.
+
+### Unchanged
+
+- **Zero core dependencies.** `sello` still resolves zero runtime
+  dependencies on a plain `milpa fetch` (RFC-006 stands); `proptest`
+  remains optional and dev-only.
+
 ## [0.5.0] - 2026-08-21
 
 RFC-006: in-house SHA-512 (FIPS 180-4), the zero-dependency close-out.
