@@ -22,6 +22,14 @@
 #     `zypper search -s` against this exact base image (RFC-005 slice 7);
 #     zypper pulls in the matching `gcc16-32bit`/`glibc-32bit` transitively.
 #   - valgrind: slice 19's Valgrind/MSan go-no-go for the taint CT harness.
+#   - valgrind-client-headers: the `<valgrind/valgrind.h>`/`<valgrind/memcheck.h>`
+#     client-request headers `src/sello/private/taint_shim.c` (`-d:selloTaint`)
+#     includes -- a SEPARATE package from `valgrind` itself on this
+#     openSUSE base (verified live during slice 19's go/no-go spike: the
+#     plain `valgrind` package alone ships no headers at all, confirmed
+#     via `find / -iname memcheck.h` coming back empty until this package
+#     was installed). noarch, no new linked library -- just the macro
+#     headers the client-request calls expand from.
 #   - lcov: slice 17's coverage ratchet (`gcov`/`lcov` report generation).
 #     Note: this one drags in a large perl (DateTime et al.) dependency
 #     chain (~82 new packages transitively as of slice 7's verification) --
@@ -86,7 +94,7 @@ FROM ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e
 RUN zypper --non-interactive install --no-recommends \
         libsodium-devel z3-devel \
         gcc-32bit glibc-devel-32bit libstdc++6-32bit \
-        valgrind lcov \
+        valgrind valgrind-client-headers lcov \
         cross-s390x-gcc16 \
         qemu-linux-user \
     && zypper clean -a \

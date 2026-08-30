@@ -228,7 +228,7 @@ jobs:
     # credential existed, and the resulting digest matched this pin
     # exactly -- no repin needed.
     container:
-      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cpu i386
@@ -281,7 +281,7 @@ jobs:
     # libsodium-devel too (the same Containerfile, one image serving every
     # sello-dev-pinned job).
     container:
-      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test-libsodium.sh
@@ -341,7 +341,7 @@ jobs:
     # job-timeout cancellation.
     timeout-minutes: 10
     container:
-      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/bmc.sh 450
@@ -366,7 +366,7 @@ jobs:
     name: coverage-ratchet
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/coverage.sh

@@ -3,7 +3,7 @@
 # regeneration command: scripts/coverage.sh --update
 # compiler: Nim Compiler Version 2.2.10 [Linux: amd64], compiled 2026-08-09
 # image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
-# sello-dev-image: ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+# sello-dev-image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
 #
 # DO NOT HAND-EDIT the body below this line -- run the regeneration
 # command above (never under CI -- see this file's own header comment).

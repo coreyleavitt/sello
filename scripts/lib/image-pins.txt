@@ -90,8 +90,30 @@ ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890
 # package was made PUBLIC; verified via an anonymous (no-auth) pull-by-
 # digest against ghcr.io's own registry API returning HTTP 200 for this
 # exact digest.
+#
+# REPINNED 2026-08-30 (RFC-005 slice 19, A1's Stage 0): the Containerfile
+# gained `valgrind-client-headers` -- openSUSE ships
+# `<valgrind/valgrind.h>`/`<valgrind/memcheck.h>` as a package SEPARATE
+# from `valgrind` itself, verified live (the plain `valgrind` package
+# alone ships no headers at all: `find / -iname memcheck.h` came back
+# empty until this package was added), and slice 19's taint CT harness
+# needs those headers to build `tests/ct_taint/spike_shim.c`/the
+# production `src/sello/private/taint_shim.c`. This is a genuine
+# Containerfile content change (not a re-push of the same archive), so
+# this is a real rebuild-and-republish repin, not the slice-10 "same
+# digest, no repin needed" case immediately above. Built locally, pushed
+# to `ghcr.io/coreyleavitt/sello-dev:latest` by digest (this session's
+# `gh auth token` already carried `write:packages`; `podman login
+# ghcr.io` was already established), verified via
+# `gh api /user/packages/container/sello-dev/versions --jq
+# '.[0].name'` matching the digest below exactly. The prior digest
+# (`sha256:dc39f87a...`) stays live on ghcr.io for history -- images are
+# never deleted as part of a repin, only superseded by this line's
+# pointer. A portable oci-archive of this exact image is preserved at
+# `/home/corey/.cache/sello-dev-image/` (untracked, outside the repo),
+# matching the slice-7 precedent.
 
-sello-dev 806abfce49ffbbe88798043770b2698fc8ca1b7e88558946bc8c077d07ede932 ghcr.io/coreyleavitt/sello-dev@sha256:dc39f87a10ab555b2e5234bbba02faab7c7875be578b6f27bb6ca2580991f9f4
+sello-dev b3da15e098e2c303246e39cbcf04bbdb675827bd64dd5f59e1b0ec0edc7071e3 ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
 
 # === Production toolchain versions (informational, RFC-005 slice 26) =======
 # A6's toolchain canary (.github/workflows/toolchain-canary.yml)
