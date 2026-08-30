@@ -226,15 +226,6 @@ jobs:
           gcc --version
       - name: install pinned Nim (isolates the gcc-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
-      # scripts/disasm-gate.sh itself already checks for and prepends
-      # $HOME/.sello-nim/current/bin (via scripts/test.sh's own
-      # convention it shares no code with but matches) -- actually see
-      # the note below: disasm-gate.sh does NOT do this PATH prepend
-      # itself (unlike scripts/test.sh), so this leg exports PATH
-      # directly rather than relying on a mechanism disasm-gate.sh
-      # doesn't have.
-      - name: prepend pinned Nim to PATH (disasm-gate.sh, unlike scripts/test.sh, does not do this itself)
-        run: echo "$HOME/.sello-nim/current/bin" >> "$GITHUB_PATH"
       - name: restore disasm-gate rolling canary profile (gcc)
         id: restore-disasm-canary-gcc
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -243,14 +234,23 @@ jobs:
           key: sello-disasm-canary-gcc-v1-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             sello-disasm-canary-gcc-v1-${{ github.ref_name }}-
+      # PATH: scripts/disasm-gate.sh, unlike scripts/test.sh, does NOT
+      # prepend $HOME/.sello-nim/current/bin itself -- exported INLINE,
+      # in this same step's own shell, rather than via a separate
+      # `>> $GITHUB_PATH` step (this slice's own fix, recorded in the
+      # handoff doc's slice 23 stage 4 entry): a standalone GITHUB_PATH
+      # -writing step here reproducibly broke every LATER step's shell
+      # resolution ("sh: executable file not found in $PATH" on the very
+      # next docker exec, both legs, byte-identical failure) -- the
+      # cross-step PATH-file propagation this container image's exec
+      # environment does not survive cleanly is sidestepped entirely by
+      # keeping the PATH mutation local to one step's own process rather
+      # than depending on it surviving a step boundary.
       - run: |
+          export PATH="$HOME/.sello-nim/current/bin:$PATH"
           echo "toolchain-canary: disasm-canary-gcc cache matched key: ${{ steps.restore-disasm-canary-gcc.outputs.cache-matched-key || '(none -- cold start / first run on this branch)' }}"
-      - run: >-
-          scripts/ci-setup.sh &&
-          SELLO_IN_CONTAINER=1
-          SELLO_DISASM_CANARY_PREV=build/disasm-canary-gcc.tsv
-          SELLO_DISASM_CANARY_OUT=build/disasm-canary-gcc.tsv
-          scripts/disasm-gate.sh --cc gcc --canary
+          scripts/ci-setup.sh
+          SELLO_IN_CONTAINER=1           SELLO_DISASM_CANARY_PREV=build/disasm-canary-gcc.tsv           SELLO_DISASM_CANARY_OUT=build/disasm-canary-gcc.tsv           scripts/disasm-gate.sh --cc gcc --canary
       - name: save disasm-gate rolling canary profile (gcc)
         if: always()
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -286,8 +286,6 @@ jobs:
           clang --version
       - name: install pinned Nim (isolates the clang-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
-      - name: prepend pinned Nim to PATH (disasm-gate.sh, unlike scripts/test.sh, does not do this itself)
-        run: echo "$HOME/.sello-nim/current/bin" >> "$GITHUB_PATH"
       - name: restore disasm-gate rolling canary profile (clang)
         id: restore-disasm-canary-clang
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
@@ -296,14 +294,14 @@ jobs:
           key: sello-disasm-canary-clang-v1-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             sello-disasm-canary-clang-v1-${{ github.ref_name }}-
+      # See the newest-gcc job's own comment on this step's inline PATH
+      # export: a separate GITHUB_PATH-writing step reproducibly broke
+      # every later step's shell resolution.
       - run: |
+          export PATH="$HOME/.sello-nim/current/bin:$PATH"
           echo "toolchain-canary: disasm-canary-clang cache matched key: ${{ steps.restore-disasm-canary-clang.outputs.cache-matched-key || '(none -- cold start / first run on this branch)' }}"
-      - run: >-
-          scripts/ci-setup.sh &&
-          SELLO_IN_CONTAINER=1
-          SELLO_DISASM_CANARY_PREV=build/disasm-canary-clang.tsv
-          SELLO_DISASM_CANARY_OUT=build/disasm-canary-clang.tsv
-          scripts/disasm-gate.sh --cc clang --canary
+          scripts/ci-setup.sh
+          SELLO_IN_CONTAINER=1           SELLO_DISASM_CANARY_PREV=build/disasm-canary-clang.tsv           SELLO_DISASM_CANARY_OUT=build/disasm-canary-clang.tsv           scripts/disasm-gate.sh --cc clang --canary
       - name: save disasm-gate rolling canary profile (clang)
         if: always()
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
