@@ -6026,6 +6026,23 @@ question this slice does not resolve).
   maintainer-decision deferral, not a blocked-on-infrastructure one; see
   the Open forks section for the three recorded forks part 1 files).
 
+- FINAL GRIND STATE (2026-08-30, control loop, end of the unattended
+  grind): the /loop grind is PAUSED with every remaining item gated on
+  Corey. Done: 28/32 slices (1-26, 30, 31) plus slice 32 part 1 (audit,
+  doc sweep, release prep; both audit findings fixed in `7aa37a0`).
+  Live: 27 required checks, four nightly release-qualification jobs,
+  the advisory toolchain canary, the release workflow. Open, all Corey:
+  (a) slices 27-29 (physical timing box; slice 28 also lands the
+  timing-freshness canary and slice 29 the evidence branch, which turn
+  the release gate's clause (iii) green without stale-accept); (b) slice
+  32 part 2 -- version decision (recommendation: 0.6.0, since a shipped
+  CT fix landed after the untagged 0.5.0 heading), release-now-via-
+  stale-accept vs wait for the timing tier (recommendation: wait), then
+  the nimble registry PR after the first gate-passed tag (draft entry in
+  `docs/release-checklist.md`); (c) the slice-5 SECURITY.md attestations
+  and the slice-6 fork-PR held-for-approval demo. Resume command once
+  any of these is unblocked: `/loop /tdd rfc-005 til done`.
+
 ## RFC-005 slice 30: release workflow -- full record
 
 **Scope landed, unabridged.** `.github/workflows/release.yml`
