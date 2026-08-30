@@ -894,7 +894,7 @@ Phase 2 — heavy deterministic gates (independent after 7):
 - [x] 14. libsodium differential job (skip paths fatal under CI env var) -- DONE 2026-08-29, once the ghcr write:packages credential landed (see Resolved forks; taken in numeric order for once, since 10 already unblocked this fork). Code `a0c60f3` (mechanism: unit-linux-amd64-gcc-libsodium job, scripts/test-libsodium.sh dual-mode, SELLO_REQUIRE_LIBSODIUM=1 fatal-skip in test_libsodium_interop.nim, README/CLAUDE.md updates), fix `bfb764c` (a genuine local-verification finding: proptest is REQUIRED, not optional, for this script -- see below), red demo `bc91248` (dropped -d:selloLibsodium, run `33272136700`, job `99152427489`), revert `f5abe89`, ruleset re-trigger (same commit, since ruleset-apply ran before the demo). See the full slice entry below for the proptest finding, mechanism design, and run ids.
 - [x] 15. Mutation + bmc jobs (measure hosted times; heavy-gate placement decision) -- DONE 2026-08-29. Code `adbc8ec` (mechanism: mutation/bmc-symex jobs, SELLO_IN_CONTAINER dual-mode retrofit to both scripts, --shard i/N added to run_mutation.py but unwired), fix `35f5d8e` (a genuine REPO_ROOT hardcoding bug caught by the first real CI push -- see below), doc commit `88ba28e` (real hosted numbers recorded: mutation 475s, bmc-symex ~165s, both land as PLAIN UNCONDITIONAL required checks -- no sharding, no branch-pattern fallback needed), red demo on scratch branch `rfc-005-slice15-red-demo` (commit `ae65383`, run `33275913747`, jobs `99162471333`/`99162471401`), ruleset re-trigger (`ruleset-sync` job in run `33275374471`, after `scripts/ruleset-apply.sh --apply`). See the full slice entry below for the mechanism bug, the placement-decision numbers, and the two red-demo run/job ids.
 - [x] 16. Build-smoke check (fuzz target + ct_main compile; red: planted compile error) -- DONE 2026-08-24, taken out of order (see slice 11's precedent and CLAUDE.md). Code `defa505` (mechanism + job), red demo `41a8e2d`, revert `2b3747a`. See the full slice entry below for mechanism design, run ids, and the red-then-green sequence.
-- [ ] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs) -- BLOCKED on the same Corey-owned ghcr write:packages credential as slices 10/14/15 (the sello-dev image); scripts/lib/baseline.sh itself was pulled forward into slice 18 instead (see that slice's own entry and CLAUDE.md's placement-swap note) since slice 18 needed only the base image.
+- [x] 17. Coverage ratchet A3 (baseline.sh lands here, proof-spiked against disasm needs) -- DONE 2026-08-29, landed in numeric order once the ghcr credential unblocked it. Code `1b602c7` (mechanism: coverage.sh, coverage_report_gen.py, coverage-down-path.sh, justifications.md, the coverage-ratchet job, a deliberate placeholder baseline for a measurement push), doc/numbers commit `b0ef673` (real hosted numbers recorded, the single-pass-default wall-clock decision, the real baseline.txt), fix `09db5e9` (a genuine coverage-down-path.sh bug caught by the local down-path demo -- the Cites: parser matched the ledger's own header example instead of a real entry). Red demo on scratch branch `rfc-005-slice17-red-demo` (first attempt came back an HONEST false-green -- see below -- second attempt, commit `ea13d0a`, run `33281550140`, job `99177449766`, real red), ruleset re-trigger via `scripts/ruleset-apply.sh --apply` + a `ruleset-sync` re-run. See the full slice entry below for the false-green finding, the wall-clock measurement, the down-path bug, and all run/job ids.
 - [x] 18. API-surface gate A8 (generator verify-first spike; dual baselines) -- DONE 2026-08-24, taken out of order (see slice 11's/16's precedent and CLAUDE.md) -- slices 10/14/15/17 remain blocked on the same Corey-owned ghcr credential; this slice needed only the base image. Code `ad24138` (mechanism, generator, baseline.sh, both jobs, both baselines), red demo `ec1fde2`, revert `eee808c`. See the full slice entry below for mechanism design, spike findings, run ids, and the red-then-green sequence.
 
 Phase 3 — CT instruments (19→20→21→22→23 chain):
@@ -3709,6 +3709,279 @@ Z3-proof entries in "The validation bar" section. `docs/rfc-005-validation-infra
 with the real numbers and the "did not hold" finding, replacing the
 RFC's own pre-slice-15 projection.
 
+### Slice 17 (coverage ratchet, A3) -- full record
+
+2026-08-29: slice 17 DONE end-to-end, landed in numeric order (unblocked
+by the same `sello-dev` ghcr credential slices 10/14/15 needed -- see
+the grind-state note below). Two genuine findings this slice, both
+infra/tooling, not core-arithmetic defects: (1) a wall-clock finding
+(the double-pass determinism check, unconditional, cost ~26 real hosted
+minutes -- decided down to a single-pass default) and (2) a real parser
+bug in `scripts/lib/coverage-down-path.sh`, caught by this slice's own
+local down-path demo before it ever reached CI.
+
+**Required reading done first.** CLAUDE.md's CI section (sello-dev
+live+pinned digest, `SELLO_IN_CONTAINER` dual-mode pattern, the
+slice-15/18 sello-dev-job precedents, the API-surface paragraph's
+`scripts/lib/baseline.sh` placement-swap note naming this slice as the
+library's SECOND consumer), `docs/rfc-005-validation-infra.md` lines
+352-383 (A3's full text: `--lineDir:on`, per-binary object dirs merged
+via lcov, baseline pinning aggregate + per-file floored to one decimal,
+fixed seeds, the down-path governance text, monotonicity-per-file not
+diff-coverage as the honest residual), lines 1047-1054 (the slice's own
+DoD text, including the determinism check), lines 578-600 (the
+regenerable-baseline idiom), lines 1258-1260 (no fixed threshold, ever);
+`scripts/lib/baseline.sh`, `scripts/api-surface-check.sh` +
+`tests/api/api_surface_gen.py` as the existing consumer pattern;
+`scripts/merge-gate.sh`'s `baseline_gate_names` list; `scripts/test.sh`
+and `scripts/lib/unit-test-files.sh`; `scripts/ci-property.sh`;
+`tests/unit/property_crank.nim` and every `test_properties_*.nim`
+settings constructor.
+
+**Fixed-seed spike, done before writing any mechanism (per the task's
+own instruction).** Grepped every one of the six `test_properties_*.nim`
+files for `seed`/`testId`/`derandomize` before assuming a new hook was
+needed -- found that proptest's own `Settings` type (`_deps/proptest/src/
+proptest/engine/types.nim`) already defaults `seed` to a FIXED constant
+(`0x1234567890abcdef'u64`), and none of the six files ever overrides it
+with anything time/entropy-derived (`covSettings`/`settingsWithExamples`/
+`settingsForPoints` all build off `defaultSettings()` and touch only
+`maxExamples`/`coverageGuided`/`maxRejections`). A3's "fixed seeds"
+requirement was therefore ALREADY satisfied by the existing codebase --
+this slice added no `SELLO_...`-style env-var seed hook (the RFC's own
+"if none exists" fallback never triggered), a genuinely different
+outcome from slice 26's `SELLO_PROPERTY_CRANK`, which DID need a new
+hook because no existing example-count knob existed.
+
+**lcov/gcov mechanics, spiked locally before writing the real script.**
+Local alt-root podman (`--root /home/corey/.podman-push --runroot
+/run/user/1000/podman-push --storage-driver overlay --storage-opt
+overlay.mount_program=/usr/bin/fuse-overlayfs`, `sello-dev:latest`
+already loaded from a prior slice's push) verified, one file at a time,
+before committing to a design: `nim c --passC:--coverage
+--passL:--coverage --lineDir:on --nimcache:<per-binary-dir> -r <file>`
+produces `.gcno`/`.gcda` under that nimcache dir; `lcov --capture
+--directory <that dir>` captures exactly that binary's data with
+`SF:` records pointing at real `.nim` source paths (`--lineDir:on`
+confirmed working -- `SF:/workspace/src/sello/field.nim`, not a
+nimcache C file); `lcov -a f1.info -a f2.info ... -o merged.info` merges
+same-path `SF:` records into one cumulative record (not duplicated);
+`lcov --extract merged.info '*/src/sello/*'` isolates exactly the
+package's own source files. `lcov`'s `.info` format already carries
+`LF:`/`LH:` (lines-found/lines-hit) per `SF:` record directly -- no need
+to shell out to `gcov` again or hand-parse DA: line records.
+
+**Report generator, python3 not awk (a spike finding, not a style
+choice).** `/usr/bin/awk` inside `sello-dev` is BusyBox awk (verified via
+`awk --version` erroring, `which gawk`/`mawk` both empty) -- no
+`asorti`, no reliable arbitrary-precision arithmetic for the exact
+floor-to-one-decimal computation A3 calls for. `tests/coverage/
+coverage_report_gen.py` (mirroring `tests/api/api_surface_gen.py`'s own
+precedent for this class of job) parses the merged+extracted `.info`
+file's `SF:`/`LF:`/`LH:`/`end_of_record` records directly, computes
+`floor(lh/lf*1000)` via Python's exact integer floor division (`//`,
+never a float) -- avoiding the real, reproduced float-rounding trap
+where a true ratio of exactly X.2% can be represented as
+X.19999999999999 in IEEE double and floor to X.1 purely from
+representation noise, exactly the kind of spurious jitter the floor
+exists to absorb, not reintroduce.
+
+**Down-path governance, this slice's own reading (recorded per the
+task's own instruction, since the RFC text names the invariant --
+"the gate accepts a drop iff the ledger's newest entry cites the new
+number" -- without spelling out the mechanics).** Enforced at
+`scripts/coverage.sh --update` time, not by the CI check itself:
+`--update` computes fresh numbers, compares them key-by-key against the
+currently committed `baseline.txt`, and for any key whose fresh value is
+LOWER, refuses to write the new baseline unless
+`tests/coverage/expected/justifications.md`'s newest (topmost, below the
+header) entry's `Cites:` line names that exact key and exact new value.
+Once satisfied and committed, `coverage-ratchet` (the only mode CI ever
+runs) is the SAME ordinary "fresh == committed" comparison every other
+baseline-consuming gate uses -- it never re-derives "was this justified"
+from git history. A RAISE needs no ledger entry at all (only the
+deliberate `--update` + commit every baseline change here needs),
+matching this slice's reading of "raising is a deliberate commit" as
+"needs an --update like anything else," not "needs its own entry."
+
+**Measurement push -- the wall-clock finding.** Commit `1b602c7` pushed
+the full mechanism with a deliberate PLACEHOLDER `baseline.txt`
+(`aggregate 0.0`, obviously wrong), mirroring slice 15's own
+mechanism-first precedent -- since `baseline_check` short-circuits
+before ever generating fresh numbers when the pin file is simply
+absent, a placeholder (wrong, but present) was needed to force the real
+pipeline to run end-to-end and report real numbers via its own diff.
+Run `33278674618`, job `coverage-ratchet` (id `99169937937`): completed
+in 26m21s (22:28:36 -> 22:54:57 UTC) -- run 1/2 took ~12m35s
+(22:29:44 -> 22:42:19), run 2/2 took ~12m34s (22:42:19 -> 22:54:53),
+plus ~68s of checkout/milpa-install/proptest-fetch overhead before the
+first pass started. The determinism check itself PASSED (both passes
+produced byte-identical dumps -- real positive evidence, not merely
+assumed) before `baseline_check` failed on the placeholder, exactly as
+designed, reporting the real numbers in its diff:
+
+```
+aggregate 98.6
+challenge.nim 100.0
+ed25519.nim 100.0
+field.nim 100.0
+private/backend.nim 96.7
+private/ct.nim 100.0
+private/secret_hooks.nim 100.0
+private/sha512.nim 99.1
+ristretto.nim 97.5
+scalar.nim 99.0
+signing.nim 97.6
+wipe.nim 100.0
+wire.nim 100.0
+x25519.nim 95.4
+```
+
+Every OTHER job in that same run was already green (all 21 other
+required checks; `ruleset-sync` red only for the standard pre-apply
+reason).
+
+**Decision: single pass by default, double pass reserved for `--update`/
+`--verify-determinism`.** 26 minutes is well past the merge gate's
+~15-minute aim and by a wide margin the new long pole (the prior
+heaviest required check, `property-linux-amd64-gcc`, sits at ~9.5
+minutes). The RFC's own branch-pattern/sharding fallback is
+pre-authorized but does not fit this project's branch model (every
+push, every branch, no path/branch filter -- there is no natural
+"cheap branch" to narrow onto, unlike a hypothetical PR-vs-main split).
+Recorded decision instead: `scripts/coverage.sh` gained a
+`--verify-determinism` flag; the double pass runs ONLY for `--update`
+(already off the per-push CI path, so free in the sense that matters)
+and for that explicit flag; CI's own `coverage-ratchet` job invokes the
+script with no flags, a single pass, roughly half the measured cost.
+Re-pushed (commit `b0ef673`, run `33279892466`): `coverage-ratchet` job
+`99174707991` completed in 13m32s (22:59:29 -> 23:13:01) -- confirming
+the halving. Full run: all 22 jobs green including `coverage-ratchet`
+and (after `scripts/ruleset-apply.sh --apply` + a `ruleset-sync`
+re-run) `ruleset-sync`.
+
+`scripts/lib/baseline.sh`'s `_baseline_header_meta` gained one additive
+fix in the same commit: `coverage-ratchet` is the first baseline-
+consuming gate that runs on `sello-dev`, not the base image, so a
+`sello-dev-image:` header line was added alongside the existing
+`image:` line (sourced from `scripts/lib/image-pins.txt`'s own
+`sello-dev` pin) -- header-only, never diffed, so `api-surface`/
+`api-surface-libsodium`'s own committed baselines needed no
+regeneration.
+
+**Red demo, attempt 1 -- an HONEST FALSE-GREEN, not a failure of the
+mechanism.** Scratch branch `rfc-005-slice17-red-demo`, commit
+`3797730`: removed `tests/unit/test_ct.nim` from
+`scripts/lib/unit-test-files.sh`'s roster ("skip a test that uniquely
+covers some lines," per the task's own suggested approach). Pushed, run
+`33280515825`, job `coverage-ratchet` (id `99174795010`) completed
+GREEN in 18m23s (23:14:48 -> 23:33:11) -- `baseline_check: OK`, numbers
+UNCHANGED. Verified via a local diff of `.info` LF/LH pairs (exact
+integer level, not merely the floored display) between "12-file merge
+WITH test_ct.nim" and "12-file merge WITHOUT it": every single file's
+LF/LH was IDENTICAL. `private/ct.nim`'s lines are apparently fully
+redundantly covered by other tests that also call `wipe()` (signing,
+x25519, ristretto, sha512 each exercise it independently). **Recorded
+finding, stated honestly rather than glossed over:** this is a real,
+inherent property of a one-decimal-floored line-coverage ratchet, not a
+bug -- it only catches a drop that crosses a floor, by construction (the
+same jitter-absorption the floor exists for cuts both ways). A
+mutation-style "did this specific test contribute anything" question is
+a different, harder instrument (this project already has one -- the
+mutation catalog -- for a related but distinct question).
+
+**Red demo, attempt 2 -- verified locally before pushing, confirmed red
+for real.** Same scratch branch, commit `ea13d0a`. Before touching the
+roster again, checked LOCALLY (against real `.info` captures already
+sitting in the alt-root probe container from earlier spikes) whether
+each of the six `test_properties_*.nim` files contributes anything the
+core unit/Wycheproof/facade suite doesn't already cover -- found that
+FIVE of six contribute nothing measurable (confirmed: a 12-file merge
+including `test_properties_field.nim` reproduced the FULL 18-file
+numbers exactly, for every file except `x25519.nim`), and that
+`test_properties_x25519.nim` specifically is the sole contributor of
+`x25519.nim`'s last +0.1% (raw: 124/130 without it vs 125/131 with it --
+confirmed via a direct capture-and-merge of that one file, not
+inferred). Removed `tests/unit/test_properties_x25519.nim` from the
+roster; pushed; run `33281550140`, job `coverage-ratchet` (id
+`99177449766`) FAILED for real in 12m21s (23:41:13 -> 23:53:34), diff
+showing EXACTLY one line: `-x25519.nim 95.4` / `+x25519.nim 95.3` --
+nothing else moved, confirming the targeted, minimal, predicted drop.
+Every other job in that run stayed green (21/22, `coverage-ratchet` the
+only red).
+
+**Governed down-path green demo (local, per the task's own "at minimum
+locally" instruction) -- and a genuine bug it caught.** Appended a
+scratch entry to `tests/coverage/expected/justifications.md` citing
+`x25519.nim=95.3`, then ran `coverage_down_path_guard` (sourced
+directly, a fake `nim` shim on PATH for the header's compiler-version
+line) against the real repo's `baseline.txt` with a synthetic fresh dump
+matching the real drop. FIRST attempt still REFUSED, unexpectedly --
+investigation found `grep -m1 '^Cites: '` was matching
+`justifications.md`'s OWN header comment, which uses the literal text
+`Cites: <key>=<new-value>[, <key>=<new-value>...]` as a worked format
+example -- that line sits earlier in the file (inside the `<!-- -->`
+header block) than any real entry ever will, so the parser never
+reached a real citation. Fixed `scripts/lib/coverage-down-path.sh` to
+skip past the header's closing `-->` before searching (mirroring
+`baseline.sh`'s own header-stripping convention), re-verified against
+both the original four-case synthetic fixture battery (raise/no-drop,
+unjustified drop refused, justified drop accepted, first-ever-baseline
+no-op) AND the real repo files/real drop -- all correct. Then ran
+`baseline_update` for real (through the fixed guard) and confirmed it
+WROTE the lowered `x25519.nim 95.3` line -- the complete green
+demonstration, not just the guard's own verdict. Everything (the
+demo baseline.txt, the demo justifications.md entry) reverted via `git
+checkout --` before the fix was committed; the fix itself
+(`scripts/lib/coverage-down-path.sh` only) was extracted via a diff/
+apply round-trip onto the real `rfc-005-slice17` branch as its own
+commit (`09db5e9`), pushed, confirmed green (run `33282123728`, all 22
+jobs including `coverage-ratchet`).
+
+**Scratch branch cleanup.** `rfc-005-slice17-red-demo` deleted locally
+(`git branch -D`) and on origin (`git push origin --delete`), confirmed
+via a 404 from `gh api repos/.../branches/rfc-005-slice17-red-demo`.
+
+**Escalation check (per the task's own rule).** No core-arithmetic or
+cryptographic finding surfaced this slice. Both real findings --the
+26-minute double-pass wall-clock cost and the `Cites:`-line parser bug--
+are infra/tooling, not defects in sello's field/scalar/signing code. No
+escalation triggered.
+
+**Local verification, per the task's own instruction.** Alt-root podman
+(`--root /home/corey/.podman-push --runroot /run/user/1000/podman-push
+--storage-driver overlay --storage-opt
+overlay.mount_program=/usr/bin/fuse-overlayfs`), `sello-dev:latest`
+already loaded from a prior slice; no `-v` mounts under `/home` (this
+host's own standing trap) -- `podman create`+`start`+`exec`, tree copied
+in via `tar --no-same-owner` over `podman exec -i ... tar xf -` (the
+plain `tar` without `--no-same-owner` failed loud on ownership errors
+against this host's rootless-podman UID mapping, a recurrence of the
+trap slice 15's own record already names). Used to spike the lcov/gcov
+mechanics file-by-file BEFORE writing `scripts/coverage.sh`, to capture
+real per-file `.info` data later reused (rather than re-running the full
+suite) to verify both red-demo attempts' predicted outcomes before ever
+pushing, and to run the local down-path demo. A background full-suite
+double-run attempted early in this slice was abandoned partway through
+(host load average briefly spiked to ~20 on 6 cores from unrelated
+concurrent sessions on this shared host, making local wall-clock
+measurements meaningless) in favor of getting authoritative numbers and
+timing from the real hosted measurement push instead -- the right call,
+confirmed in hindsight by how cleanly the measurement-push numbers
+matched every one of this slice's own local partial-merge predictions.
+
+**CLAUDE.md** updated across three commits: `1b602c7`/`b0ef673` added
+the full "Coverage ratchet (RFC-005 slice 17, A3)" CI-section paragraph
+(mechanism, fixed-seed finding, the wall-clock decision with real
+numbers, the down-path governance reading, the pinned baseline), updated
+the job-count line (twenty-one -> twenty-two, with a new "slice 17 adds
+`coverage-ratchet`" clause), added a "Coverage ratchet" bullet to "The
+validation bar" section, and updated the API-surface paragraph's
+`baseline.sh` placement-swap note (slice 17 confirmed "source it as-is,
+not fork it," plus the one additive `sello-dev-image:` header fix);
+`09db5e9`'s own CLAUDE.md update appended the false-green finding, the
+real red-demo numbers, and the down-path bug to the same paragraph.
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -3839,4 +4112,28 @@ RFC's own pre-slice-15 projection.
   order: 17, 19-23, 25 (all formerly credential-blocked, same as before),
   then the A9 memcheck extension of nightly.yml, then slice 30, then 32.
   Slices 27-29 stay Corey-physical. 20/32 done at this note.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 17.
+  Slice 17 is DONE (2026-08-29, landed in numeric order -- see its own
+  full-record entry above): `coverage-ratchet` (`scripts/coverage.sh`,
+  `sello-dev` image for `lcov`) landed as a PLAIN, UNCONDITIONAL required
+  check, single-pass by default after a real measurement push found the
+  double-pass determinism check costs ~26 hosted minutes (well past
+  budget) -- the double pass stayed available, reserved for `--update`
+  and an explicit `--verify-determinism` flag, rather than building the
+  RFC's own pre-authorized branch-pattern/sharding fallback, which this
+  project's every-push/every-branch/no-filter branch model gives no
+  natural place to hang. Two genuine infra findings, both fixed
+  same-session: a real parser bug in `scripts/lib/coverage-down-path.sh`
+  (the `Cites:`-line search matched the ledger's own header example
+  instead of a real entry, caught by this slice's own local down-path
+  demo before it ever reached CI) and an HONEST FALSE-GREEN on the first
+  red-demo attempt (skipping `test_ct.nim` changed no pinned number --
+  every line it covers is also covered elsewhere -- a real, disclosed
+  property of a one-decimal-floored ratchet, not a defect); the corrected
+  second attempt (skipping `test_properties_x25519.nim`, verified locally
+  before pushing) confirmed a real, minimal, targeted red
+  (`x25519.nim` 95.4% -> 95.3%, job `99177449766`), reverted, scratch
+  branch deleted (404-confirmed). No core-arithmetic finding. Remaining
+  launch order: 19-23, 25 (all formerly credential-blocked, same as
+  before), then the A9 memcheck extension of nightly.yml, then slice 30,
+  then 32. Slices 27-29 stay Corey-physical. 21/32 done at this note.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 19.
