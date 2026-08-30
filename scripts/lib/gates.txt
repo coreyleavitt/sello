@@ -283,6 +283,24 @@
 # has an entry for every exported proc accepting a secret-role type and
 # every exported secret-import constructor, across both build configs.
 #
+# RFC-005 slice 22 (taint CI + doc drift): two entries, one per compiler
+# backend, mirroring the unit-linux-amd64-{gcc,clang}/
+# property-linux-amd64-{gcc,clang} axis -- `scripts/ct-taint.sh` /
+# `scripts/ct-taint.sh --cc clang` (that script's own header comment has
+# the full --cc mechanics, the toolchain-identity canary, and the
+# doc-anchor drift check that now runs as an early step of every
+# invocation, standalone-runnable via `python3
+# scripts/lib/taint_anchor_check.py`). Named `taint-ct-linux-amd64-<cc>`
+# rather than folding into the `unit-*` family -- see
+# .github/workflows/merge-gate.yml's own job comment for the naming
+# rationale. Both entries resolve the `sello-dev` image on a
+# maintainer's host (valgrind + valgrind-client-headers), same mechanism
+# as unit-linux-i386-gcc/unit-linux-amd64-gcc-libsodium/bmc-symex/
+# coverage-ratchet above. `build-smoke` (above) also moved to
+# `sello-dev` this slice and grew a fourth phase compiling every taint
+# target via `scripts/ct-taint.sh --build-only` -- see that job's own
+# comment and scripts/build-smoke.sh's header for the full record.
+#
 # check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
@@ -307,3 +325,5 @@ mutation                            scripts/mutation.sh
 bmc-symex                           scripts/bmc.sh 450
 coverage-ratchet                    scripts/coverage.sh
 secret-target-register              scripts/secret-target-register-check.sh
+taint-ct-linux-amd64-gcc            scripts/ct-taint.sh
+taint-ct-linux-amd64-clang          scripts/ct-taint.sh --cc clang

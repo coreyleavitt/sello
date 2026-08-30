@@ -17,12 +17,6 @@
 # scripts/lib/sello-dev-image.sh, same convention as
 # scripts/test-libsodium.sh/scripts/bmc.sh.
 #
-# Usage:  scripts/ct-taint.sh
-#         SELLO_IN_CONTAINER=1 scripts/ct-taint.sh   # already inside the
-#                                                       pinned sello-dev
-#                                                       image (CI, a later
-#                                                       slice)
-#
 # Every target run is asserted to produce EXACTLY ZERO memcheck errors
 # except tests/ct_taint/target_planted_leak.nim, the harness's own
 # PERMANENT negative fixture -- asserted to produce AT LEAST ONE (the
@@ -41,8 +35,89 @@
 # overloads, ristretto's encode/equal/import-reject/ephemeral-zero-
 # verdict ids, and sha512's digest-KAT id) via the additional targets
 # below -- so this check is real, not a placeholder, across every id.
+#
+# Usage:  scripts/ct-taint.sh
+#         scripts/ct-taint.sh --cc clang           # RFC-005 slice 22
+#         scripts/ct-taint.sh --build-only          # RFC-005 slice 22
+#         scripts/ct-taint.sh --cc clang --build-only   # composes, either order
+#         SELLO_IN_CONTAINER=1 scripts/ct-taint.sh [...]   # already inside the
+#                                                       pinned sello-dev
+#                                                       image (CI)
+#
+# --cc <name> (RFC-005 slice 22, the two required taint-ct checks):
+# threads `--cc:<name>` into every `nim c` invocation below, mirroring
+# scripts/test.sh's own --cc mechanism exactly (one script serving both
+# the gcc and clang legs, no forked clang-flavored copy -- RFC-005 Part
+# B's build-path invariant). Left unset, `nim c` resolves its own default
+# backend (gcc). The FIRST compile below is routed through
+# scripts/lib/toolchain-canary.sh (the same platform-identity canary
+# scripts/test.sh uses), proving from Nim's own --listCmd output which C
+# compiler actually got invoked -- not merely which flag was passed. The
+# taint binary keeps `-d:release` regardless of --cc (same dudect-flags
+# rationale as every other backend leg in this project): a non-release
+# build would false-positive on the debug-only asserts in
+# backend.signDetached/scalar.geScalarmultBase.
+#
+# A GENUINE DIVERGENCE BETWEEN BACKENDS IS A FINDING, NOT NOISE: if the
+# clang leg produces a memcheck error the gcc leg does not (or vice
+# versa), that is a real compiler-synthesized branch/CMOV/index on secret
+# data this instrument exists to catch (see CLAUDE.md's own "CMOV
+# policy" paragraph on private/taint.nim) -- never declassify it away or
+# suppress it to make the leg green; investigate, record the stack
+# trace, and escalate.
+#
+# --build-only (RFC-005 slice 22, the build-smoke extension): compiles
+# every taint target (every clean target, every verdict arm, plus the
+# permanent negative fixture) and stops -- no valgrind run, no memcheck
+# verdict, no exercise-completeness/register-taint-column assertion
+# (both need real run logs this mode never produces). This is the
+# harness-rot guard scripts/build-smoke.sh wires in: the S07-class risk
+# of a taint target silently failing to compile, discovered only at a
+# maintainer's next real `scripts/ct-taint.sh` invocation, "nights
+# later" (RFC-005 Part B's own phrase, applied to tests/fuzz/ and
+# tests/ct/ by slice 16 -- this flag is the identical treatment for
+# tests/ct_taint/). The doc-anchor drift check (below) and the
+# toolchain-identity canary still run under --build-only -- both are
+# cheap, and the canary's own compile+run of a small probe doubles as
+# real evidence the pinned compiler backend still builds this harness's
+# code at all.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+cc_name="gcc"
+cc_flag=""
+build_only=0
+while [[ "${1:-}" == "--cc" || "${1:-}" == "--build-only" ]]; do
+  case "$1" in
+    --cc)
+      if [[ -z "${2:-}" ]]; then
+        echo "scripts/ct-taint.sh: --cc requires a compiler name, e.g. --cc clang" >&2
+        exit 2
+      fi
+      cc_name="$2"
+      cc_flag="--cc:$cc_name"
+      shift 2
+      ;;
+    --build-only)
+      build_only=1
+      shift
+      ;;
+  esac
+done
+
+# Forwarded verbatim into the podman-wrapped recursive invocation below
+# (host mode only) -- both flags are consumed by this script's own
+# argument loop above, so they would otherwise be silently dropped on
+# the way into the container. printf %q for the compiler name only
+# (single trusted word today, but this matches ci-property.sh's own
+# forwarding convention for a value that becomes part of a shell string).
+forward_args=""
+if [[ -n "$cc_flag" ]]; then
+  forward_args="$forward_args --cc $(printf '%q' "$cc_name")"
+fi
+if [[ "$build_only" -eq 1 ]]; then
+  forward_args="$forward_args --build-only"
+fi
 
 # Every target compiled with these exact flags (mirrors scripts/ct.sh's
 # own dudect flags: -d:release, default gcc backend -- a non-release
@@ -51,13 +126,17 @@ cd "$(dirname "$0")/.."
 # ct.sh's own header comment). SELLO_TAINT_ID_COUNT is supplied by
 # taint.nim's own {.passC.} pragma (computed from the live DeclassId
 # enum), not repeated here.
-taint_flags='-d:release -d:selloTaint --passC:"-DSELLO_TAINT_HARNESS_ACTIVE"'
+taint_flags="-d:release -d:selloTaint --passC:\"-DSELLO_TAINT_HARNESS_ACTIVE\" ${cc_flag}"
 
 run_target() {
   local name="$1" src="$2" extra_defines="${3:-}" expect="$4"
   local bin="build/ct_taint_${name}"
   echo "ct-taint: building ${name} (${src})..." >&2
   eval "nim c ${taint_flags} ${extra_defines} --outdir:build -o:${bin} ${src}"
+  if [ "${build_only}" -eq 1 ]; then
+    echo "ct-taint: --build-only -- ${name} compiled, not run (no memcheck verdict)." >&2
+    return 0
+  fi
   echo "ct-taint: running ${name} under valgrind memcheck..." >&2
   local log="build/ct_taint_${name}.memcheck.log"
   set +e
@@ -88,6 +167,14 @@ run_target() {
 ct_taint_main() {
   mkdir -p build
 
+  echo "ct-taint: checking taint declassification register doc-anchor drift (RFC-005 slice 22, A1's own emitter+check -- scripts/lib/taint_anchor_check.py, also runnable standalone)..." >&2
+  python3 scripts/lib/taint_anchor_check.py
+
+  if [ "${build_only}" -eq 0 ]; then
+    echo "ct-taint: platform-identity canary (${cc_name})..." >&2
+    scripts/lib/toolchain-canary.sh "${cc_name}" nim c ${cc_flag} -d:release -d:selloTaint --passC:"-DSELLO_TAINT_HARNESS_ACTIVE" --outdir:build -o:build/ct_taint_canary_probe --listCmd -f -r tests/ct_taint/target_sign.nim
+  fi
+
   run_target "sign" "tests/ct_taint/target_sign.nim" "" "clean"
   run_target "x25519_static_normal" "tests/ct_taint/target_x25519_static.nim" "" "clean"
   run_target "x25519_static_smallorder" "tests/ct_taint/target_x25519_static.nim" "-d:x25519SmallOrderPeer" "clean"
@@ -116,6 +203,11 @@ ct_taint_main() {
   run_target "wipe_generic" "tests/ct_taint/target_wipe_generic.nim" "" "clean"
 
   run_target "planted_leak" "tests/ct_taint/target_planted_leak.nim" "" "leaky"
+
+  if [ "${build_only}" -eq 1 ]; then
+    echo "ct-taint: --build-only -- every taint target (and the negative fixture) compiled; no valgrind run occurred, so the exercise-completeness and register-taint-column checks below (which read real run logs) are SKIPPED in this mode -- see this script's own --build-only header paragraph. This is deliberately the ONLY thing scripts/build-smoke.sh's taint phase ever does with this harness." >&2
+    return 0
+  fi
 
   echo "ct-taint: checking register exercise-completeness (union across the battery)..." >&2
   cat > build/ct_taint_exercise_probe.nim <<'EOF'
@@ -276,5 +368,5 @@ else
     -v "$HOME/.cache/milpa:$HOME/.cache/milpa" \
     -w /workspace \
     "$img" \
-    bash -c "SELLO_IN_CONTAINER=1 scripts/ct-taint.sh"
+    bash -c "SELLO_IN_CONTAINER=1 scripts/ct-taint.sh${forward_args}"
 fi

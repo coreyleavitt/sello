@@ -679,25 +679,95 @@ jobs:
   # dudect harness in compile-smoke mode only... stated in the workflow
   # name" -- satisfied in spirit via the loud log statement rather than a
   # job-name qualifier, since this one job's name already covers the fuzz
-  # target/driver too, not ct_main alone). SCOPE, stated honestly: the
-  # taint (slice 19) and disasm (slice 23) binaries do not exist in this
-  # repository yet and are therefore NOT covered by this job -- those
-  # slices extend this exact script/job in place when they land, per the
-  # RFC's own phased sequencing (see scripts/build-smoke.sh's own header
-  # comment for the full writeup). Same digest-pinned image as every
-  # other amd64 build job; needs milpa+proptest (the fuzz driver imports
-  # proptest, unlike ct_main), so its one run step needs no `ci-setup.sh`
-  # chain -- scripts/build-smoke.sh's own in-container body does its own
-  # milpa install + `--features proptest --locked` fetch, mirroring
+  # target/driver too, not ct_main alone). RFC-005 slice 22 adds a fourth
+  # phase: every tests/ct_taint/ target (every clean target, every
+  # verdict arm, plus the permanent negative fixture) compiled, never run
+  # under valgrind, via `scripts/ct-taint.sh --build-only` -- the
+  # scheduled taint-half extension of this job (slice 19/21 landed the
+  # taint harness itself; this slice is where build-smoke picks it up,
+  # per the RFC's own phased sequencing). SCOPE, stated honestly: the
+  # disasm gate (slice 23) binaries do not exist in this repository yet
+  # and are therefore NOT covered by this job -- that slice extends this
+  # exact script/job in place when it lands (see
+  # scripts/build-smoke.sh's own header comment for the full writeup).
+  # IMAGE, changed this slice: pinned to `sello-dev`, not the base
+  # `ghcr.io/coreyleavitt/nim` image every other build-smoke-adjacent job
+  # used before -- Phase 4 needs valgrind-client-headers to compile
+  # `private/taint_shim.c` under `-d:selloTaint`, even in --build-only
+  # mode (the shim `{.compile.}`s unconditionally once that define is
+  # set); no new pin was needed, since `sello-dev` was already published
+  # and already pinned (unit-linux-i386-gcc, unit-linux-amd64-gcc-libsodium,
+  # bmc-symex, coverage-ratchet all already use it) -- see
+  # scripts/build-smoke.sh's own "IMAGE, changed this slice" header
+  # paragraph for the full record, including the policy-lint.sh
+  # cross-check confirming this needed no Containerfile change. Needs
+  # milpa+proptest (the fuzz driver imports proptest, unlike ct_main), so
+  # its one run step needs no `ci-setup.sh` chain -- scripts/build-smoke.sh's
+  # own in-container body does its own milpa install +
+  # `--features proptest --locked` fetch, mirroring
   # property-linux-amd64-gcc's run step shape exactly.
   build-smoke:
     name: build-smoke
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/build-smoke.sh
+
+  # RFC-005 slice 22: the two required taint-ct checks -- runs
+  # scripts/ct-taint.sh's real valgrind memcheck battery (every clean
+  # target, every verdict arm, the permanent negative fixture, the
+  # exercise-completeness + register-taint-column assertions, and --
+  # this slice's own addition -- the doc-anchor drift check) for real,
+  # unlike build-smoke's compile-only Phase 4 above. Named
+  # `taint-ct-linux-amd64-<cc>`, not a bare `taint-ct` or a
+  # `unit-linux-amd64-<cc>` sibling: this is the same os-arch-compiler
+  # axis the `unit-*`/`property-*` families already use (it genuinely
+  # varies by C backend, exactly like those do), but it is NOT the
+  # ordinary unit test suite (`scripts/test.sh`), so folding it into the
+  # `unit-*` name family would misdescribe what it runs -- unlike the
+  # single-shot instrument checks with no compiler axis at all
+  # (`bmc-symex`, `coverage-ratchet`, `mutation`, `secret-target-register`,
+  # `api-surface`), which correctly carry no such suffix. Pinned to
+  # `sello-dev` by digest (valgrind + valgrind-client-headers), same
+  # image every other sello-dev-pinned job in this workflow already
+  # pulls -- no new pin needed. `scripts/ci-setup.sh` runs first (a bare
+  # CI checkout has no milpa-generated `nim.cfg`; ct-taint.sh's own
+  # targets need only `--path:"src"`, no proptest), matching
+  # unit-linux-i386-gcc's/unit-linux-amd64-gcc-libsodium's own run-step
+  # shape exactly. `scripts/ct-taint.sh` is itself dual-mode
+  # (SELLO_IN_CONTAINER=1 skips both the podman wrap and the host
+  # milpa-lock preflight, running the identical valgrind battery
+  # directly -- no podman-inside-a-container nesting to worry about,
+  # same as every other SELLO_IN_CONTAINER=1-wrapped script in this
+  # workflow).
+  taint-ct-linux-amd64-gcc:
+    name: taint-ct-linux-amd64-gcc
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/ct-taint.sh
+
+  # The clang-backend sibling -- same battery, `--cc clang` threaded into
+  # every `nim c` invocation via ct-taint.sh's own --cc mechanism
+  # (mirrors scripts/test.sh's --cc exactly, first compile routed through
+  # scripts/lib/toolchain-canary.sh proving clang was genuinely invoked,
+  # not merely requested). A genuine memcheck divergence between this
+  # job and taint-ct-linux-amd64-gcc above (an error one backend produces
+  # and the other does not) is a real compiler-synthesized-branch/CMOV
+  # finding, not something either leg's own script may declassify away
+  # to go green -- see ct-taint.sh's own --cc header paragraph.
+  taint-ct-linux-amd64-clang:
+    name: taint-ct-linux-amd64-clang
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/ct-taint.sh --cc clang
 
   # RFC-005 slice 31 (README evidence table + drift check): parses
   # README.md's validation-map table (every CLAUDE.md "validation bar"
