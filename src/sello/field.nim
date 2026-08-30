@@ -37,6 +37,16 @@
 ## `signing.nim`'s module doc for the surface-wide policy.
 {.push raises: [], gcsafe.}
 
+## Leaf-to-leaf import (RFC-005 fix-slice 22a): `private/ct.nim` is a
+## universal leaf reachable from any position in the layering (see
+## CLAUDE.md's Architecture section) -- `field.nim` reaches in
+## specifically for `valueBarrier32`, the value-barrier primitive
+## `feCMove`/`feCSwap` below now route their masks through (see
+## `private/ct.nim`'s own "The value barrier" doc section). This is the
+## first `private/ct` import from `field.nim`; `field.nim` still holds
+## no secret of its own and still imports nothing else.
+import sello/private/ct
+
 type
   Fe* = object
     limbs*: array[10, int32]
@@ -688,7 +698,14 @@ func feCMove*(r: var Fe; a: Fe; b: bool) {.noinline.} =
   ## `scalar.nim`'s `cmovCached`), and inlining it into a call site can let
   ## the C compiler see through the mask arithmetic and "optimize" it back
   ## into a branch -- exactly the outcome the mask exists to prevent.
-  let mask = -int32(b)
+  ## `valueBarrier32` (RFC-005 fix-slice 22a): without it, clang's `-O3`
+  ## proves `mask` is confined to `{0, -1}` (bool-derived) and
+  ## re-synthesizes this loop into `if b: r = a` -- a genuine
+  ## secret-conditioned branch, caught live by the taint harness
+  ## (`taint-ct-linux-amd64-clang`). The barrier makes `mask`'s value
+  ## opaque to the optimizer after construction, closing that reasoning
+  ## without changing the arithmetic (see `private/ct.nim`'s own doc).
+  let mask = valueBarrier32(-int32(b))
   for i in 0..<10:
     r.limbs[i] = r.limbs[i] xor ((r.limbs[i] xor a.limbs[i]) and mask)
 
@@ -696,7 +713,11 @@ func feCSwap*(a, b: var Fe; swap: bool) {.noinline.} =
   ## Constant-time conditional swap: exchanges a and b iff swap is true.
   ## Arithmetic masking, no secret-dependent branch. `{.noinline.}`
   ## (RFC-001 slice 8) for the same reason as `feCMove` above.
-  let mask = -int32(swap)
+  ## `valueBarrier32` (RFC-005 fix-slice 22a): same clang branch-synthesis
+  ## finding and remedy as `feCMove`'s own mask, above -- see that
+  ## function's comment and `private/ct.nim`'s "The value barrier" doc
+  ## section.
+  let mask = valueBarrier32(-int32(swap))
   for i in 0..<10:
     let x = (a.limbs[i] xor b.limbs[i]) and mask
     a.limbs[i] = a.limbs[i] xor x

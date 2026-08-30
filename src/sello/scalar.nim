@@ -402,7 +402,12 @@ func cmovCached*(r: var GeCached; table: array[8, GeCached]; digit: int32) {.noi
   r.t2d = FeZero
 
   let isNeg = digit < 0
-  let signMask = -int32(isNeg)
+  let signMask = valueBarrier32(-int32(isNeg))
+    ## `valueBarrier32` (RFC-005 fix-slice 22a): same clang
+    ## branch-synthesis finding and remedy as `field.feCMove`/`feCSwap`'s
+    ## own masks (this function's `isNeg`-derived mask is the third and
+    ## last of the codebase's three secret-derived mask construction
+    ## sites) -- see `private/ct.nim`'s "The value barrier" doc section.
   let absDigit = (digit xor signMask) - signMask  # branchless abs
 
   for i in 1..8:

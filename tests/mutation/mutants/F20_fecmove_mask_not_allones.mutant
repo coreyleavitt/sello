@@ -1,8 +1,8 @@
 id: F20
 target: src/sello/field.nim
-desc: feCMove: constant-time mask construction broken, 'let mask = -int32(b)' -> 'let mask = int32(b)' (mask becomes 0/1 instead of 0/all-ones, so the XOR-select only ever touches each limb's least significant bit).
+desc: feCMove: constant-time mask construction broken, 'let mask = valueBarrier32(-int32(b))' -> 'let mask = valueBarrier32(int32(b))' (mask becomes 0/1 instead of 0/all-ones, so the XOR-select only ever touches each limb's least significant bit). Re-synced RFC-005 fix-slice 22a: the mask construction now routes through valueBarrier32 (the CT value barrier closing a real clang branch-synthesis defect), but this mutant's own intent -- the mask's numeric value is wrong -- is unchanged and still fully covered by the same source.
 ====OLD====
-  let mask = -int32(b)
+  let mask = valueBarrier32(-int32(b))
 ====NEW====
-  let mask = int32(b)
+  let mask = valueBarrier32(int32(b))
 ====END====

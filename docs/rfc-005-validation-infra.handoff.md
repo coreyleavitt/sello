@@ -901,7 +901,7 @@ Phase 3 — CT instruments (19→20→21→22→23 chain):
 - [x] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike) -- DONE 2026-08-30. Repin `8cd8441` (go/no-go GO on both halves, sello-dev repinned + republished), mechanism+targets `e9e2eca` (taint_shim.c/taint.nim, three declassify call sites, codegen-unchanged proof, target_sign/target_x25519_static/target_planted_leak, scripts/ct-taint.sh, zero-annotation arc verified by hand via git stash, schema proof-spike verified empirically). See the full slice entry below for transcripts and run ids.
 - [x] 20. Secret-target register A7 (per-instrument columns; dudect retrofit; red demo) -- DONE 2026-08-29/30. `tests/registers/secret_targets.nim` (37 entries, `array[SecretTargetId, SecretTargetEntry]`), `secret_target_check.py` (two-rule completeness, new required check `secret-target-register`), `ct_main.nim`'s compile-time assert-against retrofit, `ct-taint.sh`'s taint-column check, `disasmRoots()` prepared for slice 23, `tests/unit/test_registers.nim`. See the full slice entry below for the design, both real-CI red demos, and run ids.
 - [x] 21. Taint targets (all remaining; both verdict arms; zero-annotation arc per target) -- DONE 2026-08-30. Commit `cc93d71` (six new DeclassIds -- diX25519BasePublicKey, diRistrettoEncodeOutput, diRistrettoEqualVerdict, diRistrettoStaticSecretImportReject, diRistrettoEphemeralZeroVerdict, diSha512DigestKat -- twelve new tests/ct_taint/ targets, 0 PENDING register cells remain (20 direct/11 coveredBy/6 permanent exempt, 37 total), mutants X02/R12/R08 re-synced, docs/mutation-results.md regenerated, real 84/84-killed mutation run). See the full slice entry below for the two genuine design findings (ristrettoEncode/sha512 sharing a secret-path caller -- no interior declassify by design), the codegen-unchanged proof, and all run ids.
-- [ ] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check)
+- [ ] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check) -- MECHANISM DONE, BLOCKED on a genuine clang-leg CT finding (escalated per standing orders, not merged to main). See the full slice entry below.
 - [ ] 23. Disasm gate A2 ({.noinline.} roots + full battery refresh; nimcache-C resolver; per-backend baselines)
 
 Phase 4 — nightly, timing, release:
@@ -4641,6 +4641,384 @@ for real), then the A9 memcheck extension of `nightly.yml`, then slice
 30, then 32. Slices 27-29 stay Corey-physical. 24/32 done at this note.
 
 
+
+## RFC-005 slice 22: taint CI + doc-anchor drift check (MECHANISM DONE, BLOCKED on a genuine clang-leg CT finding)
+
+**Scope delivered.** (a) `scripts/lib/taint_anchor_check.py`, a static text
+scan over `private/taint.nim`'s own `DeclassId`/`declassRegister` source
+(no Nim compile needed -- both types stay outside the `when
+defined(selloTaint)` block): emits the register as TSV (id, anchor,
+width, buildCondition) then checks both directions -- every register
+entry's anchor is grounded in a real citing site (`## Cites: <id>`
+immediately after a matching proc/func/template/converter signature in
+the resolved `src/sello/<module>.nim`/`src/sello/private/<module>.nim`
+file, or a real `declassify(<id>, ...)` call in
+`tests/ct_taint/<name>.nim` for the two `ct_taint.*`-anchored ids that
+have no `src/sello/` call site), and every `Cites:` line found anywhere
+under `src/sello/` names a real `DeclassId` whose own register anchor
+points back at that same module. Verified against two real local red
+demos before ever being wired into CI: a renamed `Cites:` id in
+`x25519.nim` (caught: "cites unknown DeclassId"), and a renamed register
+`anchor` field in `taint.nim` (caught: "no '## Cites: ...' doc-comment
+line ... found"). Runs as an early step of every `scripts/ct-taint.sh`
+invocation (no separate check name, per scope (a)'s own instruction) and
+stands alone via `python3 scripts/lib/taint_anchor_check.py`.
+
+(b) `scripts/ct-taint.sh` gained `--cc <name>` (mirroring
+`scripts/test.sh`'s own mechanism exactly: threads `--cc:<name>` into
+every `nim c`, first compile routed through
+`scripts/lib/toolchain-canary.sh` for a real compiler-identity proof from
+Nim's own `--listCmd` output, not merely the flag passed) and
+`--build-only` (compiles every taint target plus the permanent negative
+fixture, runs nothing -- no valgrind, no verdict, no exercise-completeness/
+register-taint-column assertion, which both need real run logs this mode
+never produces). Both flags forward correctly through the host-mode
+podman-wrap recursion (`printf %q`-quoted, matching `ci-property.sh`'s own
+forwarding convention).
+
+(c) Two new required-check-shaped jobs, `taint-ct-linux-amd64-gcc` and
+`taint-ct-linux-amd64-clang` (naming decided: the `unit-linux-amd64-<cc>`/
+`property-linux-amd64-<cc>` os-arch-compiler axis, since this check
+genuinely varies by C backend the same way those do, but NOT folded into
+the `unit-*` family since it is not `scripts/test.sh`'s ordinary unit
+suite -- recorded in both `scripts/lib/gates.txt`'s own comment and the
+new workflow job's own comment). Both pinned to `sello-dev` by digest (no
+new pin needed -- already published, already used by four other jobs),
+run step `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/ct-taint.sh
+[--cc clang]`, matching `unit-linux-i386-gcc`'s/
+`unit-linux-amd64-gcc-libsodium`'s own shape.
+
+(d) `scripts/build-smoke.sh` moved from the base
+`ghcr.io/coreyleavitt/nim` image to `sello-dev` (Phase 4's compile of
+`private/taint_shim.c` under `-d:selloTaint` needs
+valgrind-client-headers even in `--build-only` mode, where the shim still
+`{.compile.}`s unconditionally) and gained Phase 4/4: `scripts/ct-taint.sh
+--build-only`. Verified this needed no new pin and nothing in the RFC
+text forbids it: `sello-dev` was already published and already pinned
+(`unit-linux-i386-gcc`, `unit-linux-amd64-gcc-libsodium`, `bmc-symex`,
+`coverage-ratchet` all already use it), and `scripts/policy-lint.sh`'s
+container-digest assertion checks any `container:` field against the
+UNION of the base-image and sello-dev pin sections (verified by reading
+that script directly before making the change), so redirecting one job's
+image needed no Containerfile change and no repin.
+
+**Local verification (podman, `ghcr.io/coreyleavitt/sello-dev:latest`
+tagged in the alt-root store at `/home/corey/.podman-push` from a prior
+slice's own local load -- create+cp+exec, no `-v` under `/home`, per
+slice 19/21's own documented pattern).** The full gcc battery (`scripts/ct-
+taint.sh`, no flags) passed cleanly end to end: doc-anchor check OK (9
+entries, 15 modules scanned), toolchain canary PASS (confirmed gcc
+invoked via `--listCmd`), all 20 clean targets clean, `planted_leak` red
+as required, exercise-completeness OK for all 9 ids, register taint-column
+check OK (20 direct / 11 coveredBy / 0 pending / 6 permanent, 37 total).
+`scripts/ct-taint.sh --build-only` also verified clean (every target
+compiled, nothing run, exit 0).
+
+**The clang leg: a genuine, reproducible CT finding, confirmed both
+locally and on real hosted CI -- escalated per standing orders, not
+worked around.** `scripts/ct-taint.sh --cc clang` fails at the very
+first target (`target_sign.nim`): `feCMove` (called from
+`geScalarmultBase`'s `cmovCached`, itself called from `signDetached` via
+`sign`) trips Valgrind's "Conditional jump or move depends on
+uninitialised value(s)" -- 4348 errors from 100 contexts, entirely inside
+`feCMove`/`cmovCached`/`geScalarmultBase`'s own call chain (confirmed
+directly by inspecting the memcheck log's stack traces). A follow-up
+isolated probe (`target_x25519_static.nim` built standalone with `--cc
+clang`) confirmed this is NOT confined to `geScalarmultBase`'s
+cached-table select: X25519's Montgomery ladder trips the SAME error
+class via `feCSwap` -- 504 errors from 2 contexts, stack trace resolving
+directly to `feCSwap` -> `ladder` -> `x25519`. This is the CMOV-policy
+triage category `private/taint.nim`'s own module doc comment already
+names verbatim ("a compiler-synthesized CMOV on a tainted condition fails
+the gate even though CMOV is constant-time on the pinned targets... a CMOV
+finding is a named triage category, not noise") -- but it is the FIRST
+real evidence of it on this codebase, and the first time this codebase's
+CT-critical arithmetic (`field.feCMove`/`feCSwap`, the CT masking
+primitives every secret-dependent selection in the signer/X25519 code
+routes through) has ever been exercised under clang at all: the dudect
+timing harness (`scripts/ct.sh`) carries no `--cc` option and has only
+ever measured gcc.
+
+**Real hosted CI confirmation (branch `rfc-005-slice22`, commit
+`b44ccb0`, run `33297839211`):** every job except `taint-ct-linux-amd64-
+clang` and (necessarily, given the manifest/ruleset gap this slice
+deliberately leaves open) `ruleset-sync` passed --
+`taint-ct-linux-amd64-gcc` real and green (job `99220450465`, 73s),
+`build-smoke` real and green with the new Phase 4 and the `sello-dev`
+image switch (job `99220450595`, 112s), `gates-manifest-sync`/
+`policy-lint`/`validation-map`/`api-surface`/`api-surface-libsodium`/
+`secret-target-register`/every `unit-*`/`property-*`/`mutation`/
+`bmc-symex`/`coverage-ratchet` job all green -- no regression anywhere
+else in the matrix from this slice's own edits. `taint-ct-linux-amd64-
+clang` failed for real (job `99220450445`, 35s -- fails fast, at the
+first target): **4348 errors from 100 contexts, the EXACT SAME count as
+the independent local podman run** -- strong evidence this is a genuine,
+deterministic property of the pinned `sello-dev` image's clang 22.1.8
+codegen against this exact source, not a local-environment artifact.
+`ruleset-sync` failed exactly as expected and intended (job
+`99220450618`): "required by gates.txt (and not actively waived) but
+missing from the live main ruleset: taint-ct-linux-amd64-clang,
+taint-ct-linux-amd64-gcc" -- confirming `scripts/ruleset-apply.sh
+--apply` was correctly never run.
+
+**Decision (escalated, not made unilaterally): `scripts/ruleset-apply.sh
+--apply` was deliberately NOT run, and the branch was NOT fast-forwarded
+to `main`.** Landing either action would make `taint-ct-linux-amd64-clang`
+a LIVE REQUIRED CHECK that is reproducibly red, blocking every future push
+to `main` project-wide until resolved -- a consequence of a scale this
+project's own standing escalation rule ("a genuine fork with no confident
+recommendation... STOP and return as blocker") exists specifically to
+route through a human decision rather than a control loop's own judgment,
+doubly so since the candidate fixes (touching `field.feCMove`/`feCSwap`,
+the shared CT masking primitive underneath BOTH the ed25519 signer and
+X25519, or the `-O3`-driven codegen choice inside the taint build's own
+flags) sit squarely inside this project's "roll-your-own-crypto trust
+tax" surface. **All mechanism work is complete, verified (both locally
+and on real hosted CI), and committed to the `rfc-005-slice22` branch,
+pushed to `origin` for visibility -- not merged.** Options recorded for
+Corey, in ascending order of intrusiveness: (1) accept the clang leg as a
+documented, disclosed, PERMANENT carve-out (matching this project's own
+precedent for `` ristretto.`==` ``/`x25519(static)` in the dudect
+battery) and land ONLY `taint-ct-linux-amd64-gcc` as the live required
+check, with `taint-ct-linux-amd64-clang` staying in the workflow/manifest
+as an informational, non-required leg (would need a manifest-schema
+extension -- `gates.txt`/`ruleset-apply.sh` currently treat every
+manifest entry as required-by-construction, so this is not a same-day
+change); (2) investigate whether a taint-build-specific compile flag
+(e.g. dropping `-O3` in favor of `-O2`, or an explicit
+`-fno-jump-tables`/CMOV-suppression flag scoped ONLY to the
+`-d:selloTaint` build, never the shipped release build) makes clang stop
+synthesizing a CMOV here, closing the gap without touching the arithmetic
+itself -- untried this slice, deliberately, since it is exactly the kind
+of "make the instrument's own build config match what it needs to prove"
+call this project's `SELLO_TAINT_HARNESS_ACTIVE` split already treats as
+delicate; (3) treat this as a genuine trigger for the dudect harness to
+finally gain its own `--cc` option and measure clang for real (closing the
+"first time under clang at all" gap directly, timing-verdict side); (4)
+accept the divergence as informative but decline the whole clang leg
+(revert `taint-ct-linux-amd64-clang` entirely, keep only the gcc leg
+required) -- the least effort, but the least informative, and loses the
+"genuine compiler-divergence CT finding" this slice's own investigation
+surfaced.
+
+**No `src/sello/` files were touched this slice** (the fork is
+confined to the CI/tooling files listed above), so the standing
+"prove non-taint codegen unchanged, re-sync exact-string mutants" rule
+does not apply -- nothing to re-verify there.
+
+**Dudect evidence refresh:** not applicable -- this slice never touched
+`src/sello/`.
+
+Remaining launch order (unchanged pending Corey's decision above): 22
+stays open (mechanism landed, live-required status pending), 23 (the
+disasm gate, consuming `disasmRoots()` for real), then the A9 memcheck
+extension of nightly.yml, then slice 30, then 32. Slices 27-29 stay
+Corey-physical. 24/32 items landed in some form; 22 is the first slice in
+this grind whose own mechanism is fully done but whose ROLLOUT is
+deliberately incomplete, by design, pending a human decision.
+
+## RFC-005 fix-slice 22a: the clang-leg CT defect, fixed at its root (value barrier)
+
+**Directive.** Slice 22 left a genuine, reproducible clang-leg CT finding
+open for a human decision (four options recorded, none unilaterally
+chosen). This fix-slice's directive supersedes that options list with the
+decision itself: fix the underlying defect in `src/sello/field.nim`/
+`scalar.nim` rather than carve out, flag-tune around, or decline the
+clang leg. All work below happened on branch `rfc-005-slice22a` (from
+`main`), in a worktree at a scratch path plus a matching local
+`ghcr.io/coreyleavitt/sello-dev:latest` (podman, alt-root store
+`/home/corey/.podman-push`/`/run/user/1000/podman-push` -- this host's
+standing local-validation pattern, see the slice-1/7 traps below;
+workspace mounted from under `/tmp`, not `/home`, so the slice-7
+`$HOME`-mount permission trap did not apply here).
+
+**Reproduction (before-state).** `scripts/ct-taint.sh --cc clang`
+(borrowed unmodified from `origin/rfc-005-slice22`'s commit `b44ccb0`
+into the local worktree only -- per this slice's own scope, NOT
+committed on `rfc-005-slice22a`) reproduced the exact finding: the first
+target, `target_sign`, failed with **4348 errors from 100 contexts**,
+byte-identical to both the prior local run and hosted CI run
+`33297839211`/job `99220450445` recorded in slice 22's own entry above --
+strong confirmation this is a deterministic property of the pinned
+`sello-dev` image's clang 22.1.8 codegen against this exact source, not
+environment noise. `gcc` (no `--cc` flag) stayed clean, as before.
+
+**objdump before-state, both compilers, `feCMove` (the shared root of
+every stack trace: `signDetached -> geScalarmultBase -> cmovCached ->
+feCMove`, and independently `x25519 -> ladder -> feCSwap`):**
+- **clang -O3 (defective):** `test %edx,%edx; je <skip-to-ret>` followed
+  by an unconditional 9-limb `mov`/`mov`-pair copy loop -- clang proved
+  `mask` (`-int32(b)`) is confined to `{0, -1}` and re-synthesized the
+  ENTIRE masked-select loop into `if (b) { memcpy-style copy } `. This is
+  a genuine conditional BRANCH on the secret bit `b`, not merely a CMOV --
+  strictly worse than the RFC's own named CMOV-policy triage category.
+- **gcc -O3 (clean, confirmed unaffected by this finding):** a fully
+  vectorized SSE2 sequence (`pshufd`/`pcmpeqd`-derived broadcast mask,
+  then `pand`/`pandn`/`por`/`movups` -- textbook masked blend, no branch
+  on `b`) plus one PRE-EXISTING, unrelated `jbe` -- a pointer-aliasing
+  safety check gcc's auto-vectorizer inserts, gated on the numeric
+  DISTANCE between the `r`/`a` pointer arguments (an address comparison,
+  never data-dependent on `b`/`mask`), present in both the before- and
+  after-fix gcc builds identically.
+
+**The fix.** `src/sello/private/ct.nim` gains `valueBarrier32*(x: int32):
+int32 {.inline.}` -- the BoringSSL/BearSSL *value barrier* idiom: `result
+= x` then an empty `asm volatile("" : "+r"(result));`. A read-write
+register constraint with no instructions forces the C compiler to (a)
+materialize the value into a register at that exact point and (b) treat
+its contents afterward as an unknown, arbitrary `int32` -- specifically,
+no longer provably confined to `{0, -1}` even though it was constructed
+as `-int32(someBool)`. This is semantically the identity function: the
+barriered value equals the input on every real execution, so it changes
+no arithmetic and adds no branch of its own. Applied at all three (and
+only three) secret-derived mask construction sites in the codebase
+(grepped for `-int32(`/`-int64(`/`-uint`/`and mask` across `src/sello/`
+before landing, confirmed exhaustive): `field.feCMove`'s `mask`,
+`field.feCSwap`'s `mask`, `scalar.cmovCached`'s `signMask`. No call site
+needed a change -- `x25519.nim`'s ladder and `ristretto.nim`'s selects
+all route through `feCMove`/`feCSwap` themselves. `field.nim` gained its
+first `private/ct` import (a leaf-to-leaf reach, not a layering
+violation -- `private/ct.nim` is reachable from any position per
+CLAUDE.md's Architecture section); `field.nim` still holds no secret of
+its own. Full doc-comment rationale lives in `private/ct.nim`'s new "The
+value barrier" module-doc section and at each of the three call sites.
+
+**objdump after-state, both compilers -- the fix confirmed structurally,
+plus one honestly-investigated new observation.** The `test/je`
+branch-and-skip is GONE under clang: both compilers now emit a
+straight-line, unconditional per-limb masked-select body (clang: scalar
+`mov`/`xor`/`and`/`xor`/`mov` per limb, no vectorization; gcc: the
+identical vectorized `pand`/`pandn`/`por` sequence as before, functionally
+unchanged). Both AFTER builds (both compilers) additionally show a NEW,
+IDENTICAL small branch pattern not present before:
+`mov $<offset>,%rax; cmpb $0x0,%fs:(%rax); jne <skip-to-ret>`. Investigated
+before accepting it, per the standing "STOP and escalate, don't iterate
+blindly" rule -- traced through the generated C (nimcache) rather than
+guessed: `feCMove`'s C body now reads
+```
+NIM_BOOL* nimErr_;
+nimErr_ = nimErrorFlag();
+mask_1 = valueBarrier32__...(((NI32)-(((NI32) (b_p2)))));
+if (NIM_UNLIKELY(*nimErr_)) goto BeforeRet_;
+```
+-- this is Nim's own stock `--exceptions:goto` codegen: an
+exception-propagation check inserted after ANY call to a separately
+compiled Nim proc (`valueBarrier32`, now a real out-of-line proc since it
+crossed a module boundary, even though `{.inline.}` at the Nim level and
+in fact fully inlined by the C compiler's own optimizer at the machine
+level -- no `call valueBarrier32` instruction appears in either objdump).
+`nimErrorFlag()` returns a thread-local pointer (hence the `%fs:` prefix),
+which the codegen dereferences and branches on. **This branch is
+provably NOT conditioned on any secret data**: (1) its condition reads a
+completely separate memory location (`*nimErr_`) with no data-flow from
+`b`/`mask`/`edx` at all; (2) the IDENTICAL pattern (confirmed by grepping
+the same objdump output) appears in `wipe()` (`private/sha512.nim`,
+`scalar.nim`, `private/backend.nim` -- files this fix-slice never
+touched) and immediately after `call cmovCached` returns inside
+`geScalarmultBase` -- i.e. it is Nim's uniform, pre-existing convention
+for any proc containing an `{.emit.}` block or calling one, not something
+new introduced by this fix; (3) directly and conclusively, the taint
+harness (below) proves ZERO memcheck errors on this exact compiled path
+under BOTH compilers, meaning no branch anywhere in the executed path --
+including this one -- depends on tainted/secret-derived memory. Recorded
+honestly as a new but harmless structural artifact, not glossed over.
+
+**Proofs, all real (foreground container runs, this slice):**
+- **Taint harness, gcc:** `scripts/ct-taint.sh` (no flag) -- ALL TARGETS
+  PASSED: every clean target 0 memcheck errors, `target_planted_leak`
+  (permanent negative fixture) still red (1 error, confirmed still
+  detected), all 9 `DeclassId` register entries exercised, register
+  taint-column check OK (20 direct / 11 coveredBy / 0 pending / 6
+  permanent, 37 total) -- identical shape to slice 22's own gcc leg,
+  confirming no regression.
+- **Taint harness, clang:** `scripts/ct-taint.sh --cc clang` -- **ALL
+  TARGETS PASSED**, the fix's own headline result: `target_sign`'s own
+  memcheck log now reads `ERROR SUMMARY: 0 errors from 0 contexts`
+  (previously 4348/100), `target_x25519_static_normal` likewise `0
+  errors from 0 contexts` (previously the independently-confirmed 504
+  errors from 2 contexts via `feCSwap`), negative fixture still red (1
+  error), every register entry exercised, register taint-column check OK
+  -- byte-for-byte the same completeness shape as the gcc leg.
+- **Full unit + property suite, both compilers:** `scripts/test.sh`
+  (`GCC_EXIT=0`) and `scripts/test.sh --cc clang` (`CLANG_EXIT=0`) --
+  14 unit/vector files (RFC 8032/7748 KATs, Wycheproof, libsodium
+  differential, facade/CT smoke) plus all 6 `test_properties_*.nim`
+  files (proptest fetched via `milpa fetch --features proptest`), 100%
+  green under both backends -- direct functional evidence that
+  `feCMove`/`feCSwap`/`cmovCached`'s barriered mask construction is still
+  correct on every RFC/Wycheproof/property vector, including the
+  non-secret verify path (`ed25519.pointDecode` also calls `feCMove` on
+  public candidate data during decode, unaffected).
+- **`tests/verify/symex_mask.nim` (Z3, via `scripts/bmc.sh`):** re-ran in
+  full -- all three mask-algebra lemmas (`maskConstructStep`,
+  `cmoveSelectStep`, `cswapSelectStep`) still `PROVED sxUnsat` over their
+  full domains, and `crossCheckMaskConstructThenSelect` still matches the
+  real `feCMove`/`feCSwap` on 1124 concrete cases. Confirms the reasoning
+  stated in `private/ct.nim`'s own doc comment: the proof reasons about
+  the VALUES the mask takes (0 or -1, given the boolean), and
+  `valueBarrier32` does not change what value the mask holds on any real
+  execution -- only what the optimizer may assume about it -- so the
+  proof's scope covers the barriered source unmodified, with no new
+  query needed. (The other three `bmc.sh` files -- `symex_recode.nim`,
+  `symex_reduce.nim`, `symex_equal.nim` -- also ran clean as part of the
+  same invocation, unaffected, confirming no collateral regression.)
+- **Mutation catalog:** every one of the 49 existing `field.nim`/
+  `scalar.nim` mutants' exact-string `OLD` blocks were checked against
+  the new source before running anything (a scripted grep-check, not
+  assumed) -- only ONE needed re-syncing: `F20_fecmove_mask_not_allones`
+  (its `OLD`/`NEW` strings updated from `let mask = -int32(b)` /
+  `let mask = int32(b)` to `let mask = valueBarrier32(-int32(b))` /
+  `let mask = valueBarrier32(int32(b))` -- same intent, same defect
+  class, new source text). The full 84-mutant catalog then ran for real
+  (`scripts/mutation.sh`, base `ghcr.io/coreyleavitt/nim:2.2.10` image):
+  **84/84 killed, 0 survivors** (`docs/mutation-results.md` regenerated
+  wholesale by the run, committed). One NEW mutant was authored per this
+  slice's own instruction and tested rather than assumed:
+  `F31_fecmove_valuebarrier_dropped` (`let mask =
+  valueBarrier32(-int32(b))` -> `let mask = -int32(b)`, i.e. undoing this
+  exact fix at one of its three sites) -- applied to a scratch copy and
+  run against the FULL `scripts/test.sh` battery (unit + all six property
+  suites, gcc, 20 files): **SURVIVED, zero failures**, confirming it is
+  behaviorally equivalent under every correctness-oriented instrument
+  (the mask's VALUE is identical either way -- only the clang leg of the
+  taint harness, which `scripts/mutation.sh` never drives, can
+  distinguish them, and does: this exact removal is how the pre-22a
+  source read, and it reproduced the original 4348-error finding both
+  locally and on real CI). Retired to
+  `tests/mutation/mutants/equivalent/F31_fecmove_valuebarrier_dropped.mutant`
+  with this evidence recorded in its own `note:` field, matching the
+  `F05`/`H07` precedent exactly (three retired-equivalent mutants total
+  now: F05, F31, H07).
+- **Coverage ratchet:** not run locally this slice (needs `lcov` inside
+  `sello-dev` and is itself a required merge-gate check that will run for
+  real on push) -- expectation recorded rather than measured: flat or a
+  tiny rise, since the fix adds one new leaf proc (`valueBarrier32`,
+  exercised by every call site that already existed) and touches no
+  branch structure at the Nim source level.
+- **Codegen diff, non-secret paths:** no dedicated raw-instruction diff
+  was run beyond the three touched functions; the full-suite green result
+  under both compilers (above) is the direct functional evidence non-
+  secret call sites (`ed25519.pointDecode`'s public-data `feCMove` calls,
+  `ristretto.nim`'s selects) are unaffected -- a public-data correctness
+  regression in `feCMove`/`feCSwap` would have failed the RFC 8032/
+  Wycheproof/RFC 9496 vector suites directly.
+
+**Records.** CLAUDE.md: `field.nim`'s entry (item 1) and `private/ct.nim`'s
+entry (item 10) both gained the value-barrier finding/remedy; the
+taint-harness CT-instruments paragraph (the `- A **taint-based
+deterministic CT harness**...` bullet) gained a note that this fix-slice
+closes the clang-leg defect at its root, pointing at slice 22's own
+Part-2 landing for the live-required-check flip. `docs/ct-results.md`
+gained a dated note at the top: every recorded dudect battery predates
+this codegen change; a full re-run is DEFERRED to slice 23's own mandated
+refresh (which changes this exact codegen again via `{.noinline.}`
+disasm-gate roots) rather than duplicated here -- a control-loop decision,
+recorded as such rather than silently assumed, since the barrier is
+proved value-preserving (not an arithmetic change) rather than something
+only a timing re-measurement could validate. `docs/mutation-results.md`
+regenerated wholesale by the real 84-mutant run (84/84 killed, 3
+retired-equivalent: F05, F31, H07).
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -4825,4 +5203,23 @@ for real), then the A9 memcheck extension of `nightly.yml`, then slice
   same as before), then the A9 memcheck extension of nightly.yml, then
   slice 30, then 32. Slices 27-29 stay Corey-physical. 23/32 done at
   this note.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 21.
+  Slice 22 is MECHANISM-DONE, BLOCKED-ON-DECISION (2026-08-30 -- see its
+  own full-record entry above): the doc-anchor drift check, the
+  `--cc`/`--build-only` flags on `scripts/ct-taint.sh`, and both new CI
+  jobs (`taint-ct-linux-amd64-gcc`/`-clang`) landed and were verified
+  both locally (podman) and via a real hosted CI run (branch
+  `rfc-005-slice22`, commit `b44ccb0`, run `33297839211`) -- but
+  `taint-ct-linux-amd64-clang` is a genuine, reproducible CT finding
+  (`feCMove`/`feCSwap` trip Valgrind's CMOV-policy error class under
+  clang specifically, first evidence of this codebase's CT-critical
+  arithmetic ever being exercised under clang at all), so
+  `scripts/ruleset-apply.sh --apply` was deliberately NOT run and the
+  branch was NOT fast-forwarded to `main` -- landing either would make a
+  reproducibly-red check live-required, blocking every future push
+  project-wide. THIS IS A GENUINE HUMAN-DECISION BLOCKER, not a
+  credential wait: see the slice's own entry above for the four ranked
+  options recorded for Corey. The grind loop should NOT proceed past
+  slice 22 (i.e. should not start slice 23) until Corey has chosen one
+  of those options and the chosen fix (if any) has landed on
+  `rfc-005-slice22` or a successor branch.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, FIRST check whether Corey has made a decision on slice 22's clang-leg CT finding (see that slice's own entry above) -- do not silently proceed to slice 23 without it. If a decision is recorded, resume RFC order there; if not, surface the open decision rather than guessing.

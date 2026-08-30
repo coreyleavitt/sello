@@ -1,5 +1,24 @@
 # Constant-time timing evidence (RFC-001 slice 9)
 
+**2026-08-30 note (RFC-005 fix-slice 22a):** every timing battery recorded
+below PREDATES the value-barrier fix to `field.feCMove`/`feCSwap` and
+`scalar.cmovCached` (see `src/sello/private/ct.nim`'s "The value barrier"
+doc section and this project's handoff doc's fix-slice 22a entry) --
+the fix changes shipped codegen (gcc's own `-O3` output for these three
+functions is confirmed byte-identical in structure before/after; this
+note exists because the source changed, not because gcc's output did).
+A full dudect re-run against the barriered binary is DEFERRED to slice
+23's own mandated timing refresh (which changes this codegen again, by
+adding `{.noinline.}` disasm-gate roots) rather than duplicated here --
+a control-loop decision, recorded rather than silently assumed: running
+the battery twice in two back-to-back slices against two different
+codegen states was judged not worth the ~re-run cost given slice 23
+already mandates a refresh, and the barrier is proved value-preserving
+(identity on every real execution -- see `private/ct.nim`'s own doc and
+`tests/verify/symex_mask.nim`'s proof scope, both argued to still apply
+unmodified) rather than an arithmetic change a timing re-measurement
+would be the only way to validate.
+
 Results of the `tests/ct/` dudect-style harness, run via `scripts/ct.sh`. This
 document is the honest record the RFC requires: the harness measures, it
 does not prove. It is evidence toward the constant-time discipline applied

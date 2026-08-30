@@ -49,6 +49,62 @@
 ## field — it would zero the pointer/length header, not the heap payload,
 ## silently leaving the real secret bytes alive on the heap.
 
+## ## The value barrier (RFC-005 fix-slice 22a)
+##
+## `feCMove`/`feCSwap` (`field.nim`) and `cmovCached` (`scalar.nim`)
+## construct their selection/negation masks as `-int32(b)` from a `bool`
+## (0 -> `0'i32`, 1 -> `-1'i32`, i.e. all-zero-bits or all-one-bits), then
+## select between two values via `x xor ((x xor y) and mask)` -- no
+## secret-dependent branch, by construction, at the Nim source level.
+## `taint-ct-linux-amd64-clang` (RFC-005 slice 22) caught a genuine defect
+## in that reasoning: clang, unlike gcc on the same source, recognizes
+## `mask` is exactly `0` or `-1` (derived straight from a `bool`) and
+## re-synthesizes the whole masked-select loop into `if (b) memcpy(...)`
+## -- a real conditional branch on the secret bit, confirmed by
+## disassembly (`test %edx,%edx; je ...` in `feCMove`'s compiled body
+## under `-O3`/clang, vs. gcc's unconditional SSE2 `pand`/`pandn`/`por`
+## select on the identical source), not merely a CMOV (which the RFC's
+## own CMOV policy would at least have named a named triage category --
+## this is strictly worse, a full branch). Valgrind/memcheck's taint
+## instrument caught it directly: `feCMove`/`cmovCached`'s branch,
+## reached from `signDetached` via `geScalarmultBase`, and `feCSwap`'s
+## twin in `x25519`'s Montgomery ladder.
+##
+## The remedy is the standard BoringSSL/BearSSL *value barrier*:
+## `valueBarrier32` launders an `int32` through an empty
+## `asm volatile("" : "+r"(...))` -- a read-write register constraint
+## with no instructions -- so the C compiler must (a) materialize the
+## value into a register before the asm statement and (b) treat the
+## register's contents *after* the asm as an unknown, arbitrary `int32`,
+## not the specific compile-time-derivable `{0, -1}` it can otherwise
+## prove `-int32(b)` is confined to. This is semantically the identity
+## function (the barriered value equals the input value on every real
+## execution) -- it changes no arithmetic, adds no branch, and is why
+## `tests/verify/symex_mask.nim`'s existing machine-checked mask-algebra
+## proof still applies unmodified: the proof reasons about the
+## construct-then-consume VALUES the mask takes, and the barrier does not
+## change what value the mask holds, only what the optimizer is permitted
+## to assume about it. Every secret-derived mask construction site in the
+## codebase routes through it (`field.feCMove`'s and `feCSwap`'s `mask`,
+## `scalar.cmovCached`'s `signMask`) -- there are exactly three sites
+## (grepped for `-int32(`/`-int64(`/`-uint`/`and mask` across `src/sello/`
+## before this fix landed; `x25519.nim`'s ladder and `ristretto.nim`'s
+## selects all route through `feCMove`/`feCSwap` themselves and need no
+## call-site change). Verdict-declassification sites (`scIsCanonicalCT`,
+## `feEqualCT`-style or-accumulate results) are a different thing
+## entirely -- an intentionally PUBLIC verdict, not a mask feeding a
+## still-secret selection -- and get no barrier; see `private/taint.nim`'s
+## own `declassify` register for that boundary.
+##
+## Deliberately `{.inline.}`, unlike `wipe`'s `{.noinline.}`: the barrier
+## is a genuine machine-level fence (the empty `asm volatile` forces a
+## real register materialization/reload at that exact program point) that
+## survives inlining intact -- inlining the wrapper just inlines the one
+## barrier instruction in place, at zero call overhead, which is the
+## whole point (`wipe` is `{.noinline.}` for an unrelated reason: so a
+## caller-side "the result is unobserved" analysis can't see through the
+## call and decide the wipe itself is dead).
+
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy. A wipe
 ## primitive that could raise or touch global state would defeat its own
@@ -110,6 +166,24 @@ func wipe*[N: static int](data: var array[N, uint64]) {.noinline.} =
   for i in 0 ..< N:
     volatileStoreWord(addr base[i], 0'u64)
   {.emit: "asm volatile(\"\" ::: \"memory\");".}
+
+func valueBarrier32*(x: int32): int32 {.inline.} =
+  ## Value barrier (see module doc, "The value barrier" section above):
+  ## returns `x` unchanged, but laundered through an empty
+  ## `asm volatile("" : "+r"(result))` so the C compiler can no longer
+  ## assume anything about the returned value beyond "some `int32`" --
+  ## specifically, it can no longer prove the value is confined to
+  ## `{0, -1}` even when the caller constructed it as `-int32(someBool)`,
+  ## which is exactly the proof clang was making use of to re-synthesize
+  ## `field.feCMove`/`feCSwap`'s masked-select arithmetic back into a
+  ## branch on the secret bit (RFC-005 fix-slice 22a). `result` (not `x`
+  ## itself) is what gets barriered: `x` is a Nim `int32` parameter passed
+  ## by value, which compiles to a plain-value C local, but the emitted
+  ## asm needs a single, unambiguous local symbol to bind its `"+r"`
+  ## read-write constraint to, and `result` is that symbol on every
+  ## `func` regardless of parameter-passing convention.
+  result = x
+  {.emit: ["asm volatile(\"\" : \"+r\"(", result, "));"].}
 
 {.pop.}
 {.pop.}
