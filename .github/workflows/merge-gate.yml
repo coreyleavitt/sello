@@ -792,3 +792,44 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/validation-map-check.sh
+
+  # RFC-005 slice 23 (A2, disasm gate). Named `disasm-gate-<cc>`, the
+  # same os-arch-elided, compiler-suffixed convention `taint-ct-linux-
+  # amd64-<cc>` set two slices ago for a check that genuinely varies by
+  # C backend but is not the ordinary unit suite -- shortened to
+  # `disasm-gate-<cc>` rather than `disasm-gate-linux-amd64-<cc>` since
+  # this gate has no realistic non-amd64 story (the pinned baselines are
+  # themselves compiler-ABI-specific; a future arm64 leg would need its
+  # own baseline pair and its own job name, not a retrofit of this one).
+  # Pinned to sello-dev by digest (objdump/nm live in the base image
+  # too, but this runs on sello-dev for consistency with every other
+  # CT-adjacent gate in this workflow -- no new pin needed). Builds
+  # tests/ct_disasm/main.nim, resolves every {.noinline.} root via the
+  # nimcache C, disassembles it, and compares the per-root conditional
+  # -branch profile against the committed tests/ct_disasm/expected/<cc>.txt
+  # baseline (scripts/lib/baseline.sh's regenerable-baseline idiom).
+  disasm-gate-gcc:
+    name: disasm-gate-gcc
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/disasm-gate.sh
+
+  # The clang-backend sibling -- same resolver, same baseline contract,
+  # a SEPARATE committed baseline (tests/ct_disasm/expected/clang.txt):
+  # the two backends' codegen genuinely differs (confirmed this slice --
+  # gcc's feCMove profile carries both a stack-protector canary AND a
+  # pointer-distance vectorization-dispatch branch; clang's carries only
+  # the canary), so a single shared baseline would either be perpetually
+  # wrong for one backend or would have to encode both, defeating the
+  # point of a pinned artifact.
+  disasm-gate-clang:
+    name: disasm-gate-clang
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/disasm-gate.sh --cc clang

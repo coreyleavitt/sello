@@ -47,6 +47,19 @@
 #      phase exists purely so a taint target's own compile error is
 #      caught here too, not only at the next real
 #      `scripts/ct-taint.sh` invocation.
+#   4. (RFC-005 slice 23) Compiles AND RUNS ONCE tests/ct_disasm/main.nim
+#      (every {.noinline.} disasm-gate root referenced) via
+#      `scripts/disasm-gate.sh --build-only` -- see that flag's own
+#      header comment in disasm-gate.sh. NEVER resolves a root's C
+#      symbol, disassembles anything, or compares against a baseline:
+#      same no-verdict-authority posture as ct_main/Phase 3 above. The
+#      two REQUIRED disasm-gate checks (`disasm-gate-gcc`/`-clang`, this
+#      slice's own gates.txt/merge-gate.yml additions) are what actually
+#      run the real resolver + objdump + baseline comparison on every
+#      push; this phase exists purely so tests/ct_disasm/main.nim's own
+#      compile error (or a root becoming unreachable/removable by the
+#      C compiler) is caught here too, not only at the next real
+#      `scripts/disasm-gate.sh` invocation.
 #
 # SCOPE, stated honestly (this slice was taken deliberately OUT OF ORDER
 # -- slices 10/14/15 remain blocked on a Corey-owned ghcr `write:packages`
@@ -56,12 +69,11 @@
 # phased sequencing (Part B's build-smoke paragraph: "extended in phase 3
 # to the taint/disasm binaries") scheduled the taint harness (slice 19)
 # and disasm gate (slice 23) binaries for LATER slices. Slice 19/21
-# landed the taint harness; THIS slice (22) is that scheduled extension
-# for the taint half -- the disasm gate (slice 23, no `tests/ct_disasm/`
-# yet) remains not-yet-covered and is NOT a gap this slice silently
-# backfills; slice 23 extends this same script/job in place when it
-# lands, not a fork of a new one (RFC-005 Part B's build-path invariant:
-# one scripts/ invocation per job, widened in place).
+# landed the taint harness; slice 22 was that scheduled extension for the
+# taint half; THIS slice (23) is the disasm-gate half -- both halves of
+# the RFC's own "taint/disasm binaries" phrase are now covered by this
+# one script/job, widened in place rather than forked (RFC-005 Part B's
+# build-path invariant: one scripts/ invocation per job).
 #
 # IMAGE, changed this slice: build-smoke now runs on `sello-dev`
 # (valgrind/valgrind-client-headers), not the base
@@ -123,7 +135,7 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   "$MILPA_BIN" fetch --features proptest --locked
 
   echo "=============================================================="
-  echo "build-smoke: PHASE 1/3 -- fuzz external target (real SanitizerCoverage"
+  echo "build-smoke: PHASE 1/5 -- fuzz external target (real SanitizerCoverage"
   echo "build-smoke: instrumentation) + driver: compile only, via"
   echo "build-smoke: scripts/fuzz.sh --build-only"
   echo "=============================================================="
@@ -131,7 +143,7 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
 
   echo ""
   echo "=============================================================="
-  echo "build-smoke: PHASE 2/3 -- one deterministic input through the built,"
+  echo "build-smoke: PHASE 2/5 -- one deterministic input through the built,"
   echo "build-smoke: instrumented target binary directly (not the proptest"
   echo "build-smoke: mutation campaign -- see scripts/fuzz.sh's --build-only"
   echo "build-smoke: header comment for why)"
@@ -154,18 +166,28 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
 
   echo ""
   echo "=============================================================="
-  echo "build-smoke: PHASE 3/4 -- ct_main: compile only, via scripts/ct.sh --build-only"
+  echo "build-smoke: PHASE 3/5 -- ct_main: compile only, via scripts/ct.sh --build-only"
   echo "=============================================================="
   SELLO_IN_CONTAINER=1 scripts/ct.sh --build-only
 
   echo ""
   echo "=============================================================="
-  echo "build-smoke: PHASE 4/4 (RFC-005 slice 22) -- every tests/ct_taint/ target"
+  echo "build-smoke: PHASE 4/5 (RFC-005 slice 22) -- every tests/ct_taint/ target"
   echo "build-smoke: (every clean target, every verdict arm, plus the permanent"
   echo "build-smoke: negative fixture): compile only, via"
   echo "build-smoke: scripts/ct-taint.sh --build-only"
   echo "=============================================================="
   SELLO_IN_CONTAINER=1 scripts/ct-taint.sh --build-only
+
+  echo ""
+  echo "=============================================================="
+  echo "build-smoke: PHASE 5/5 (RFC-005 slice 23) -- tests/ct_disasm/main.nim:"
+  echo "build-smoke: compile + run once (real end-to-end evidence, same"
+  echo "build-smoke: no-verdict-authority posture as ct_main/PHASE 3 -- no"
+  echo "build-smoke: resolver, no disassembly, no baseline comparison), via"
+  echo "build-smoke: scripts/disasm-gate.sh --build-only"
+  echo "=============================================================="
+  SELLO_IN_CONTAINER=1 scripts/disasm-gate.sh --build-only
 
   echo ""
   echo "=============================================================="
@@ -182,11 +204,12 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   echo "build-smoke:     battery runs only via the required taint-ct-linux-amd64-gcc"
   echo "build-smoke:     / taint-ct-linux-amd64-clang checks, or a maintainer's own"
   echo "build-smoke:     plain 'scripts/ct-taint.sh'."
-  echo "build-smoke:   - SCOPE (taken out of order; see this script's own header"
-  echo "build-smoke:     comment and CLAUDE.md): the disasm gate (slice 23) binaries"
-  echo "build-smoke:     do not exist in this repository yet and are therefore NOT"
-  echo "build-smoke:     covered by this check -- that slice extends this same"
-  echo "build-smoke:     script/job when it lands."
+  echo "build-smoke:   - tests/ct_disasm/main.nim compiled and ran once (RFC-005"
+  echo "build-smoke:     slice 23). COMPILE-AND-RUN-ONCE ONLY -- no resolver, no"
+  echo "build-smoke:     disassembly, no baseline comparison; the real per-root"
+  echo "build-smoke:     conditional-branch-profile check runs only via the required"
+  echo "build-smoke:     disasm-gate-gcc / disasm-gate-clang checks, or a maintainer's"
+  echo "build-smoke:     own plain 'scripts/disasm-gate.sh'."
   echo "=============================================================="
 else
   # Lockfile-conformance preflight (RFC-001 ledger finding 30), same

@@ -327,3 +327,5 @@ coverage-ratchet                    scripts/coverage.sh
 secret-target-register              scripts/secret-target-register-check.sh
 taint-ct-linux-amd64-gcc            scripts/ct-taint.sh
 taint-ct-linux-amd64-clang          scripts/ct-taint.sh --cc clang
+disasm-gate-gcc                     scripts/disasm-gate.sh
+disasm-gate-clang                   scripts/disasm-gate.sh --cc clang
