@@ -443,6 +443,35 @@ func finish*(ctx: var Sha512Context; digest: var array[64, byte]) =
 # ---------------------------------------------------------------------------
 
 func sha512*(a: openArray[byte]): array[64, byte] =
+  ## **Taint posture (RFC-005 slice 21, A1's taint CT harness) --
+  ## deliberately NO interior `declassify` call**, the same reasoning as
+  ## `ristretto.ristrettoEncode`'s own documented posture (see that
+  ## function's doc comment for the full writeup this one cross-
+  ## references rather than re-derives). `sha512` is a shared low-level
+  ## primitive, reused both for hashing a message a caller intends to
+  ## inspect the digest of (this slice's own `diSha512DigestKat` target)
+  ## AND for genuinely secret-derivation hashing internal to this
+  ## codebase's signing path -- `private/backend.derivePublic`'s very
+  ## first line, `h = sha512(seed)`, is exactly this: `h` is not a value
+  ## `derivePublic` intends to publish, it is the raw material the
+  ## secret scalar `a` and the nonce-generation prefix are carved from,
+  ## and `backend.signDetached`'s own nonce hash (`sha512(prefix, msg)`)
+  ## is the identical shape. Declassifying unconditionally at THIS
+  ## function's own return would silently un-taint every one of those
+  ## secret intermediates the moment `sha512` produces them -- masking
+  ## real leaks in `derivePublic`/`signDetached`'s OWN downstream
+  ## clamp/scalarmult logic from this harness, the exact "taint washout"
+  ## failure mode A1's own text names, self-inflicted by this function
+  ## rather than caught by it. `compress` (below) is pure ARX (add-
+  ## rotate-xor) with no data-dependent branch of its own either, so
+  ## there is no interior-branch-timing reason to declassify here at
+  ## all -- unlike `diX25519ZeroVerdict`'s "too late" argument against a
+  ## harness-side declassify, nothing inside `sha512`/`compress` ever
+  ## branches on the digest, so a CALLER declassifying its own copy of
+  ## the digest, after this call returns, loses nothing. This slice's
+  ## own `tests/ct_taint/target_sha512.nim` target does exactly that --
+  ## see its own header comment.
+  ##
   ## Single-buffer one-shot: `init`/`update`/`finish` on a module-confined
   ## context, wiped before returning.
   var ctx: Sha512Context
@@ -453,6 +482,8 @@ func sha512*(a: openArray[byte]): array[64, byte] =
 
 func sha512*(a, b: openArray[byte]): array[64, byte] =
   ## Two-buffer one-shot (the nonce hash's shape: `sha512(prefix, msg)`).
+  ## Taint posture: see the single-buffer overload's doc comment above --
+  ## identical reasoning, no interior declassify here either.
   var ctx: Sha512Context
   ctx.init()
   ctx.update(a)
@@ -462,7 +493,9 @@ func sha512*(a, b: openArray[byte]): array[64, byte] =
 
 func sha512*(a, b, c: openArray[byte]): array[64, byte] =
   ## Three-buffer one-shot (`challenge`'s shape, and the CAVP Monte Carlo
-  ## chain step's `sha512(md3, md2, md1)`).
+  ## chain step's `sha512(md3, md2, md1)`). Taint posture: see the
+  ## single-buffer overload's doc comment above -- identical reasoning,
+  ## no interior declassify here either.
   var ctx: Sha512Context
   ctx.init()
   ctx.update(a)

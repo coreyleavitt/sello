@@ -109,11 +109,72 @@ type
     diX25519ZeroVerdict
       ## `x25519.x25519`'s OR-accumulated all-zero small-order-peer
       ## verdict byte (RFC 7748 §6.1's zero-output check) — the interior
-      ## branch the `if acc == 0` in both the `X25519StaticSecret` and
-      ## `X25519EphemeralSecret` overloads reads. This slice wires the
-      ## `X25519StaticSecret` overload's site only; the ephemeral
-      ## overload's identical disclosure class shares this id and is
-      ## wired when that role joins the taint target list.
+      ## branch the `if acc == 0` reads, in BOTH the `X25519StaticSecret`
+      ## overload (wired since slice 19) and the `X25519EphemeralSecret`
+      ## overload (wired RFC-005 slice 21) — the identical disclosure
+      ## class over two overloads sharing one id, per this member's
+      ## original doc comment.
+    diX25519BasePublicKey
+      ## `x25519.x25519Base`'s returned public u-coordinate (32 bytes),
+      ## declassified at the assign-result/declassify/return idiom —
+      ## RFC-005 slice 21. Shared by BOTH overloads (`X25519StaticSecret`
+      ## and `X25519EphemeralSecret`): neither has a branch of its own,
+      ## each is a direct `ladder` call, so one id covers both call sites
+      ## exactly as `diX25519ZeroVerdict` covers both `x25519` overloads.
+    diRistrettoEncodeOutput
+      ## The canonical 32-byte encoding of a `RistrettoPoint` a caller
+      ## intends to publish — RFC-005 slice 21. **NO interior call site
+      ## inside `ristretto.ristrettoEncode` itself** (see that function's
+      ## own doc comment for why: it is reused on the genuine secret DH
+      ## product inside `ristrettoScalarmult(sink RistrettoEphemeralSecret,
+      ## ...)`, so an unconditional interior declassify there would
+      ## violate this register's own boundary rule). Declassified instead
+      ## at each genuinely-public CALL SITE of `ristrettoEncode` — this
+      ## slice's own `tests/ct_taint/target_ristretto_scalarmult.nim`
+      ## target — legitimate because `ristrettoEncode` has no interior
+      ## branch of its own (straight-line CT plus `feCMove` selects), so
+      ## a declassify by the caller, after the call returns, loses no
+      ## coverage the way an interior-branch case would (contrast
+      ## `diX25519ZeroVerdict`'s "too late" argument against exactly that
+      ## pattern for a function WITH an interior branch).
+    diRistrettoEqualVerdict
+      ## `ristretto.\`==\``'s CT verdict byte (`uint8(eq1) or uint8(eq2)`),
+      ## declassified immediately before return — RFC-005 slice 21. Same
+      ## sanctioning argument as `diX25519ZeroVerdict`: the boolean this
+      ## function hands back IS the disclosure the caller asked for by
+      ## calling it.
+    diRistrettoStaticSecretImportReject
+      ## `ristretto.toRistrettoStaticSecret`'s `scIsCanonicalCT` accept/
+      ## reject verdict over CALLER-SUPPLIED import bytes — promoted from
+      ## the Stage-3 schema proof-spike (slice 19) to a live id, RFC-005
+      ## slice 21. The verdict is a fact about the caller's own
+      ## already-possessed bytes (an IMPORT boundary, not a derived-
+      ## computation verdict), the class `diX25519ZeroVerdict` is not.
+    diRistrettoEphemeralZeroVerdict
+      ## `ristretto.ristrettoScalarmult(sink RistrettoEphemeralSecret,
+      ## ...)`'s OR-accumulated all-zero identity-encoding verdict byte
+      ## (RFC 9496 §4.3.2's canonical-encoding-of-identity-is-all-zero
+      ## fact) — the interior branch the `if acc == 0` reads. RFC-005
+      ## slice 21. A distinct id from `diX25519ZeroVerdict` (different
+      ## anchor, different module, this register's one-anchor-per-id
+      ## convention) even though the shape (OR-accumulate, zero-verdict)
+      ## is the same construction.
+    diSha512DigestKat
+      ## `private/sha512.sha512`'s returned digest, for a caller's own
+      ## KAT-style inspection — promoted from the Stage-3 schema
+      ## proof-spike (slice 19) to a live id, RFC-005 slice 21. The
+      ## INVERTED class: the MESSAGE is what gets tainted, the DIGEST is
+      ## what gets declassified. **NO interior call site inside
+      ## `sha512.sha512` itself** (see that function's own doc comment
+      ## for why: it is reused for genuinely secret-derivation hashing
+      ## internal to `private/backend.derivePublic`/`signDetached`, so an
+      ## unconditional interior declassify there would silently un-taint
+      ## those secret intermediates). Declassified instead at the CALL
+      ## SITE that treats the digest as intentionally inspectable test
+      ## data — this slice's own `tests/ct_taint/target_sha512.nim`
+      ## target — legitimate for the same "no interior branch, so no
+      ## coverage lost by declassifying after return" reason
+      ## `diRistrettoEncodeOutput`'s own doc comment states.
 
   DeclassWidth* = enum
     ## Disclosed WIDTH, typed rather than left as a raw byte count — the
@@ -121,8 +182,7 @@ type
     dwVerdictByte   ## a single accept/reject verdict byte.
     dwPublicKey32   ## a derived/imported 32-byte public key.
     dwSignature64   ## a 64-byte ed25519 signature (`R || S`).
-    dwDigest64      ## a 64-byte hash digest (sha512) — schema proof-spike
-                     ## register only as of this slice, see below.
+    dwDigest64      ## a 64-byte hash digest (sha512).
 
   DeclassEntry* = object
     id*: DeclassId
@@ -176,6 +236,110 @@ const declassRegister*: array[DeclassId, DeclassEntry] = [
       "returned Option's some/none discriminant hands the caller " &
       "regardless, so branching on it openly costs no additional " &
       "secrecy.",
+    buildCondition: "",
+  ),
+  diX25519BasePublicKey: DeclassEntry(
+    id: diX25519BasePublicKey,
+    width: dwPublicKey32,
+    anchor: "x25519.x25519Base",
+    rationale: "A derived X25519 public u-coordinate is public data the " &
+      "moment x25519Base returns it -- the same rationale as " &
+      "diDerivePublicKey, restated for X25519's own key-derivation " &
+      "boundary. Shared by both the X25519StaticSecret and " &
+      "X25519EphemeralSecret overloads: neither branches on its own " &
+      "input, so one id covers both call sites.",
+    buildCondition: "",
+  ),
+  diRistrettoEncodeOutput: DeclassEntry(
+    id: diRistrettoEncodeOutput,
+    width: dwPublicKey32,
+    anchor: "ct_taint.target_ristretto_scalarmult",
+    rationale: "ristrettoEncode's canonical wire encoding is the " &
+      "actual disclosure boundary for a RistrettoPoint a caller " &
+      "intends to publish (a Pedersen commitment, an OPRF blinded " &
+      "element) -- the same role diDerivePublicKey/" &
+      "diX25519BasePublicKey play for their own key types. NO interior " &
+      "call site inside ristretto.ristrettoEncode itself: that " &
+      "function is reused on the genuine secret DH product inside " &
+      "ristrettoScalarmult(sink RistrettoEphemeralSecret, ...), so an " &
+      "unconditional interior declassify there would violate this " &
+      "register's own boundary rule (see ristrettoEncode's own doc " &
+      "comment). Declassified instead at each genuinely-public call " &
+      "site of ristrettoEncode -- this anchor names the taint TARGET " &
+      "that does so, not a src/sello/ site, since ristrettoEncode has " &
+      "no interior branch of its own (straight-line CT plus feCMove " &
+      "selects) and therefore loses no coverage by being declassified " &
+      "after it returns.",
+    buildCondition: "",
+  ),
+  diRistrettoEqualVerdict: DeclassEntry(
+    id: diRistrettoEqualVerdict,
+    width: dwVerdictByte,
+    anchor: "ristretto.`==`",
+    rationale: "The equality verdict IS the return value a caller asked " &
+      "for by calling `==` -- withholding definedness from it would " &
+      "only hide the disclosure from this harness, not from any real " &
+      "consumer (the same argument diDerivePublicKey's own rationale " &
+      "makes for a returned public key). Declassified immediately " &
+      "before return, matching every other verdict-byte entry's " &
+      "assign-result/declassify/return idiom.",
+    buildCondition: "",
+  ),
+  diRistrettoStaticSecretImportReject: DeclassEntry(
+    id: diRistrettoStaticSecretImportReject,
+    width: dwVerdictByte,
+    anchor: "ristretto.toRistrettoStaticSecret",
+    rationale: "toRistrettoStaticSecret's scIsCanonicalCT verdict over " &
+      "CALLER-SUPPLIED import bytes (not a library-derived value) " &
+      "decides accept (Some) vs. reject (None). The verdict is a fact " &
+      "about the caller's OWN bytes, already fully in the caller's " &
+      "possession before the call -- branching on whether they were " &
+      "canonical discloses nothing the caller did not already have. " &
+      "Distinct from diX25519ZeroVerdict's class (a verdict derived " &
+      "FROM a secret computation) precisely because this verdict is " &
+      "over an IMPORT boundary, not a derived DH/scalar result.",
+    buildCondition: "",
+  ),
+  diRistrettoEphemeralZeroVerdict: DeclassEntry(
+    id: diRistrettoEphemeralZeroVerdict,
+    width: dwVerdictByte,
+    anchor: "ristretto.ristrettoScalarmult",
+    rationale: "RFC 9496 section 4.3.2's canonical-identity-encoding-is-" &
+      "all-zero check is a public verdict over this caller's own DH " &
+      "computation (an all-zero encoding means the peer point was the " &
+      "identity, or the ephemeral scalar was 0 mod L -- either way, " &
+      "public information the returned Option's some/none discriminant " &
+      "hands the caller regardless) -- the same argument " &
+      "diX25519ZeroVerdict's rationale makes for x25519's own zero-" &
+      "output check.",
+    buildCondition: "",
+  ),
+  diSha512DigestKat: DeclassEntry(
+    id: diSha512DigestKat,
+    width: dwDigest64,
+    anchor: "ct_taint.target_sha512",
+    rationale: "The harness's own KAT comparison needs the digest " &
+      "bytes defined to compare against a known-answer vector. This " &
+      "is the INVERTED class every other entry in this register is " &
+      "not: sha512's MESSAGE is what a caller taints (matching " &
+      "dudect's own sha512 target, which varies message content, not " &
+      "a secret scalar), and the DIGEST -- not a verdict derived from " &
+      "it -- is what gets declassified. NO interior call site inside " &
+      "sha512.sha512 itself: that function is reused for genuinely " &
+      "secret-derivation hashing internal to backend.derivePublic/" &
+      "signDetached (h = sha512(seed), the nonce hash), so an " &
+      "unconditional interior declassify there would silently un-taint " &
+      "those secret intermediates (see sha512.sha512's own doc " &
+      "comment). Declassified instead at the taint TARGET that treats " &
+      "the digest as intentionally inspectable test data -- this " &
+      "anchor names that target, not a src/sello/ site -- legitimate " &
+      "because sha512/compress has no interior branch of its own " &
+      "(pure ARX) and therefore loses no coverage by being " &
+      "declassified after it returns. A hash digest carries no " &
+      "secrecy obligation of its own once its (possibly secret) " &
+      "input has been fully absorbed; declassifying it here matches " &
+      "the same assign-result/declassify/return idiom the signature " &
+      "and public-key entries above use.",
     buildCondition: "",
   ),
 ]
@@ -262,60 +426,18 @@ else:
 
 {.pop.}
 
-## ## Schema proof-spike (Stage 3, DoD)
+## ## Schema proof-spike (Stage 3, slice 19) — resolved, RFC-005 slice 21
 ##
-## Written on paper, against the FROZEN `DeclassEntry` schema above,
-## before this slice closes — deliberately NOT added to the live
-## `DeclassId` enum / `declassRegister` array (that would need real
-## `declassify` call sites in `private/sha512.nim`/`ristretto.nim`, which
-## this slice does not touch; both join the taint target list in a later
-## slice, at which point these two drafts graduate into real entries).
-## Both instantiate `DeclassEntry` without any field/type change, which is
-## the proof-spike's actual verdict: the schema fits both the inverted
-## disclosure class (message tainted, DIGEST declassified — every other
-## register entry so far taints an input and declassifies a DIFFERENT,
-## smaller verdict/derived value) and an import-path REJECT arm (a
-## `false` accept/reject verdict over caller-supplied, not
-## library-derived, bytes).
-##
-##   diSha512DigestKat: DeclassEntry(
-##     id: diSha512DigestKat,
-##     width: dwDigest64,
-##     anchor: "sha512.sha512",
-##     rationale: "The harness's own KAT comparison needs the digest " &
-##       "bytes defined to compare against a known-answer vector. This " &
-##       "is the INVERTED class every other entry in this register is " &
-##       "not: sha512's MESSAGE is what a caller taints (matching " &
-##       "dudect's own sha512 target, which varies message content, not " &
-##       "a secret scalar), and the DIGEST -- not a verdict derived from " &
-##       "it -- is what gets declassified. A hash digest carries no " &
-##       "secrecy obligation of its own once its (possibly secret) " &
-##       "input has been fully absorbed; declassifying it here matches " &
-##       "the same assign-result/declassify/return idiom the signature " &
-##       "and public-key entries above use.",
-##     buildCondition: "",
-##   )
-##
-##   diRistrettoStaticSecretImportReject: DeclassEntry(
-##     id: diRistrettoStaticSecretImportReject,
-##     width: dwVerdictByte,
-##     anchor: "ristretto.toRistrettoStaticSecret",
-##     rationale: "toRistrettoStaticSecret's scIsCanonicalCT verdict " &
-##       "over CALLER-SUPPLIED import bytes (not a library-derived " &
-##       "value) decides accept (Some) vs. reject (None). The verdict " &
-##       "is a fact about the caller's OWN bytes, already fully in the " &
-##       "caller's possession before the call -- branching on whether " &
-##       "they were canonical discloses nothing the caller did not " &
-##       "already have. Distinct from diX25519ZeroVerdict's class " &
-##       "(a verdict derived FROM a secret computation) precisely " &
-##       "because this verdict is over an IMPORT boundary, not a " &
-##       "derived DH/scalar result -- both are sanctioned, for " &
-##       "different reasons, which is why each gets its own rationale " &
-##       "text rather than sharing one.",
-##     buildCondition: "",
-##   )
-##
-## Both compile as `DeclassEntry` literals under the schema exactly as
-## written above (verified by pasting each into a scratch `const` during
-## this spike) — no field needed adding, no type needed widening. The
-## schema is FROZEN as of this slice.
+## Slice 19's Stage 3 wrote `diSha512DigestKat` and
+## `diRistrettoStaticSecretImportReject` on paper against this module's
+## frozen `DeclassEntry` schema, before any real call site existed for
+## either, to prove the schema would not need to change when they landed
+## for real. Both compiled as `DeclassEntry` literals exactly as drafted
+## then (no field or type change needed) — the proof-spike's actual
+## verdict, recorded in the handoff doc's slice 19 entry. RFC-005 slice
+## 21 is where both graduated: they are now live members of `DeclassId`
+## and `declassRegister` above, with real `declassify` call sites in
+## `private/sha512.sha512` and `ristretto.toRistrettoStaticSecret`
+## respectively — see those modules' own `Cites:` doc comments. The
+## schema itself needed no further change to accommodate either landing,
+## confirming the spike's own prediction.

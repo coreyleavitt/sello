@@ -53,22 +53,31 @@
 ##   - `ckExempt(rationale)` -- no target exists for this instrument, for
 ##     a stated reason. Two rationale registers share this ONE variant
 ##     rather than getting a fourth (`pending`/`notYetWired`) shape --
-##     deliberately, per this slice's own task text ("decide the
+##     deliberately, per RFC-005 slice 20's own task text ("decide the
 ##     vocabulary so slice 21 flips them to direct without schema
 ##     change"): a rationale beginning literally with the string
-##     `"PENDING (slice 21)"` is a TEMPORARY exemption -- named in A1's
-##     own target list (`docs/rfc-005-validation-infra.md` lines
-##     115-290) but not yet wired into a live `tests/ct_taint/` target --
-##     and every other rationale is a PERMANENT, stated design boundary
-##     (e.g. "wipe timing is not a dudect concern", or the boundary rule
-##     that a secret OUTPUT's disclosure is never sanctioned). Flipping a
-##     `PENDING` cell to `ckDirect` when its target lands is a one-line
-##     diff to THIS array; the `Coverage` variant itself never changes
-##     shape. Every instrument's own coverage-check script greps for the
-##     literal `"PENDING (slice 21)"` prefix to print an honest
-##     skip-with-notation line rather than silently treating an exempt
-##     cell as satisfied (this slice's own scope (c) instruction: "never
-##     silently green").
+##     `"PENDING (slice N)"` (a module-level `const Pending`, referenced
+##     BY IDENTIFIER at every call site rather than re-typed as a
+##     literal, so a coverage-check script's grep and this array's own
+##     cells can never drift) would be a TEMPORARY exemption -- named in
+##     an instrument's own target list but not yet wired into a live
+##     target -- and every other rationale is a PERMANENT, stated design
+##     boundary (e.g. "wipe timing is not a dudect concern", or the
+##     boundary rule that a secret OUTPUT's disclosure is never
+##     sanctioned). Flipping a `PENDING` cell to `ckDirect` when its
+##     target lands is a one-line diff to THIS array; the `Coverage`
+##     variant itself never changes shape. Every instrument's own
+##     coverage-check script greps for the literal `"PENDING (slice "`
+##     prefix to print an honest skip-with-notation line rather than
+##     silently treating an exempt cell as satisfied ("never silently
+##     green"). **RFC-005 slice 21 flipped every one of the 28 taint-
+##     column `PENDING (slice 21)` cells this slice's own predecessor
+##     left behind to `ckDirect`/`ckCoveredBy`/a permanent `ckExempt`
+##     rationale (0 PENDING cells remain as of this slice) -- the `const
+##     Pending` binding itself is retired (no live reference left in this
+##     array), kept available in this doc comment's own prose as the
+##     mechanism record for a future instrument that needs the identical
+##     temporary-exemption vocabulary again.**
 ##
 ## `declassIds`: the optional cross-link (A7's own text) -- the
 ## `sello/private/taint.DeclassId`s a taint run of this entry is expected
@@ -209,10 +218,6 @@ type
     declassIds*: seq[DeclassId]
     note*: string
 
-const Pending = "PENDING (slice 21) -- named in A1's own target list " &
-  "(docs/rfc-005-validation-infra.md lines 115-290), not yet wired into " &
-  "a live tests/ct_taint/ target."
-
 const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
   stDerivePublic: SecretTargetEntry(
     id: stDerivePublic,
@@ -250,12 +255,17 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     ruleBasis: "curated",
     secretShape: "s: SecretScalar -- the signer's/keygen's secret scalar.",
     dudect: Coverage(kind: ckDirect, name: "scalar.geScalarmultBase"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stDerivePublic),
     disasm: Coverage(kind: ckDirect, name: "geScalarmultBase"),
     declassIds: @[],
     note: "The fixed-base CT scalarmult underlying both signing/keygen " &
       "AND ristretto.ristrettoScalarmultBase's two overloads (see " &
-      "stRistrettoScalarmultBase's coveredBy cell).",
+      "stRistrettoScalarmultBase's coveredBy cell). Taint-coveredBy " &
+      "stDerivePublic (RFC-005 slice 21): the \"sign\" taint target " &
+      "exercises this proc's interior code path (as the unwrapped " &
+      "SecretScalar behind backend.derivePublic's own call), with no " &
+      "call site/DeclassId of its own -- a real secret-dependent branch " &
+      "here would surface as an error inside that target.",
   ),
   stX25519Base: SecretTargetEntry(
     id: stX25519Base,
@@ -265,15 +275,21 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "secret: X25519StaticSecret | X25519EphemeralSecret " &
       "(two overloads) -- the caller's private X25519 scalar.",
     dudect: Coverage(kind: ckDirect, name: "x25519.x25519Base"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "x25519_base"),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stX25519Ladder),
-    declassIds: @[],
+    declassIds: @[diX25519BasePublicKey],
     note: "Bundles BOTH x25519Base overloads under one register row " &
       "(jsondoc/the facade-surface tooling treats them as one symbol). " &
       "Only the X25519StaticSecret arm (via toX25519StaticSecret) has " &
       "dedicated dudect coverage today -- the X25519EphemeralSecret " &
       "arm is not separately invoked by any dudect target, disclosed " &
-      "here rather than silently implied by the shared entry.",
+      "here rather than silently implied by the shared entry. Taint " &
+      "covers BOTH arms (RFC-005 slice 21): this cell names " &
+      "\"x25519_base\" (the static-role target); " &
+      "tests/ct_taint/target_x25519_ephemeral.nim exercises the " &
+      "identical diX25519BasePublicKey call site via the ephemeral " &
+      "overload, folded into stX25519EphemeralConsume's own cell below " &
+      "rather than duplicated here.",
   ),
   stX25519EphemeralConsume: SecretTargetEntry(
     id: stX25519EphemeralConsume,
@@ -283,14 +299,24 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "secret: sink X25519EphemeralSecret -- single-use " &
       "ephemeral scalar, consumed by this call.",
     dudect: Coverage(kind: ckDirect, name: "x25519(ephemeral) construct+consume"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "x25519_ephemeral_normal"),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stX25519Ladder),
-    declassIds: @[],
+    declassIds: @[diX25519BasePublicKey, diX25519ZeroVerdict],
     note: "dudect target is a construct+consume CALIBRATION check, not " &
       "a fixed-vs-random-secret leak test -- X25519EphemeralSecret has " &
       "no from-bytes constructor, so no fixed class can be built (see " &
       "ct_main.nim's own module doc). The genuine leak-value test for " &
-      "this shared ladder() is stX25519StaticDH.",
+      "this shared ladder() is stX25519StaticDH. Taint (RFC-005 slice " &
+      "21): tests/ct_taint/target_x25519_ephemeral.nim tapes the " &
+      "private field via a harness-side cast (the type has no from-" &
+      "bytes constructor), exercises x25519Base(ephemeral)'s shared " &
+      "diX25519BasePublicKey call site and this overload's own " &
+      "diX25519ZeroVerdict call site, both verdict arms (normal peer " &
+      "AND the RFC 7748 u=0 small-order peer, " &
+      "-d:x25519SmallOrderPeer) -- this cell names the identity anchor " &
+      "\"x25519_ephemeral_normal\" only; the smallorder run shares the " &
+      "same DeclassId and register entry, same convention as " &
+      "stX25519StaticDH.",
   ),
   stX25519StaticDH: SecretTargetEntry(
     id: stX25519StaticDH,
@@ -317,7 +343,7 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     ruleBasis: "curated",
     secretShape: "k: array[32, byte] -- the clamped secret scalar.",
     dudect: Coverage(kind: ckCoveredBy, coveredBy: stX25519Base),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stX25519Base),
     disasm: Coverage(kind: ckDirect, name: "ladder"),
     declassIds: @[],
     note: "Module-private RFC 7748 Montgomery ladder, not facade- " &
@@ -325,7 +351,10 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "(docs/rfc-005-validation-infra.md lines 290-352) shared by every " &
       "X25519 secret-scalar entry above (stX25519Base, " &
       "stX25519EphemeralConsume, stX25519StaticDH all disasm-cover-by " &
-      "this one root, since they all call the identical ladder()).",
+      "this one root, since they all call the identical ladder()). " &
+      "Taint-coveredBy stX25519Base (RFC-005 slice 21) for the same " &
+      "reason: every X25519 taint target above runs this exact " &
+      "function's own code path with no call site/DeclassId of its own.",
   ),
   stX25519ToBytesStatic: SecretTargetEntry(
     id: stX25519ToBytesStatic,
@@ -336,7 +365,13 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     dudect: Coverage(kind: ckExempt, rationale:
       "Straight field copy, no secret-dependent branch or index -- CT " &
       "by construction, not a dedicated dudect target."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckExempt, rationale:
+      "Plain field copy, no secret-dependent branch or index for the " &
+      "taint harness to check either (RFC-005 slice 21) -- the caller " &
+      "already owns this secret, exporting it is not a sanctioned " &
+      "PUBLICATION boundary the way diX25519BasePublicKey's own class " &
+      "is, and there is no interior branch a memcheck run could ever " &
+      "flag on this code path."),
     disasm: Coverage(kind: ckExempt, rationale:
       "Plain field copy, not a {.noinline.} secret-path root."),
     declassIds: @[],
@@ -374,15 +409,16 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "(the volatile-store loop's length is PUBLIC, not secret-" &
       "dependent) -- observable-wipe correctness is a memcheck/" &
       "property concern instead."),
-    taint: Coverage(kind: ckExempt, rationale: Pending & " A1's own " &
-      "wipe-paths note: caller-owned buffer wipes ARE the observable " &
-      "class taint can check (make-undefined-then-check-defined), but " &
-      "no tests/ct_taint/ target exercises this wipe yet."),
+    taint: Coverage(kind: ckDirect, name: "wipe_x25519"),
     disasm: Coverage(kind: ckExempt, rationale:
       "private/ct.wipe is straight-line, no secret-dependent branch; " &
       "not in the A2 {.noinline.} root list."),
     declassIds: @[],
-    note: "",
+    note: "RFC-005 slice 21: tests/ct_taint/target_wipe_x25519.nim " &
+      "runs make-undefined-then-wipe-then-check-defined on this exact " &
+      "overload's own memory (a `var` parameter -- no move/copy " &
+      "involved), the cleanest of the three X25519 wipe checks. No " &
+      "DeclassId: there is no accept/reject verdict here to register.",
   ),
   stX25519WipeShared: SecretTargetEntry(
     id: stX25519WipeShared,
@@ -392,11 +428,14 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "sh: var X25519Shared.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Same wipe-timing-is-not-a-dudect-concern rationale as stX25519WipeStatic."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stX25519WipeStatic),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "Taint-coveredBy stX25519WipeStatic (RFC-005 slice 21): " &
+      "target_wipe_x25519.nim's second block runs the identical " &
+      "make-undefined-then-wipe-then-check-defined sequence on this " &
+      "overload directly, in the same target file/register cell.",
   ),
   stX25519WipeEphemeral: SecretTargetEntry(
     id: stX25519WipeEphemeral,
@@ -406,11 +445,18 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "s: sink X25519EphemeralSecret.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Same wipe-timing-is-not-a-dudect-concern rationale as stX25519WipeStatic."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stX25519WipeStatic),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "Taint-coveredBy stX25519WipeStatic (RFC-005 slice 21): " &
+      "target_wipe_x25519.nim's third block runs this sink overload " &
+      "with a genuinely tainted input end to end -- honestly disclosed " &
+      "there as a WEAKER check than the two `var` blocks (the caller- " &
+      "side memory check is confounded by Nim's own post-move " &
+      "`wasMoved` reset, not `wipe`'s own store), still folded into " &
+      "the same register cell rather than claiming an equally clean " &
+      "isolation it does not have.",
   ),
   stToX25519StaticSecret: SecretTargetEntry(
     id: stToX25519StaticSecret,
@@ -473,12 +519,20 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "caller-supplied expectedPublic) via wire.`==`'s ordinary " &
       "vartime compare -- no CT obligation, so not a dudect target by " &
       "design, not a coverage gap."),
-    taint: Coverage(kind: ckExempt, rationale: Pending & " Named " &
-      "explicitly in A1's own target list (\"the import paths " &
-      "toRistrettoStaticSecret and keypair(seed, expectedPublic)\")."),
+    taint: Coverage(kind: ckDirect, name: "keypair_expected_public_match"),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stDerivePublic),
-    declassIds: @[],
-    note: "janus consumer finding 2's load-time gate for persisted keys.",
+    declassIds: @[diDerivePublicKey],
+    note: "janus consumer finding 2's load-time gate for persisted " &
+      "keys. Taint (RFC-005 slice 21): NO new DeclassId/call site -- " &
+      "by the time this proc's interior `kp.public == expectedPublic` " &
+      "compare runs, kp.public's bytes are ALREADY DEFINED (the " &
+      "diDerivePublicKey call site inside the keypair(seed) call this " &
+      "proc makes internally already fired), so the compare runs on " &
+      "fully-defined data regardless of match/mismatch arm -- see " &
+      "tests/ct_taint/target_keypair_expected_public.nim's own header " &
+      "comment for the full reasoning. Both arms driven " &
+      "(-d:keypairMismatch selects mismatch); this cell names the " &
+      "match arm's identity only, same convention as stX25519StaticDH.",
   ),
   stSign: SecretTargetEntry(
     id: stSign,
@@ -504,11 +558,17 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern (see stX25519WipeStatic's " &
       "identical rationale)."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "wipe_signing"),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "RFC-005 slice 21: tests/ct_taint/target_wipe_signing.nim's " &
+      "first block runs make-undefined-then-wipe-then-check-defined via " &
+      "a harness-side cast (Seed has no public raw-bytes accessor of " &
+      "its own) -- honestly disclosed there as confounded by Nim's own " &
+      "post-move `wasMoved` reset (the same disclosure " &
+      "stX25519WipeEphemeral's own note makes for the identical " &
+      "sink-parameter shape).",
   ),
   stSigningWipeKeypair: SecretTargetEntry(
     id: stSigningWipeKeypair,
@@ -518,11 +578,16 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "kp: var Keypair.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stSigningWipeSeed),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "Taint-coveredBy stSigningWipeSeed (RFC-005 slice 21): " &
+      "target_wipe_signing.nim's second block exercises this exact " &
+      "overload directly, through the PUBLIC toSeedBytes(kp) surface " &
+      "(no harness-side cast needed -- see that file's own header " &
+      "comment for why this is the cleanest of this slice's wipe " &
+      "checks), in the same target file/register cell.",
   ),
   stPublic: SecretTargetEntry(
     id: stPublic,
@@ -533,10 +598,16 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     dudect: Coverage(kind: ckExempt, rationale:
       "Returns an already-derived PUBLIC field via a plain field read, " &
       "no secret-dependent branch."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckExempt, rationale:
+      "Returns an ALREADY-DECLASSIFIED field (RFC-005 slice 21): " &
+      "kp.public was declassified once, at construction time, via the " &
+      "real diDerivePublicKey call site inside keypair(seed)'s own " &
+      "backend.derivePublic call -- nothing for a taint run to check " &
+      "here, since the bytes this accessor reads are already fully " &
+      "defined by the time any Keypair value exists to call it on."),
     disasm: Coverage(kind: ckExempt, rationale:
       "Plain field accessor, not a {.noinline.} secret-path root."),
-    declassIds: @[],
+    declassIds: @[diDerivePublicKey],
     note: "",
   ),
   stToSeedBytes: SecretTargetEntry(
@@ -551,9 +622,16 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     dudect: Coverage(kind: ckExempt, rationale:
       "Plain field read/copy, no secret-dependent branch or index -- " &
       "CT by construction."),
-    taint: Coverage(kind: ckExempt, rationale: Pending & " A genuine " &
-      "secret-disclosure boundary (exports Seed bytes) worth a " &
-      "dedicated taint target; not yet built."),
+    taint: Coverage(kind: ckExempt, rationale:
+      "Plain field copy, no secret-dependent branch or index for the " &
+      "taint harness to check (RFC-005 slice 21, decided rather than " &
+      "left pending): unlike diDerivePublicKey/diX25519BasePublicKey's " &
+      "class, this proc hands the CALLER their OWN already-possessed " &
+      "secret (the Keypair's own seed material) back for persistence " &
+      "-- it is not a publication to a third party, so there is no " &
+      "sanctioned-disclosure boundary here to register a DeclassId " &
+      "for, the same reasoning stX25519ToBytesStatic's own rationale " &
+      "states for X25519StaticSecret's raw-bytes export."),
     disasm: Coverage(kind: ckExempt, rationale:
       "Plain field copy, not a {.noinline.} secret-path root."),
     declassIds: @[],
@@ -566,11 +644,23 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     ruleBasis: "rule1",
     secretShape: "secret: RistrettoStaticSecret.",
     dudect: Coverage(kind: ckDirect, name: "ristretto.ristrettoScalarmult"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "ristretto_scalarmult"),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stGeScalarmultCT),
-    declassIds: @[],
+    declassIds: @[diRistrettoEncodeOutput, diRistrettoEqualVerdict],
     note: "Genuine fixed-vs-random-SECRET leak test (RFC-004 slice 7b) " &
-      "via scalar.geScalarmultCT.",
+      "via scalar.geScalarmultCT. Taint (RFC-005 slice 21): " &
+      "tests/ct_taint/target_ristretto_scalarmult.nim builds the secret " &
+      "via toRistrettoStaticSecretWide (mirroring ct_main.nim's own " &
+      "opRistrettoScalarmult construction -- see " &
+      "stToRistrettoStaticSecretWide's own cell), calls this proc, " &
+      "then encodes and `==`-compares the result -- neither " &
+      "ristrettoScalarmultBase nor this proc has a branch of its own to " &
+      "protect (both delegate straight into geScalarmultBase/" &
+      "geScalarmultCT), so the target itself declassifies its own " &
+      "encoded copy at diRistrettoEncodeOutput (see that id's own " &
+      "register entry for why NOT inside ristrettoEncode itself), while " &
+      "`` `==` ``'s own diRistrettoEqualVerdict call site fires for " &
+      "real, inside the library.",
   ),
   stRistrettoScalarmultEphemeral: SecretTargetEntry(
     id: stRistrettoScalarmultEphemeral,
@@ -579,15 +669,25 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     ruleBasis: "rule1",
     secretShape: "secret: sink RistrettoEphemeralSecret.",
     dudect: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "ristretto_ephemeral_normal"),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stGeScalarmultCT),
-    declassIds: @[],
-    note: "Ephemeral-covered-by-static (this register's own first-" &
-      "class-data version of the rationale ct_main.nim's module doc " &
-      "states in prose): the ephemeral role's one consuming call runs " &
-      "the identical scalar.geScalarmultCT the static entry already " &
-      "measures with full fixed-vs-random power, so a dedicated " &
-      "calibration target would add runtime without adding information.",
+    declassIds: @[diRistrettoEphemeralZeroVerdict],
+    note: "Ephemeral-covered-by-static for DUDECT (this register's own " &
+      "first-class-data version of the rationale ct_main.nim's module " &
+      "doc states in prose): the ephemeral role's one consuming call " &
+      "runs the identical scalar.geScalarmultCT the static entry " &
+      "already measures with full fixed-vs-random power, so a " &
+      "dedicated TIMING target would add runtime without adding " &
+      "information. TAINT is direct, not coveredBy (RFC-005 slice 21): " &
+      "this overload's own OR-accumulated identity-encoding zero-" &
+      "verdict (diRistrettoEphemeralZeroVerdict) is a call site the " &
+      "static-role overload never reaches, so " &
+      "tests/ct_taint/target_ristretto_ephemeral.nim gives it real, " &
+      "independent taint coverage -- harness-side cast for the " &
+      "private field (no from-bytes constructor), both verdict arms " &
+      "(the degenerate RistrettoIdentity peer AND a normal peer, " &
+      "-d:ristrettoIdentityPeer). RistrettoShared output handled by " &
+      "the boundary rule (harness-side markDefined, no DeclassId).",
   ),
   stRistrettoScalarmultBase: SecretTargetEntry(
     id: stRistrettoScalarmultBase,
@@ -597,12 +697,19 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "secret: RistrettoStaticSecret | RistrettoEphemeralSecret " &
       "(two overloads).",
     dudect: Coverage(kind: ckCoveredBy, coveredBy: stGeScalarmultBase),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
     disasm: Coverage(kind: ckCoveredBy, coveredBy: stGeScalarmultBase),
     declassIds: @[],
     note: "Bundles both overloads under one register row (same " &
       "collapsing rationale as stX25519Base) -- both delegate directly " &
-      "to scalar.geScalarmultBase with no branch of their own.",
+      "to scalar.geScalarmultBase with no branch of their own. Taint-" &
+      "coveredBy stRistrettoScalarmultStatic (RFC-005 slice 21): the " &
+      "static overload is exercised directly by " &
+      "target_ristretto_scalarmult.nim (basePt = " &
+      "ristrettoScalarmultBase(secret)); the ephemeral overload is " &
+      "exercised by target_ristretto_ephemeral.nim's own C1 = " &
+      "ristrettoScalarmultBase(secret) borrow. Neither overload has a " &
+      "branch of its own, so no separate DeclassId/call site is needed.",
   ),
   stGeScalarmultCT: SecretTargetEntry(
     id: stGeScalarmultCT,
@@ -611,12 +718,16 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     ruleBasis: "curated",
     secretShape: "s: SecretScalar.",
     dudect: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
     disasm: Coverage(kind: ckDirect, name: "geScalarmultCT"),
     declassIds: @[],
     note: "Module-private CT variable-base scalarmult, curated as an " &
       "A2 disasm root -- the only route dudect measures it through is " &
-      "ristretto.ristrettoScalarmult (static role).",
+      "ristretto.ristrettoScalarmult (static role). Taint-coveredBy " &
+      "the same entry (RFC-005 slice 21): both " &
+      "target_ristretto_scalarmult.nim and " &
+      "target_ristretto_ephemeral.nim run this exact function's own " &
+      "code path with no call site/DeclassId of its own.",
   ),
   stRistrettoEncode: SecretTargetEntry(
     id: stRistrettoEncode,
@@ -630,13 +741,24 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "secret-role type, so this entry is curated (A1's own target " &
       "list names it explicitly), not rule-1-mandated.",
     dudect: Coverage(kind: ckDirect, name: "ristretto.ristrettoEncode"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "ristretto_scalarmult"),
     disasm: Coverage(kind: ckDirect, name: "ristrettoEncode"),
-    declassIds: @[],
+    declassIds: @[diRistrettoEncodeOutput],
     note: "ristretto.ristrettoDecode gets NO register entry, " &
       "deliberately: its input is attacker-supplied wire data, public " &
       "by definition -- there is no secret class to measure (matching " &
-      "ed25519.pointDecode's own precedent).",
+      "ed25519.pointDecode's own precedent). Taint (RFC-005 slice 21): " &
+      "ristrettoEncode has DELIBERATELY NO interior declassify call " &
+      "site (see that function's own doc comment) -- it is reused on " &
+      "the genuine secret DH product inside " &
+      "ristrettoScalarmult(sink RistrettoEphemeralSecret, ...), and an " &
+      "unconditional interior declassify would violate this register's " &
+      "own boundary rule for that path. diRistrettoEncodeOutput is " &
+      "instead declassified at each genuinely-public CALL SITE: this " &
+      "cell names \"ristretto_scalarmult\" (which also exercises " &
+      "ristrettoScalarmultBase's/ristrettoScalarmult(static)'s own " &
+      "encodings); target_ristretto_from_uniform.nim exercises the " &
+      "identical id independently too.",
   ),
   stRistrettoEqual: SecretTargetEntry(
     id: stRistrettoEqual,
@@ -646,10 +768,15 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "a, b: RistrettoPoint -- same curated rationale as " &
       "stRistrettoEncode.",
     dudect: Coverage(kind: ckDirect, name: "ristretto.`==` (P,P) vs (P,Q)"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "ristretto_scalarmult"),
     disasm: Coverage(kind: ckDirect, name: "`==`"),
-    declassIds: @[],
-    note: "dudect carve-out (a VERDICT note, not a coverage gap -- the " &
+    declassIds: @[diRistrettoEqualVerdict],
+    note: "RFC-005 slice 21 taint: unlike ristrettoEncode, `` `==` `` " &
+      "HAS an interior declassify call site (no ephemeral-secret-path " &
+      "reuse conflict -- RistrettoShared has no `==` of its own), " &
+      "exercised by target_ristretto_scalarmult.nim comparing two " &
+      "computed points against themselves and each other. " &
+      "dudect carve-out (a VERDICT note, not a coverage gap -- the " &
       "dudect cell above stays `direct`): this target measurably FAILS " &
       "(worst-case |t| in the 20-40+ range), extensively investigated " &
       "and attributed to a harness resolution-floor artifact for very " &
@@ -675,13 +802,18 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "though the map itself is a total function with no accept/reject " &
       "verdict.",
     dudect: Coverage(kind: ckDirect, name: "ristretto.ristrettoFromUniformBytes"),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "ristretto_from_uniform"),
     disasm: Coverage(kind: ckExempt, rationale:
       "Total function, not in the A2 {.noinline.} root list today -- " &
       "its arithmetic runs through field/scalar primitives other roots " &
       "already cover."),
-    declassIds: @[],
-    note: "",
+    declassIds: @[diRistrettoEncodeOutput],
+    note: "RFC-005 slice 21 taint: tests/ct_taint/target_ristretto_from_uniform.nim " &
+      "taints the 64-byte input, calls this proc (a total function, no " &
+      "interior branch), then encodes and declassifies its own copy of " &
+      "the result at diRistrettoEncodeOutput (same reasoning as " &
+      "stRistrettoScalarmultStatic's own cell: no call site inside " &
+      "ristrettoEncode itself).",
   ),
   stToRistrettoStaticSecret: SecretTargetEntry(
     id: stToRistrettoStaticSecret,
@@ -696,15 +828,25 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "symex_reduce.nim's carry-bound lemma) and mutation-killed (S25, " &
       "scIsCanonicalCT verdict flip) -- a dudect target would re-time " &
       "an already-proven primitive."),
-    taint: Coverage(kind: ckExempt, rationale: Pending & " private/" &
-      "taint.nim's own Stage-3 schema proof-spike already drafted " &
-      "diRistrettoStaticSecretImportReject for exactly this proc -- " &
-      "not yet promoted to a live DeclassId/target."),
+    taint: Coverage(kind: ckDirect, name: "ristretto_import_canonical"),
     disasm: Coverage(kind: ckExempt, rationale:
       "scIsCanonicalCT is inlined into feEqualCT-style straight-line " &
       "code with no root of its own in the A2 list."),
-    declassIds: @[],
-    note: "",
+    declassIds: @[diRistrettoStaticSecretImportReject],
+    note: "RFC-005 slice 21 taint: promotes private/taint.nim's own " &
+      "Stage-3 schema proof-spike draft to a live target. Both verdict " &
+      "arms driven (-d:ristrettoImportNonCanonical selects the reject " &
+      "arm, an all-0xFF input far above the group order L) -- this " &
+      "cell names the canonical-accept arm's identity only, same " &
+      "convention as stX25519StaticDH. GENUINE DESIGN CONFIRMATION " &
+      "caught by an early draft of the target: on the accept arm, the " &
+      "returned RistrettoStaticSecret's OWN bytes correctly stay " &
+      "tainted (only the 1-byte verdict is declassified) -- an early " &
+      "target draft asserted checkDefined on the accepted secret's own " &
+      "bytes and correctly went RED, confirming this proc does not " &
+      "leak the imported scalar past its accept/reject verdict; fixed " &
+      "in the target, not the library (see " &
+      "target_ristretto_import.nim's own header comment).",
   ),
   stToRistrettoStaticSecretWide: SecretTargetEntry(
     id: stToRistrettoStaticSecretWide,
@@ -714,12 +856,15 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "bytes: array[64, byte] -- import boundary, TOTAL " &
       "(wide-reduces, no reject).",
     dudect: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoScalarmultStatic),
     disasm: Coverage(kind: ckExempt, rationale:
       "Total reduction, no accept/reject branch; not a {.noinline.} root."),
     declassIds: @[],
     note: "dudect's opRistrettoScalarmult constructs the secret via " &
-      "this proc INSIDE the measured region every sample.",
+      "this proc INSIDE the measured region every sample. Taint-" &
+      "coveredBy the same entry (RFC-005 slice 21): " &
+      "target_ristretto_scalarmult.nim's own secret construction " &
+      "mirrors that exact idiom.",
   ),
   stRistrettoWipeStatic: SecretTargetEntry(
     id: stRistrettoWipeStatic,
@@ -729,11 +874,14 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "s: var RistrettoStaticSecret.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "wipe_ristretto"),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "RFC-005 slice 21: tests/ct_taint/target_wipe_ristretto.nim's " &
+      "first block runs make-undefined-then-wipe-then-check-defined on " &
+      "this exact overload's own memory (a `var` parameter -- no move/" &
+      "copy involved), same clean register as stX25519WipeStatic.",
   ),
   stRistrettoWipeEphemeral: SecretTargetEntry(
     id: stRistrettoWipeEphemeral,
@@ -743,11 +891,15 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "s: sink RistrettoEphemeralSecret.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoWipeStatic),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "Taint-coveredBy stRistrettoWipeStatic (RFC-005 slice 21): " &
+      "target_wipe_ristretto.nim's third block runs this sink overload " &
+      "end to end, honestly disclosed there as confounded by Nim's own " &
+      "post-move `wasMoved` reset, same register as " &
+      "stX25519WipeEphemeral's own note.",
   ),
   stRistrettoWipeShared: SecretTargetEntry(
     id: stRistrettoWipeShared,
@@ -757,11 +909,14 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "sh: var RistrettoShared.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckCoveredBy, coveredBy: stRistrettoWipeStatic),
     disasm: Coverage(kind: ckExempt, rationale:
       "Not a {.noinline.} secret-path root."),
     declassIds: @[],
-    note: "",
+    note: "Taint-coveredBy stRistrettoWipeStatic (RFC-005 slice 21): " &
+      "target_wipe_ristretto.nim's second block exercises this exact " &
+      "overload directly (a `var` parameter -- no move/copy involved), " &
+      "in the same target file/register cell.",
   ),
   stRistrettoToBytesStatic: SecretTargetEntry(
     id: stRistrettoToBytesStatic,
@@ -771,7 +926,12 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
     secretShape: "s: RistrettoStaticSecret -- exports the raw scalar bytes.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Plain field copy, no secret-dependent branch or index."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckExempt, rationale:
+      "Plain field copy, no secret-dependent branch or index for the " &
+      "taint harness to check either (RFC-005 slice 21) -- same " &
+      "reasoning as stX25519ToBytesStatic's own rationale: the caller " &
+      "already owns this secret, exporting it is not a sanctioned " &
+      "publication boundary."),
     disasm: Coverage(kind: ckExempt, rationale:
       "Plain field copy, not a {.noinline.} secret-path root."),
     declassIds: @[],
@@ -803,16 +963,22 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "challenge hash all route through this proc). The RFC's own named " &
       "curated-annex example alongside ristrettoFromUniformBytes.",
     dudect: Coverage(kind: ckDirect, name: "sha512.sha512 (4-block compress)"),
-    taint: Coverage(kind: ckExempt, rationale: Pending & " private/" &
-      "taint.nim's own Stage-3 schema proof-spike already drafted " &
-      "diSha512DigestKat for exactly this proc -- not yet promoted to " &
-      "a live DeclassId/target."),
+    taint: Coverage(kind: ckDirect, name: "sha512"),
     disasm: Coverage(kind: ckDirect, name: "compress"),
-    declassIds: @[],
+    declassIds: @[diSha512DigestKat],
     note: "Not facade-exported (private/, sello is a 25519 library, not " &
       "a hash toolkit) -- curated because backend.derivePublic/" &
       "signDetached/challenge.challenge all call it on secret-derived " &
-      "input.",
+      "input. Taint (RFC-005 slice 21): promotes private/taint.nim's " &
+      "own Stage-3 schema proof-spike draft to a live target -- " &
+      "sha512/compress has DELIBERATELY NO interior declassify call " &
+      "site (see sha512.sha512's own doc comment): it is reused for " &
+      "genuinely secret-derivation hashing inside backend.derivePublic/ " &
+      "signDetached (already exercised, undeclassified at THAT " &
+      "internal level, by the \"sign\" target), so " &
+      "tests/ct_taint/target_sha512.nim declassifies its own copy of " &
+      "the digest at its own call site instead, across all three " &
+      "one-shot overloads.",
   ),
   stWipeGeneric: SecretTargetEntry(
     id: stWipeGeneric,
@@ -828,13 +994,15 @@ const secretTargetRegister*: array[SecretTargetId, SecretTargetEntry] = [
       "taint CAN check.",
     dudect: Coverage(kind: ckExempt, rationale:
       "Wipe timing is not a dudect concern."),
-    taint: Coverage(kind: ckExempt, rationale: Pending),
+    taint: Coverage(kind: ckDirect, name: "wipe_generic"),
     disasm: Coverage(kind: ckExempt, rationale:
       "Delegates to private/ct.wipe, itself not a {.noinline.} root " &
       "beyond the existing feCMove/feCSwap/cmovCached trio already " &
       "covered elsewhere."),
     declassIds: @[],
-    note: "",
+    note: "RFC-005 slice 21: tests/ct_taint/target_wipe_generic.nim -- " &
+      "the simplest wipe target in this register, a plain caller-owned " &
+      "array with no harness-side cast needed at all.",
   ),
 ]
 

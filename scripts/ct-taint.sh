@@ -35,10 +35,12 @@
 # `exerciseCount(id)` for every `DeclassId` -- every id must show at
 # least one exercise SUMMED ACROSS the whole battery (A1's own
 # "union-across-the-battery" rule), or the script fails loud naming the
-# unexercised id. This slice's register has exactly three ids, all wired
-# to a real call site this same script already exercises via
-# target_sign.nim / target_x25519_static.nim (both peer arms) -- so this
-# check is real, not a placeholder, from the first run.
+# unexercised id. Slice 19 wired the first three ids (target_sign.nim /
+# target_x25519_static.nim, both peer arms); RFC-005 slice 21 wired the
+# remaining six (x25519's base-public-key id shared by both x25519Base
+# overloads, ristretto's encode/equal/import-reject/ephemeral-zero-
+# verdict ids, and sha512's digest-KAT id) via the additional targets
+# below -- so this check is real, not a placeholder, across every id.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -89,6 +91,30 @@ ct_taint_main() {
   run_target "sign" "tests/ct_taint/target_sign.nim" "" "clean"
   run_target "x25519_static_normal" "tests/ct_taint/target_x25519_static.nim" "" "clean"
   run_target "x25519_static_smallorder" "tests/ct_taint/target_x25519_static.nim" "-d:x25519SmallOrderPeer" "clean"
+
+  # RFC-005 slice 21: the remaining targets -- one module at a time,
+  # matching CLAUDE.md's own "the mechanical ~5-module sweep" note.
+  run_target "x25519_base" "tests/ct_taint/target_x25519_base.nim" "" "clean"
+  run_target "x25519_ephemeral_normal" "tests/ct_taint/target_x25519_ephemeral.nim" "" "clean"
+  run_target "x25519_ephemeral_smallorder" "tests/ct_taint/target_x25519_ephemeral.nim" "-d:x25519SmallOrderPeer" "clean"
+  run_target "wipe_x25519" "tests/ct_taint/target_wipe_x25519.nim" "" "clean"
+
+  run_target "keypair_expected_public_match" "tests/ct_taint/target_keypair_expected_public.nim" "" "clean"
+  run_target "keypair_expected_public_mismatch" "tests/ct_taint/target_keypair_expected_public.nim" "-d:keypairMismatch" "clean"
+  run_target "wipe_signing" "tests/ct_taint/target_wipe_signing.nim" "" "clean"
+
+  run_target "ristretto_scalarmult" "tests/ct_taint/target_ristretto_scalarmult.nim" "" "clean"
+  run_target "ristretto_ephemeral_normal" "tests/ct_taint/target_ristretto_ephemeral.nim" "" "clean"
+  run_target "ristretto_ephemeral_identity" "tests/ct_taint/target_ristretto_ephemeral.nim" "-d:ristrettoIdentityPeer" "clean"
+  run_target "ristretto_from_uniform" "tests/ct_taint/target_ristretto_from_uniform.nim" "" "clean"
+  run_target "ristretto_import_canonical" "tests/ct_taint/target_ristretto_import.nim" "" "clean"
+  run_target "ristretto_import_noncanonical" "tests/ct_taint/target_ristretto_import.nim" "-d:ristrettoImportNonCanonical" "clean"
+  run_target "wipe_ristretto" "tests/ct_taint/target_wipe_ristretto.nim" "" "clean"
+
+  run_target "sha512" "tests/ct_taint/target_sha512.nim" "" "clean"
+
+  run_target "wipe_generic" "tests/ct_taint/target_wipe_generic.nim" "" "clean"
+
   run_target "planted_leak" "tests/ct_taint/target_planted_leak.nim" "" "leaky"
 
   echo "ct-taint: checking register exercise-completeness (union across the battery)..." >&2
@@ -113,7 +139,13 @@ EOF
   for id_log in \
     "diDerivePublicKey:build/ct_taint_sign.memcheck.log" \
     "diSignDetachedSignature:build/ct_taint_sign.memcheck.log" \
-    "diX25519ZeroVerdict:build/ct_taint_x25519_static_normal.memcheck.log"
+    "diX25519ZeroVerdict:build/ct_taint_x25519_static_normal.memcheck.log" \
+    "diX25519BasePublicKey:build/ct_taint_x25519_base.memcheck.log" \
+    "diRistrettoEncodeOutput:build/ct_taint_ristretto_scalarmult.memcheck.log" \
+    "diRistrettoEqualVerdict:build/ct_taint_ristretto_scalarmult.memcheck.log" \
+    "diRistrettoStaticSecretImportReject:build/ct_taint_ristretto_import_canonical.memcheck.log" \
+    "diRistrettoEphemeralZeroVerdict:build/ct_taint_ristretto_ephemeral_normal.memcheck.log" \
+    "diSha512DigestKat:build/ct_taint_sha512.memcheck.log"
   do
     local_id="${id_log%%:*}"
     local_log="${id_log#*:}"
@@ -139,7 +171,20 @@ EOF
 import re
 import sys
 
-names_run = {"sign", "x25519_static_normal", "x25519_static_smallorder"}
+names_run = {
+    "sign", "x25519_static_normal", "x25519_static_smallorder",
+    # RFC-005 slice 21 additions:
+    "x25519_base", "x25519_ephemeral_normal", "x25519_ephemeral_smallorder",
+    "wipe_x25519",
+    "keypair_expected_public_match", "keypair_expected_public_mismatch",
+    "wipe_signing",
+    "ristretto_scalarmult", "ristretto_ephemeral_normal",
+    "ristretto_ephemeral_identity", "ristretto_from_uniform",
+    "ristretto_import_canonical", "ristretto_import_noncanonical",
+    "wipe_ristretto",
+    "sha512",
+    "wipe_generic",
+}
 # ^ the identity anchors this script's own run_target calls above use --
 # "planted_leak" is deliberately excluded: it is the harness's own
 # PERMANENT negative fixture, not a secret_targets.nim register entry.

@@ -383,11 +383,24 @@ func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
 {.pop.}
 
 func x25519Base*(secret: X25519StaticSecret): X25519Public =
+  ## Cites: diX25519BasePublicKey -- the derived public u-coordinate is
+  ## declassified (RFC-005 slice 21, A1's taint CT harness) immediately
+  ## after assignment, before return: a derived X25519 public key is
+  ## public data the moment this call returns it. See
+  ## `private/taint.nim`'s own module doc for the full mechanism (a
+  ## compile-time no-op in every normal build).
+  ##
   ## Public key derivation: X25519(secret, 9). Never all-zero for a
   ## clamped scalar, so no Option.
-  toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
+  var pub = ladder(secret.bytes, toBytes(X25519BasePoint))
+  declassify(diX25519BasePublicKey, pub)
+  result = toX25519Public(pub)
 
 func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
+  ## Cites: diX25519BasePublicKey -- shares the static overload's id (see
+  ## that overload's doc comment): neither overload branches on its own
+  ## input, so one id covers both call sites.
+  ##
   ## Public key derivation for an ephemeral secret. Deliberately
   ## NON-consuming: a plain by-value `X25519EphemeralSecret` parameter is a
   ## borrow when this is not the argument's last use (the `Keypair`
@@ -397,7 +410,9 @@ func x25519Base*(secret: X25519EphemeralSecret): X25519Public =
   ## secret -- only `x25519`'s `sink` parameter (below) does that. See
   ## `x25519EphemeralPair()` below for the primary flow, which needs
   ## neither this nor `move()`.
-  toX25519Public(ladder(secret.bytes, toBytes(X25519BasePoint)))
+  var pub = ladder(secret.bytes, toBytes(X25519BasePoint))
+  declassify(diX25519BasePublicKey, pub)
+  result = toX25519Public(pub)
 
 proc x25519StaticPair*(): tuple[secret: X25519StaticSecret, public: X25519Public] {.raises: [OSError].} =
   ## Fresh static secret plus its derived public value, in one call
@@ -548,6 +563,12 @@ func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25
   ## "I assert this is safe," the same escape hatch every Nim ARC/ORC
   ## move-only type shares; it is not a sello-specific hole.
   ##
+  ## Cites: diX25519ZeroVerdict -- shares the `X25519StaticSecret`
+  ## overload's id (RFC-005 slice 21; wired for that overload since slice
+  ## 19): the identical disclosure class over the identical `if acc == 0`
+  ## shape, so one id covers both call sites. See that overload's own doc
+  ## comment for the full rationale.
+  ##
   ## `s` (the raw ladder output) is wiped via `ct.wipe` on both branches,
   ## same as the `X25519StaticSecret` overload above -- see that overload's
   ## doc comment for the `Option`-vs-`bool` rationale (round-3 finding A8)
@@ -556,6 +577,7 @@ func x25519*(secret: sink X25519EphemeralSecret; peer: X25519Public): Option[X25
   var s = ladder(secret.bytes, array[32, byte](peer))
   var acc: byte = 0
   for b in s: acc = acc or b
+  declassify(diX25519ZeroVerdict, acc)
   try:
     if acc == 0:
       result = none[X25519Shared]()

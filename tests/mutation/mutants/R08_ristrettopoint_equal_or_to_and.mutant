@@ -1,8 +1,12 @@
 id: R08
 target: src/sello/ristretto.nim
-desc: RistrettoPoint `==`: top-level bitwise combine changed from or to and, 'bool(uint8(eq1) or uint8(eq2))' -> 'bool(uint8(eq1) and uint8(eq2))' -- RFC 9496 §4.3.3's quotient equality requires EITHER cross-product check to hold (x1*y2 == y1*x2 OR y1*y2 == x1*x2); requiring BOTH rejects most genuinely-equal representative pairs of the same element. RFC-004 slice 8b's named "equality's or->and" mutant, also anchoring the bitwise-combine shape the module doc calls out as the one place a short-circuit rewrite would break the OLD-string match.
+desc: RistrettoPoint `==`: top-level bitwise combine changed from or to and, 'uint8(eq1) or uint8(eq2)' -> 'uint8(eq1) and uint8(eq2)' -- RFC 9496 §4.3.3's quotient equality requires EITHER cross-product check to hold (x1*y2 == y1*x2 OR y1*y2 == x1*x2); requiring BOTH rejects most genuinely-equal representative pairs of the same element. RFC-004 slice 8b's named "equality's or->and" mutant, also anchoring the bitwise-combine shape the module doc calls out as the one place a short-circuit rewrite would break the OLD-string match. RFC-005 slice 21 re-sync: the combine now assigns into a named `verdict` local (declassified for the taint CT harness) before the boolean conversion, so the mutant targets the `or`/`and` operator inside that assignment rather than the old direct-return expression.
 ====OLD====
-  bool(uint8(eq1) or uint8(eq2))
+  var verdict = uint8(eq1) or uint8(eq2)
+  declassify(diRistrettoEqualVerdict, verdict)
+  bool(verdict)
 ====NEW====
-  bool(uint8(eq1) and uint8(eq2))
+  var verdict = uint8(eq1) and uint8(eq2)
+  declassify(diRistrettoEqualVerdict, verdict)
+  bool(verdict)
 ====END====

@@ -116,6 +116,7 @@ import sello/field
 import sello/scalar
 import sello/private/ct
 import sello/private/secret_hooks
+import sello/private/taint
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy.
@@ -220,6 +221,12 @@ func ristrettoUnchecked*(p: GeP3): RistrettoPoint {.inline.} =
   RistrettoPoint(p: p)
 
 func `==`*(a, b: RistrettoPoint): bool =
+  ## Cites: diRistrettoEqualVerdict -- the CT verdict byte is declassified
+  ## (RFC-005 slice 21, A1's taint CT harness) immediately before return:
+  ## the boolean this function hands back IS the disclosure the caller
+  ## asked for by calling it. See `private/taint.nim`'s own module doc
+  ## for the full mechanism (a compile-time no-op in every normal build).
+  ##
   ## RFC 9496 §4.3.3 quotient equality: two internal representations name
   ## the same ristretto255 element iff
   ## `CT_EQ(x1*y2, y1*x2) | CT_EQ(y1*y2, x1*x2)`.
@@ -249,7 +256,9 @@ func `==`*(a, b: RistrettoPoint): bool =
   feMul(x1x2, a.p.x, b.p.x)
   let eq1 = feEqualCT(x1y2, y1x2)
   let eq2 = feEqualCT(y1y2, x1x2)
-  bool(uint8(eq1) or uint8(eq2))
+  var verdict = uint8(eq1) or uint8(eq2)
+  declassify(diRistrettoEqualVerdict, verdict)
+  bool(verdict)
 
 # ---------------------------------------------------------------------------
 # RistrettoEncoded -- the 32-byte canonical wire form
@@ -433,6 +442,35 @@ func ristrettoDecode*(e: RistrettoEncoded): Option[RistrettoPoint] =
 # ---------------------------------------------------------------------------
 
 func ristrettoEncode*(pt: RistrettoPoint): RistrettoEncoded =
+  ## **Taint posture (RFC-005 slice 21, A1's taint CT harness) --
+  ## deliberately NO interior `declassify` call, unlike
+  ## `backend.derivePublic`/`x25519.x25519Base`'s assign-result/
+  ## declassify/return idiom.** This function is branch-free CT
+  ## throughout (see below: every conditional step is a `feCMove` select,
+  ## never an `if`), so it produces zero memcheck errors regardless of
+  ## whether `pt`'s coordinates are tainted -- there is no interior
+  ## branch an internal declassify would need to protect. More
+  ## importantly, an unconditional declassify HERE would be actively
+  ## WRONG: this exact function is reused by
+  ## `ristrettoScalarmult(sink RistrettoEphemeralSecret, ...)` on the
+  ## genuine secret DH product `S = k*P` (see this function's own
+  ## "Wipe discipline" paragraph below) -- declassifying its encoded
+  ## bytes at THIS shared boundary would violate `private/taint.nim`'s
+  ## own boundary rule ("a secret OUTPUT's disclosure is never a
+  ## sanctioned DeclassId") for every caller of that overload, silently
+  ## widening the disclosure past this one secret-DH call site with no
+  ## way to scope it back. `diRistrettoEncodeOutput` therefore has NO
+  ## call site inside this module at all -- every genuinely-public use of
+  ## this function's output (application code publishing a Pedersen
+  ## commitment or OPRF element, and this slice's own
+  ## `tests/ct_taint/target_ristretto_scalarmult.nim` target) declassifies
+  ## its OWN copy of the result, at ITS OWN call site, the same way real
+  ## application code (which never runs under `-d:selloTaint` at all)
+  ## would never need to. The ephemeral secret-DH call site below
+  ## declassifies only the derived OR-accumulated zero-verdict byte
+  ## (`diRistrettoEphemeralZeroVerdict`), never these encoded bytes
+  ## themselves -- see that overload's own doc comment.
+  ##
   ## RFC 9496 §4.3.2 Encode: the torsion-quotienting direction, taking one
   ## internal extended-coordinate representative (x0, y0, z0, t0) of `pt`'s
   ## group element to its unique canonical 32-byte encoding. CT throughout,
@@ -720,6 +758,15 @@ type
 secretHooks(RistrettoStaticSecret, bytes)
 
 func toRistrettoStaticSecret*(bytes: array[32, byte]): Option[RistrettoStaticSecret] =
+  ## Cites: diRistrettoStaticSecretImportReject -- the scIsCanonicalCT
+  ## accept/reject verdict over these CALLER-SUPPLIED import bytes is
+  ## declassified (RFC-005 slice 21, A1's taint CT harness) immediately
+  ## before the branch that reads it: the verdict is a fact about the
+  ## caller's own already-possessed bytes, an IMPORT boundary rather than
+  ## a derived-computation verdict. See `private/taint.nim`'s own module
+  ## doc for the full mechanism (a compile-time no-op in every normal
+  ## build).
+  ##
   ## Key IMPORT (dalek's `from_canonical_bytes` register): REJECTS a
   ## non-canonical scalar (`>= L`) via `scalar.scIsCanonicalCT` (finding 2
   ## -- this used to call the vartime `scIsCanonical`, whose early-exit
@@ -742,7 +789,9 @@ func toRistrettoStaticSecret*(bytes: array[32, byte]): Option[RistrettoStaticSec
   ## runs, so the wipe cannot affect the returned value.
   var scratch = bytes
   try:
-    if scIsCanonicalCT(scratch):
+    var verdict = uint8(scIsCanonicalCT(scratch))
+    declassify(diRistrettoStaticSecretImportReject, verdict)
+    if verdict != 0'u8:
       result = some(RistrettoStaticSecret(bytes: scratch))
     else:
       result = none(RistrettoStaticSecret)
@@ -1158,6 +1207,22 @@ proc wipe*(sh: var RistrettoShared) =
   ct.wipe(sh.bytes)
 
 func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoint): Option[RistrettoShared] =
+  ## Cites: diRistrettoEphemeralZeroVerdict -- the OR-accumulated
+  ## all-zero identity-encoding verdict byte (`acc`, below) is
+  ## declassified (RFC-005 slice 21, A1's taint CT harness) immediately
+  ## before the branch that reads it: the identity-or-not fact is
+  ## exactly what this function's own returned `Option` discriminant
+  ## hands the caller regardless, so branching on it openly costs no
+  ## additional secrecy -- the same argument `x25519.x25519`'s
+  ## `diX25519ZeroVerdict` entry makes for its own zero-output check.
+  ## Deliberately NOT `diRistrettoEncodeOutput`: `encoded`'s individual
+  ## bytes beyond this one OR-accumulated verdict byte remain properly
+  ## tainted/undefined all the way to this proc's own return, per the
+  ## boundary rule (`RistrettoShared` is a secret OUTPUT, never a
+  ## sanctioned disclosure) -- see `ristrettoEncode`'s own doc comment
+  ## for the full reasoning on why THAT function has no interior
+  ## declassify at all.
+  ##
   ## CT variable-base scalar multiplication that CONSUMES the ephemeral
   ## secret (RFC-004 slice 7a) -- the ONE consuming call in the
   ## ElGamal/ECIES-style flow `RistrettoEphemeralSecret`'s own doc comment
@@ -1252,6 +1317,7 @@ func ristrettoScalarmult*(secret: sink RistrettoEphemeralSecret; p: RistrettoPoi
     encoded = toBytes(reTmp)
     var acc: byte = 0
     for b in encoded: acc = acc or b
+    declassify(diRistrettoEphemeralZeroVerdict, acc)
     if acc == 0:
       result = none(RistrettoShared)
     else:
