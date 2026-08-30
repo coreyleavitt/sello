@@ -906,8 +906,8 @@ Phase 3 — CT instruments (19→20→21→22→23 chain):
 
 Phase 4 — nightly, timing, release:
 - [x] 24. Nightly fuzz continuity A5 -- DONE 2026-08-25, taken out of order (slices 10/14/15/17/19-23/25 blocked on the Corey-owned ghcr write:packages credential; slice 27 is Corey-physical; this slice needed only the base image + already-public proptest). Code `416f3b7` (corpus persistence in tests/fuzz/, scripts/nightly-fuzz.sh, .github/workflows/nightly.yml, CLAUDE.md), staleness-canary bug fix `ca5fbfe` (hour-truncation bug caught during the slice's own red-path demo). See the full slice entry below for the corpus-carry design, cache-key isolation, the staleness-canary bug, and all six nightly-workflow run ids.
-- [ ] 25. Nightly s390x A4
-- [x] 26. Nightly canaries + notifications (A6, A9, pinned-issue wiring) -- DONE 2026-08-25 except A9 (BLOCKED, same ghcr credential as slice 25/10/14/15/17/19-23). See the full slice entry above for the timeout-vs-cancel correction, the gawk finding, and all run ids/issue URLs.
+- [x] 25. Nightly s390x A4 -- DONE 2026-08-30 (landed together with A9 in this session). Two commits `09605da` (s390x)/`55aeb41` (memcheck/A9) on branch `rfc-005-slice25`, fast-forwarded to main. See the full slice entry above ("RFC-005 slice 25 (s390x, A4) + A9 (untainted memcheck) -- full record") for the cross-toolchain mechanism, the --run-with wrapper hook, the endian-canary design, the measured property-suite-prohibitive finding, and all real-CI run/job ids (merge-gate 33316197723 27/27; nightly red-demo dispatch 33316382471; nightly clean dispatch 33316911555).
+- [x] 26. Nightly canaries + notifications (A6, A9, pinned-issue wiring) -- DONE 2026-08-25 (A6, notification wiring); A9 (untainted memcheck) landed separately in slice 25's own session, 2026-08-30 -- see that slice's full entry above. See the full slice entry above for the timeout-vs-cancel correction, the gawk finding, and all run ids/issue URLs.
 - [ ] 27. Timing tier provisioning (**Corey-owned, physical** — will pause loop)
 - [ ] 28. Timing tier runner + workflow
 - [ ] 29. First quiet-box battery + carve-out re-adjudication
@@ -5527,6 +5527,208 @@ sentence already reads twenty-seven; the "Disasm gate (A2)" paragraph's
 "Honest scope note" needs rewriting now that every stage is real; append
 this handoff's own closing summary).
 
+## RFC-005 slice 25 (s390x, A4) + A9 (untainted memcheck) -- full record
+
+2026-08-30, DONE end-to-end, two commits on branch `rfc-005-slice25`
+(`09605da` s390x, `55aeb41` memcheck/A9), fast-forwarded to `main`. No
+genuine core-arithmetic bug surfaced on either target -- the escalation
+rule was not triggered.
+
+**s390x mechanism.** `scripts/test.sh --cpu s390x` threads
+`--cpu:s390x --os:linux --gcc.exe:s390x-suse-linux-gcc
+--gcc.linkerexe:s390x-suse-linux-gcc` (the exact cross-gcc binary name,
+found via `ls /usr/bin | grep s390x` inside `sello-dev`: the package
+also installs `s390x-suse-linux-{as,ld,ar,objdump,...}`, all prefixed
+identically). No `-static` linking: `cross-s390x-gcc16` transitively
+pulls in `cross-s390x-glibc-devel` (confirmed via `rpm -qa | grep
+s390x` inside `sello-dev`: `cross-s390x-binutils`,
+`cross-s390x-linux-glibc-devel`, `cross-s390x-glibc-devel`,
+`cross-s390x-gcc16`), which installs a REAL sysroot at
+`/usr/s390x-suse-linux/sys-root` (glibc, `ld64.so.1`, headers -- `gcc
+-print-sysroot` resolves to exactly this path by default, no
+`--sysroot` flag needed). Running the compiled binary needs
+`qemu-s390x -L /usr/s390x-suse-linux/sys-root` -- reproduced the exact
+failure mode without `-L` first (`qemu-s390x: Could not open
+'/lib/ld64.so.1': No such file or directory`), then closed it.
+`scripts/test.sh` gained a `run_with` bash variable (empty for every
+other `--cpu` value/no `--cpu`) that, when set, skips Nim's own `-r`
+(exec-on-this-host, impossible for a cross target) in favor of an
+explicit `-o:build/<basename>` compile followed by a SEPARATE
+`$run_with build/<basename>` execution line in the per-file loop's
+own generated `cmd` string -- the "--run-with wrapper hook" the task
+brief asked for. `scripts/lib/endian-canary.sh` (a new sibling of
+`scripts/lib/cpu-canary.sh`, not an extension -- it cannot exec its
+own probe with a bare `-r` either) runs once before the per-file loop,
+mirroring `cpu-canary.sh`'s own pre-loop role for `--cpu i386`: it
+copies a known `uint32` (`0x01020304`) into a byte array and asserts
+the bytes read back `[01 02 03 04]` (not `[04 03 02 01]`) -- a REAL
+in-memory proof, not merely Nim's own compile-time `cpuEndian` constant
+(which would tautologically read `bigEndian` under `--cpu:s390x`
+regardless of whether the binary genuinely executed that way) -- plus
+`sizeof(pointer) == 8` and the same `--listCmd`-grep compiler-identity
+technique every other canary in this codebase uses.
+
+**Property-suite scope, measured for real.** A local podman run of
+`test_properties_field.nim` (the lightest of the six property files)
+cross-compiled for s390x and executed under `qemu-s390x` was left
+running and had NOT completed after 9m30s of real CPU time (`ps aux`
+showing `qemu-s390x ... build/test_properties_field` at `99.8%` CPU,
+`Rl` state, climbing past 9:00 elapsed); the process was killed at that
+point since the evidence was already conclusive (compare: the ENTIRE
+14-file unit/KAT suite's own measured total was ~82s compile+run,
+summed, under the identical cross-compile+qemu setup, run to completion
+cleanly). This invokes the RFC's own pre-authorized fallback: unit +
+KAT suite only, no property sibling -- realized with NO special-casing
+in `scripts/test.sh` itself, since the `s390x` nightly job simply never
+fetches proptest, and `scripts/lib/unit-test-files.sh`'s own existing
+dynamic `_deps/proptest` detection (already used by every other
+unit-only leg: asan-ubsan, i386, arm64-macOS, Windows) does the rest.
+
+**Local verification before pushing** (per the branch-model's own
+"validate before pushing" convention): the alt-root podman store
+(`--root /home/corey/.podman-push --runroot
+/run/user/1000/podman-push`, `ghcr.io/coreyleavitt/sello-dev:latest`
+already loaded matching the live digest `sha256:acf5b11b...`), `-v`
+bind mounts this time (unlike some earlier slices' `/home`-mode-555
+mount trap -- not hit this session). A real end-to-end
+`scripts/test.sh --cpu s390x` run (not just the ad hoc measurement
+loop) compiled and ran all 14 unit/KAT files clean under qemu-s390x,
+including the endian canary at the top of the run; a plain
+`scripts/test.sh` (no flags) and `scripts/test.sh --cpu i386` were
+also re-run to confirm no regression from the shared `test.sh` edits.
+
+**Endianness-canary red-path, both locally and on real CI.** Locally:
+`scripts/lib/endian-canary.sh gcc "" nim c` (native compiler, no
+wrapper) reproduced a real `AssertionDefect`:
+`` `cpuEndian == bigEndian` endian canary: expected cpuEndian ==
+bigEndian, got littleEndian ``. On real hosted CI: scratch branch
+`rfc-005-slice25-red-demo` (deleted after, 404-confirmed both locally
+and on origin) added a temporary `endian-canary-red-demo` job to
+`nightly.yml` running that exact command; dispatched via `gh workflow
+run nightly.yml --ref rfc-005-slice25-red-demo -f seconds_per_target=5
+-f property_crank=1` -- run `33316382471`, job
+`endian-canary-red-demo` id `99270495227`, conclusion `failure`, log
+confirming the byte-identical `AssertionDefect`
+(`got littleEndian`).
+
+**Memcheck build-flag investigation (`-d:useMalloc`), two isolated
+scratch probes, both run locally inside `sello-dev` before writing
+`scripts/memcheck.sh`'s own header comment claims:**
+- Probe 1 (deliberate uninitialized STACK read: `{.noinit.}` local,
+  array[4, byte], summed): caught by `valgrind --tool=memcheck
+  --error-exitcode=99 --track-origins=yes --leak-check=no` IDENTICALLY
+  with and without `-d:useMalloc` (`rc=99`, 8 errors from 5 contexts,
+  both times) -- memcheck's stack-shadow tracking needs no help from
+  the allocator flag.
+- Probe 2 (deliberate uninitialized HEAP read: `cast[ptr
+  UncheckedArray[byte]](alloc(4))`, read without ever initializing,
+  `dealloc`'d after): WITHOUT `-d:useMalloc`, memcheck reported `rc=0`,
+  `ERROR SUMMARY: 0 errors` -- completely missed, confirming ORC's own
+  arena allocator is genuinely invisible to Valgrind's malloc
+  interception. WITH `-d:useMalloc`: `rc=99`, `ERROR SUMMARY: 8 errors
+  from 5 contexts` -- correctly caught.
+- (An earlier attempt at probe 1 miscounted `$?` after piping through
+  `tail` -- `$?` reflects the pipeline's LAST command, not `valgrind`
+  -- corrected by redirecting to a log file and checking `$?`
+  immediately after the `valgrind` invocation, matching
+  `scripts/memcheck.sh`'s own real per-file loop shape.)
+
+Leak-check policy decided: `--leak-check=no` (leak detection is not
+this job's target; ORC's own long-lived pool would false-positive a
+naive leak scan the same way it would under LeakSanitizer).
+`--track-origins=yes` kept ON (unlike `scripts/ct-taint.sh`'s small
+hand-picked targets) since this job runs the FULL unit suite, where an
+origin trace is the difference between actionable and unusable.
+
+**Memcheck measured wall clock.** Local (podman, alt-root store, shared
+non-dedicated host): full 14-file unit suite, `real 5m33.790s`
+(`time podman run ...`), `memcheck: ALL CLEAN -- every unit test binary
+ran with zero memcheck errors`, every file individually logged `OK ...
+clean (0 memcheck errors)`. Real hosted CI (clean dispatch, no red-demo
+fixture, `gh workflow run nightly.yml --ref rfc-005-slice25 -f
+allow_cold_start=true`, run `33316911555`): job `memcheck` id
+`99271931310`, started `14:27:28Z`, completed `14:32:45Z` = **5m17s**,
+conclusion `success` -- matches the local measurement closely (hosted
+runner was, if anything, slightly faster than this session's shared
+local host). `timeout-minutes: 30` budgets comfortably above both.
+
+**Memcheck red-path, real CI, same dispatch as the endian-canary
+demo.** Scratch branch `rfc-005-slice25-red-demo` added
+`tests/unit/test_zzz_memcheck_red_demo.nim` (the exact heap-read probe
+from the build-flag investigation above) wired ONLY into
+`scripts/memcheck.sh`'s own local `unit_test_files` array (a single
+appended line inside `memcheck_main()`, `unit_test_files+=(...)` --
+deliberately NOT added to the shared `scripts/lib/unit-test-files.sh`,
+so `unit-linux-amd64-gcc` and every other consumer of that array were
+untouched). Run `33316382471`, job `memcheck` id `99270495183`,
+conclusion `failure`; log confirms all 14 REAL unit files logged `OK
+... clean (0 memcheck errors)` (including the CAVP-heavy
+`test_sha512.nim`, ~2m16s of that job's own ~4m50s wall clock under the
+red-demo dispatch's smaller/degraded runner), and the planted fixture
+alone produced the real error: `memcheck: FAIL -- ...` followed by
+`==1636== Conditional jump or move depends on uninitialised value(s)`
+(four occurrences) plus `==1636== Syscall param write(buf) points to
+uninitialised byte(s)`, all with `Uninitialised value was created by a
+heap allocation`, `ERROR SUMMARY: 8 errors from 5 contexts`. Reverted
+by deleting the scratch branch (see below) -- `main` never saw this
+fixture.
+
+**s390x real green, both dispatches.** The scratch-branch dispatch
+above (run `33316382471`) also exercised the REAL `s390x` job (no red
+fixture touches it): job id `99270495171`, conclusion `success`, 1m42s.
+A second, CLEAN dispatch on the real `rfc-005-slice25` branch itself
+(`gh workflow run nightly.yml --ref rfc-005-slice25 -f
+allow_cold_start=true`, run `33316911555`) re-confirmed it with no
+scratch fixtures present: job id `99271931270`, started `14:27:29Z`,
+completed `14:29:23Z` = **1m54s**, conclusion `success`. (`-f
+allow_cold_start=true` was passed on both real dispatches purely to
+keep the unrelated `fuzz` job's corpus-staleness canary from tripping
+on a branch/cache combination with no prior `.last-success` marker --
+that canary and its cold-start opt-in are RFC-005 slice 24's own
+mechanism, untouched by this slice; the `fuzz` job's own campaign
+itself ran clean with no crashes on both dispatches, confirming the
+staleness trip on the FIRST scratch-branch dispatch, before
+`allow_cold_start` was passed, was the expected/documented behavior,
+not a regression from this slice's changes.)
+
+**Notification wiring, unmodified but exercised.** Both `s390x` and
+`memcheck` were added to `notify`'s `needs:`/`if:` list in the SAME
+commits that added the jobs (no separate wiring commit needed -- the
+failure-summary step's Jobs-API query is already generic over
+`.jobs[]`). The scratch-branch dispatch's own `notify-on-failure` job
+(id `99271167124`) ran and succeeded (opened/updated the pinned
+`nightly-failure` issue) in response to the real `memcheck`/`fuzz`/
+`endian-canary-red-demo` failures on that run -- confirming the
+existing slice-26 notification mechanism picks up these two new jobs
+with zero additional code, exactly as designed.
+
+**Merge-gate green, real CI, full 27-check battery.** Run `33316197723`
+on `rfc-005-slice25` (both commits' final SHA): `conclusion: success`,
+all 27 required checks green, including `validation-map` (the two new
+README rows: `s390x-nightly`, `memcheck-nightly`), `gates-manifest-sync`,
+`policy-lint` (nightly.yml's new jobs: SHA-pinned `uses:`, no
+`continue-on-error`, `container:` digest matching
+`scripts/lib/image-pins.txt`). No new required checks -- nightly jobs
+are deliberately not in `scripts/lib/gates.txt`.
+
+**Fast-forward + cleanup.** `git push origin rfc-005-slice25:main`
+(fast-forward, both commits' checks already green against that exact
+SHA); `rfc-005-slice25` and `rfc-005-slice25-red-demo` both deleted,
+both locally and on `origin` (404-confirmed via `gh api
+repos/.../branches/<name>`).
+
+**Slice 30's inherited state.** The RFC's own enumerated nightly
+release-qualification subset -- fuzz, s390x, memcheck, cranked
+properties -- now has all FOUR producers landed (fuzz: slice 24;
+cranked-properties + notification wiring: slice 26; s390x + memcheck:
+this slice) so the slice-30 deferral recorded in the control-loop note
+below (blocked on exactly these two producers not existing) is
+resolved: slice 30 is UNBLOCKED as of this session, transitively (no
+credential or physical-hardware dependency remains for the
+qualification subset itself -- slice 30 may still choose to key its
+own freshness story off the timing tier per its own DoD, a separate
+question this slice does not resolve).
+
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
 - Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26, 31 (17/32). All records
   above. Slice 31's own full record (the validation-map table design, the
@@ -5680,3 +5882,37 @@ this handoff's own closing summary).
   amendment rather than a separate numbered slice, matching this
   project's own "fix-slice" naming convention).
 - Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). Slice 22's grind-state hold is CLEARED -- resume RFC order at slice 23 with no open decision to surface.
+- Slice 23's canary branch (`rfc-005-slice23-canary`) was landed by the
+  control loop after a rebase onto slice 23's own fast-forward to
+  `main`: commit `7de6ef4` ("RFC-005 slice 23 stage 4 fix: --canary
+  mode wrote $out before reading $prev, defeating the comparison"),
+  real-CI merge-gate run `33314039729`, 27/27 required checks green.
+  This is the commit `rfc-005-slice25` branched from.
+- Slice 25 (s390x, A4) + slice 26's own A9 sub-item (untainted
+  memcheck) are BOTH DONE as of 2026-08-30 (this session) -- see the
+  full slice entry ("RFC-005 slice 25 (s390x, A4) + A9 (untainted
+  memcheck) -- full record") above for the complete design, every
+  local-verification transcript, and every real-CI run/job id (merge
+  -gate `33316197723` 27/27; red-demo dispatch `33316382471` --
+  `endian-canary-red-demo` job `99270495227` FAIL as required, `memcheck`
+  job `99270495183` FAIL as required on the planted fixture only, real
+  `s390x` job `99270495171` PASS; clean dispatch `33316911555` --
+  `s390x` job `99271931270` PASS in 1m54s, `memcheck` job `99271931310`
+  PASS in 5m17s). Fast-forwarded to `main`; both `rfc-005-slice25` and
+  the scratch `rfc-005-slice25-red-demo` branch deleted (404-confirmed).
+  No genuine core-arithmetic or byte-order bug surfaced on either
+  target. The RFC's own enumerated nightly release-qualification subset
+  (fuzz, s390x, memcheck, cranked properties) now has all four
+  producers landed -- slice 30's own deferral (recorded above, dated
+  2026-08-25) is resolved: its blocking condition ("two of the four
+  producers don't exist yet") no longer holds.
+- Remaining launch order, unchanged by this session except for the two
+  items above moving to DONE: 22/23 (already landed to `main` per the
+  gates.txt/merge-gate.yml state this session observed directly -- 27
+  required checks, including `disasm-gate-{gcc,clang}` and
+  `taint-ct-linux-amd64-{gcc,clang}` -- though their own checklist
+  entries above were not re-verified/flipped to `[x]` this session,
+  since this session's own mandate was slices 25/A9 specifically; a
+  future session should confirm and flip those two checkboxes rather
+  than re-do the work), then 30 (now unblocked, per the note above),
+  then 32. Slices 27-29 stay Corey-physical.

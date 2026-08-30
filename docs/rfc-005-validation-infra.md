@@ -1207,6 +1207,23 @@ every leg: identity canary + demonstrated red):**
   unit suite + KATs are the non-negotiable core, property fallback
   pre-authorized. Nightly jobs run parallel and individually measured
   against the 6-hour limit, timeout distinguished from failure.
+  **MEASURED (RFC-005 slice 25, 2026-08-30):** the property fallback was
+  genuinely needed, not merely pre-authorized-and-unused -- a single
+  property suite file run under `qemu-s390x` had not completed after
+  9m30s of real CPU time (killed at that point), versus ~82s for the
+  ENTIRE 14-file unit/KAT suite under the identical cross-compile+qemu
+  setup. The `s390x` nightly job (unit+KAT scope only) completed in
+  1m54s on real hosted CI (run `33316911555`, job id `99271931270`),
+  comfortably inside its `timeout-minutes: 20` budget and nowhere near
+  the 6-hour hosted-job limit. See the handoff doc's slice 25 entry for
+  the full record.
+- **Valgrind memcheck wall-clock (A9):** the RFC's own "~20-50x
+  slowdown is nightly-shaped" estimate, re-measured for real rather than
+  assumed (RFC-005 slice 25/A9, 2026-08-30) -- the full 14-file unit
+  suite under `valgrind --tool=memcheck` ran clean (0 errors on every
+  binary) in 5m34s locally and 5m17s on real hosted CI (run
+  `33316911555`, job id `99271931310`), well inside the `memcheck`
+  job's own `timeout-minutes: 30` budget.
 - **Hosted-runner variance:** none of the merge gate is timing-sensitive
   by design; dudect authority lives on the 3500U only. bmc's Z3-hang
   failure mode is the exception and carries its own timeout/triage
