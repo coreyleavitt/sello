@@ -23,21 +23,21 @@ name: nightly
 # it landed ahead of slice 25 and ahead of its own A9 sub-item, exactly as
 # slice 24's own header predicted ("slice 26 is partially blocked... A6
 # canary + notifications doable" -- see the handoff doc's slice-24
-# control-loop note). Slice 25 (s390x, A4) LANDED in this later session
-# (see the handoff doc's slice 25 entry): by then the ghcr
-# `write:packages` credential that had blocked slices 10/14/15/17/19-23
-# was already resolved (slice 10's own handoff entry), and `sello-dev`'s
-# Containerfile already carried `cross-s390x-gcc16`/`qemu-linux-user`
-# (s390x's own cross-compile+emulation toolchain) from RFC-005 slice 7's
-# own "Image consolidation" pre-authoring -- the package was live in the
-# published image by the time this slice started, so no Containerfile or
-# image-pin change was needed to land the job, only the `s390x` job
-# definition below plus its own new script (`scripts/test.sh --cpu
-# s390x`). The A9 untainted-memcheck job (also nominally slice 26's own
-# scope, per the RFC's slice list) landed in the immediately-following
-# commit, same session, same reasoning (`valgrind` was likewise already
-# live in the published image) -- see that commit and the handoff doc's
-# slice 25 entry.
+# control-loop note). Slice 25 (s390x, A4) and the A9 untainted-memcheck
+# job (also nominally slice 26's own scope, per the RFC's slice list)
+# both LANDED in this later session (see the handoff doc's slice 25
+# entry), in two separate commits (s390x, then memcheck): by then the
+# ghcr `write:packages` credential that had blocked slices
+# 10/14/15/17/19-23 was already resolved (slice 10's own handoff entry),
+# and `sello-dev`'s Containerfile already carried `cross-s390x-gcc16`/
+# `qemu-linux-user` (s390x's own cross-compile+emulation toolchain) and
+# `valgrind` (memcheck's own tool, originally added for slice 19's taint
+# CT harness) from RFC-005 slice 7's own "Image consolidation"
+# pre-authoring -- both packages were live in the published image by the
+# time this slice started, so no Containerfile or image-pin change was
+# needed to land either job, only the two `s390x`/`memcheck` job
+# definitions below plus their own new scripts (`scripts/test.sh --cpu
+# s390x`, `scripts/memcheck.sh`).
 #
 # Trigger: `schedule` (cron, quiet UTC hour -- see below) + manual
 # `workflow_dispatch`. The first three inputs (slice 24) exist so that
@@ -482,13 +482,14 @@ jobs:
     # (`.jobs[]`, not a hardcoded per-job list), so no further change was
     # needed there for these two jobs' own conclusions to show up in the
     # table and the timeout-vs-cancel split.
-    needs: [fuzz, cranked-properties, timeout-demo, s390x]
+    needs: [fuzz, cranked-properties, timeout-demo, s390x, memcheck]
     if: >-
       always() &&
       (needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled' ||
        needs.cranked-properties.result == 'failure' || needs.cranked-properties.result == 'cancelled' ||
        needs.timeout-demo.result == 'failure' || needs.timeout-demo.result == 'cancelled' ||
-       needs.s390x.result == 'failure' || needs.s390x.result == 'cancelled')
+       needs.s390x.result == 'failure' || needs.s390x.result == 'cancelled' ||
+       needs.memcheck.result == 'failure' || needs.memcheck.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -613,3 +614,36 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cpu s390x
+
+  # RFC-005 slice 26's own A9 sub-item (untainted nightly memcheck),
+  # landed in the commit immediately following slice 25, same session:
+  # plain, UNTAINTED Valgrind memcheck (`scripts/memcheck.sh`) over the
+  # ordinary unit suite -- uninitialized reads and invalid accesses, the
+  # class ASan cannot see and the class MSan was declined over
+  # (CLAUDE.md's own A9 paragraph; TSan stays a recorded non-goal, same
+  # rationale). Unit suite only, same "no property sibling" register as
+  # the `s390x` job above and every other unit-only leg in this
+  # project's matrix -- see scripts/memcheck.sh's own header comment for
+  # the full build-flag (`-d:useMalloc`, empirically justified with two
+  # isolated scratch probes this slice) and leak-check-policy
+  # (`--leak-check=no`, also recorded there) decisions. `valgrind` was
+  # already present in the published `sello-dev` image from slice 7's
+  # pre-authored package set (originally added for slice 19's taint CT
+  # harness), so no Containerfile/image-pin change was needed here
+  # either.
+  #
+  # timeout-minutes: measured real wall clock for the full 14-file unit
+  # suite under `valgrind --tool=memcheck` is recorded in
+  # docs/rfc-005-validation-infra.handoff.md's slice 25 entry (the RFC's
+  # own "~20-50x slowdown is nightly-shaped" estimate, re-measured for
+  # real rather than assumed) -- this value budgets comfortably above
+  # that measurement.
+  memcheck:
+    name: memcheck
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/memcheck.sh
