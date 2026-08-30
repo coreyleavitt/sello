@@ -5366,14 +5366,58 @@ can pick it up at Stage 2's tail (push, dispatch CI, `ruleset-apply.sh
 --apply` once green) without re-deriving any of the design decisions
 above.
 
-**Resume point:** branch `rfc-005-slice23` exists locally with Stage 1 +
-file-level Stage 2 committed (not yet pushed as of this note). Next
-concrete actions, in order: push the branch; watch the full CI battery
-(now 27 jobs) to green, paying particular attention to `ruleset-sync`
-going red as expected until the apply step; `scripts/ruleset-apply.sh
---apply`; re-run `ruleset-sync` to confirm; Stage 3's red demo; Stage
-4's canary wiring + one dispatch; Stage 5's dudect refresh; fast-forward
-to `main`; delete the branch.
+**Update, same session: the branch WAS pushed and DID get real CI
+signal after all** (the paragraph above undersold what turned out
+feasible once the mechanism was already locally verified) --
+`rfc-005-slice23` pushed as commit `fe904b8`/`0a7f408`, real run
+`33308895570`. Results, all real: `disasm-gate-gcc` (job
+`99250246743`, 37s, SUCCESS), `disasm-gate-clang` (job `99250246619`,
+32s, SUCCESS), `build-smoke` (job `99250246910`, SUCCESS -- Phase 5/5
+compiled+ran `tests/ct_disasm/main.nim` for real on hosted CI),
+`unit-linux-amd64-gcc`/`-clang`, `unit-linux-amd64-gcc-asan-ubsan`,
+`taint-ct-linux-amd64-gcc`/`-clang`, `gates-manifest-sync`,
+`policy-lint`, `validation-map` all SUCCESS. `ruleset-sync` FAILED, as
+documented and expected (the two new checks aren't in the live required
+set yet -- `scripts/ruleset-apply.sh --apply` still not run).
+
+**A genuine finding, caught by real CI, not anticipated:** `api-surface`
+and `api-surface-libsodium` BOTH FAILED. Root cause, confirmed by
+reproducing locally in under a minute: two of the nine `{.noinline.}`
+roots are facade-exported (`ristretto.ristrettoEncode`,
+`ristretto.\`==\`` on `RistrettoPoint`) -- `nim jsondoc`'s reported
+pragma list for each now includes `noinline`, exactly the kind of
+signature change `tests/api/api_surface_gen.py`'s dump is DESIGNED to
+catch (CLAUDE.md's own API-surface-gate paragraph: "an export going
+missing... nothing before this slice caught an ACCIDENTAL ADD" --
+this is the same mechanism catching a signature CHANGE, working
+exactly as designed, not a bug in the gate). Fixed by regenerating both
+baselines (`scripts/api-surface-check.sh plain --update` /
+`selloLibsodium --update`), diff confirmed to be EXACTLY the two
+`noinline` additions plus one new header metadata line
+(`sello-dev-image:`, now populated since `scripts/lib/image-pins.txt`
+carries a sello-dev pin -- `_baseline_header_meta` emits it whenever
+present, harmless), committed as `3f93e0b`, pushed, triggering run
+`33309037582` -- CONFIRMED GREEN on run `33309037582` (both jobs, real hosted CI): the fix is correct and complete, no further api-surface drift.
+
+**Resume point (updated):** Stage 1 mechanism + file-level Stage 2 +
+the api-surface repin fix are all pushed and (mechanism-wise) confirmed
+real-CI-green as of this note. Remaining, in order: confirm the
+api-surface fix is green on run `33309037582`; `scripts/ruleset-apply.sh
+--apply` (adds the two disasm-gate checks to the live required set,
+27 total); re-run/confirm `ruleset-sync` green; Stage 3's red demo
+(reintroduce a `feSqrtRatioM1`-class branch on a scratch branch, confirm
+`disasm-gate-*` red on real CI, decide/record permanent-negative-fixture
+question, revert, delete the scratch branch); Stage 4's toolchain-canary
+`--canary` wiring into `.github/workflows/toolchain-canary.yml` plus one
+dispatch (mechanism already implemented in `scripts/disasm-gate.sh
+--canary`, never wired into that workflow or exercised); Stage 5's
+dudect full-battery refresh (`docs/ct-results.md`, hours on this shared
+host, still not run); fast-forward to `main`; delete the branch. None of
+these were completed this session -- see the "Scope explicitly NOT
+completed" list above, still accurate except for the two items this
+update resolves (the branch push, now real-CI-verified for every job
+that ran, and the api-surface finding/fix, now confirmed green on
+run `33309037582`).
 
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
 - Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26, 31 (17/32). All records
