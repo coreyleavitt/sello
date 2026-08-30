@@ -3,6 +3,7 @@
 # regeneration command: scripts/api-surface-check.sh selloLibsodium --update
 # compiler: Nim Compiler Version 2.2.10 [Linux: amd64]
 # image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+# sello-dev-image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
 #
 # DO NOT HAND-EDIT the body below this line -- run the regeneration
 # command above (never under CI -- see this file's own header comment).
@@ -22,10 +23,10 @@ ristretto.`+` :: skProc :: func `+`(a, b: RistrettoPoint): RistrettoPoint {.rais
 ristretto.`-` :: skProc :: func `-`(a, b: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.`-` :: skProc :: func `-`(p: RistrettoPoint): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.`==` :: skProc :: func `==`(a, b: RistrettoEncoded): bool {.borrow, raises: [], gcsafe, tags: [], forbids: [].}
-ristretto.`==` :: skProc :: func `==`(a, b: RistrettoPoint): bool {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.`==` :: skProc :: func `==`(a, b: RistrettoPoint): bool {.noinline, raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.hash :: skProc :: func hash(e: RistrettoEncoded): Hash {.inline, raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.ristrettoDecode :: skProc :: func ristrettoDecode(e: RistrettoEncoded): Option[RistrettoPoint] {.raises: [], gcsafe, tags: [], forbids: [].}
-ristretto.ristrettoEncode :: skProc :: func ristrettoEncode(pt: RistrettoPoint): RistrettoEncoded {.raises: [], gcsafe, tags: [], forbids: [].}
+ristretto.ristrettoEncode :: skProc :: func ristrettoEncode(pt: RistrettoPoint): RistrettoEncoded {.noinline, raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.ristrettoEphemeralPair :: skProc :: proc ristrettoEphemeralPair(): tuple[secret: RistrettoEphemeralSecret, public: RistrettoPoint] {. raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.ristrettoEphemeralSecret :: skProc :: proc ristrettoEphemeralSecret(): RistrettoEphemeralSecret {.raises: [OSError], raises: [], gcsafe, tags: [], forbids: [].}
 ristretto.ristrettoFromUniformBytes :: skProc :: func ristrettoFromUniformBytes(b: array[64, byte]): RistrettoPoint {.raises: [], gcsafe, tags: [], forbids: [].}
