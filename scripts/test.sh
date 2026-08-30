@@ -102,7 +102,8 @@
 # grep).
 #
 # --cpu <name> (RFC-005 slice 10, the --cpu:i386 32-bit matrix leg):
-# today's only supported name is `i386`. Threads `--cpu:i386` PLUS the C
+# today's supported names are `i386` and `s390x` (RFC-005 slice 25, the
+# nightly big-endian leg, A4). `i386`: threads `--cpu:i386` PLUS the C
 # flags a real 32-bit build needs (`--passC:-m32 --passL:-m32`) into every
 # `nim c` invocation below. `--cpu:i386` alone is NOT enough -- verified
 # empirically inside sello-dev via `nim --cpu:i386 --listCmd`, not
@@ -127,6 +128,72 @@
 # probe, not merely a `--listCmd` text inference) -- and runs once, BEFORE
 # the per-file loop below, rather than riding the first unit test file's
 # own compile the way the other two canaries do.
+#
+# `s390x` (RFC-005 slice 25): a genuine CROSS-COMPILE, not a same-host
+# multilib build like i386 -- the resulting binary cannot be exec'd
+# directly on this (amd64) host at all. Threads `--cpu:s390x --os:linux
+# --gcc.exe:s390x-suse-linux-gcc --gcc.linkerexe:s390x-suse-linux-gcc`
+# (the exact cross-gcc name shipped by sello-dev's `cross-s390x-gcc16`
+# package, verified via `ls /usr/bin | grep s390x` inside that image --
+# RFC-005 slice 25's own investigation, not assumed) into every `nim c`
+# invocation, and sets `run_with` (see the "--run-with wrapper hook"
+# paragraph below) to `qemu-s390x -L /usr/s390x-suse-linux/sys-root`.
+# NO `-static` linking is used and none is needed: `cross-s390x-gcc16`
+# transitively pulls in `cross-s390x-glibc-devel`, a REAL s390x sysroot at
+# `/usr/s390x-suse-linux/sys-root` (glibc, ld.so, the works) -- verified
+# empirically (a plain dynamically-linked cross build ran cleanly under
+# `qemu-s390x -L <that sysroot>` with no missing-library errors) rather
+# than assumed from the static-linking-avoids-a-sysroot folk wisdom the
+# RFC's own task text raised as a question to investigate. `qemu-s390x`
+# needs `-L <sysroot>` specifically (not `QEMU_LD_PREFIX`, though that env
+# var would work equivalently) so the target's dynamic linker
+# (`sys-root/lib/ld64.so.1`) can find its own libc -- confirmed by the
+# reproduced failure mode without it: `qemu-s390x: Could not open
+# '/lib/ld64.so.1'`. This leg needs the `sello-dev` image (same
+# `resolve_sello_dev_image` host-branch call every other `--cpu` value
+# already triggers below), specifically its `cross-s390x-gcc16` and
+# `qemu-linux-user` packages (Containerfile, RFC-005 slice 7's own
+# pre-authored package set -- both were already present by the time this
+# slice landed, so no Containerfile/image-pin change was needed here).
+# `--run-with` wrapper hook (this slice's own required mechanism, per the
+# task text): `run_with`, set only for `--cpu s390x`, is an opaque command
+# STRING (not an array -- composed via `eval`, matching every other
+# flag-composition idiom in this script's own `cmd`-string-building
+# design) prepended to every compiled test binary's execution in the
+# per-file loop below, IN PLACE OF Nim's own `-r` flag (which would try
+# to exec the s390x binary directly on this amd64 host and fail with
+# "Exec format error" -- `-r` runs the just-compiled binary as a
+# subprocess of the SAME machine `nim c` ran on, with no cross-exec
+# story of its own). When `run_with` is set, `nim c` is invoked WITHOUT
+# `-r`, with an explicit `-o:build/<basename>` (Nim's own default output
+# path under this project's `config.nims`-set `--outdir:"build"` already
+# resolves to exactly this, verified empirically -- the explicit `-o:`
+# here is belt-and-suspenders, not a behavior change), and the wrapper
+# executes that path afterward as a SEPARATE command in the same `cmd`
+# string: `$run_with build/<basename>`. This keeps the plain (no
+# `--cpu s390x`) path BYTE-IDENTICAL to every prior slice (the hook is
+# additive, gated entirely behind `[[ -n "$run_with" ]]`) -- every other
+# `--cpu` value (today: `i386`, and unset) leaves `run_with` empty and
+# takes the pre-existing `-r`-based path unchanged.
+#
+# Platform-identity canary for `s390x`: `scripts/lib/endian-canary.sh`
+# (a genuinely different shape from `scripts/lib/cpu-canary.sh` -- see
+# its own header comment for why: it cannot execute its probe with a bare
+# `-r` either, so it takes the same `run_with` wrapper string this script
+# builds and threads it through identically) runs ONCE, BEFORE the
+# per-file loop, exactly like `cpu-canary.sh` does for `i386` -- proving,
+# at RUNTIME, that the compiled probe is genuinely big-endian (not merely
+# that Nim's compile-time `cpuEndian` constant was told so), that
+# `sizeof(pointer) == 8`, and that the cross compiler was genuinely
+# invoked (via the same `--listCmd`-grep technique every canary in this
+# codebase uses). Because the per-file loop's own per-file compiles have
+# no `-r`-based first-file canary route available under `s390x` (unlike
+# `i386`, whose real suite files run natively and so still get a second,
+# incidental toolchain-canary.sh confirmation on the first file), this
+# PRE-LOOP canary is the leg's ONLY compiler-identity/endianness proof --
+# by design, not an oversight: every real suite file after it is compiled
+# and run with the IDENTICAL cross-compiler/qemu invocation this canary
+# already exercised end-to-end.
 #
 # All four flags are parsed by a small leading-argument loop (still not a
 # general getopts parser -- this script has exactly four optional
@@ -236,6 +303,7 @@ sanitize_nim_args=""
 cpu_name=""
 cpu_flag=""
 cpu_nim_args=""
+run_with=""
 expect_proptest_skip=0
 while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" || "${1:-}" == "--expect-proptest-skip" ]]; do
   case "$1" in
@@ -287,8 +355,16 @@ while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" |
           cpu_flag="--cpu:i386"
           cpu_nim_args='--passC:-m32 --passL:-m32'
           ;;
+        s390x)
+          # RFC-005 slice 25 -- see the header comment above for the full
+          # cross-compile/qemu-user mechanism and why no -static is
+          # needed (a real cross sysroot is present).
+          cpu_flag="--cpu:s390x --os:linux --gcc.exe:s390x-suse-linux-gcc --gcc.linkerexe:s390x-suse-linux-gcc"
+          cpu_nim_args=""
+          run_with="qemu-s390x -L /usr/s390x-suse-linux/sys-root"
+          ;;
         *)
-          echo "scripts/test.sh: unknown --cpu value '$cpu_name' (supported: i386)" >&2
+          echo "scripts/test.sh: unknown --cpu value '$cpu_name' (supported: i386, s390x)" >&2
           exit 2
           ;;
       esac
@@ -326,19 +402,41 @@ if [[ -n "$sanitize_name" ]]; then
   # a plain (non-sanitized) run's environment is untouched.
   cmd+=$'\n'"export ASAN_OPTIONS=detect_leaks=0"
 fi
-# scripts/lib/cpu-canary.sh (RFC-005 slice 10) runs BEFORE the per-file
-# loop below, once, rather than riding the first file's own compile --
-# see that script's own header comment for why (it proves a RUNTIME
-# fact -- sizeof(pointer) == 4 -- that a --listCmd text inference alone
-# cannot establish).
-if [[ -n "$cpu_name" ]]; then
+# scripts/lib/cpu-canary.sh (RFC-005 slice 10) / scripts/lib/endian-canary.sh
+# (RFC-005 slice 25, s390x) run BEFORE the per-file loop below, once,
+# rather than riding the first file's own compile -- see each script's
+# own header comment for why (each proves a RUNTIME fact -- pointer
+# width, or genuine big-endian byte order -- that a --listCmd text
+# inference alone cannot establish). s390x uses the DIFFERENT
+# endian-canary.sh (it cannot exec its probe with a bare `-r` on this
+# amd64 host either -- see that script's own header comment), fed the
+# same $run_with wrapper string the per-file loop below uses for every
+# real suite file.
+if [[ "$cpu_name" == "s390x" ]]; then
+  cmd+=$'\n'"echo '=== endian-canary ($cpu_name) ==='"
+  cmd+=$'\n'"scripts/lib/endian-canary.sh s390x-suse-linux-gcc \"$run_with\" nim c $cpu_flag $cpu_nim_args"
+elif [[ -n "$cpu_name" ]]; then
   cmd+=$'\n'"echo '=== cpu-canary ($cpu_name) ==='"
   cmd+=$'\n'"scripts/lib/cpu-canary.sh $cc_name nim c $cc_flag $cpu_flag $cpu_nim_args"
 fi
 canary_done=0
 for f in "${unit_test_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
-  if [[ "$canary_done" -eq 0 ]]; then
+  if [[ -n "$run_with" ]]; then
+    # --run-with wrapper hook (RFC-005 slice 25): the s390x leg cannot
+    # exec its own binary with Nim's `-r` (cross-compiled, cannot run on
+    # this amd64 host directly) -- compile with an explicit output path,
+    # then run that path through the caller-supplied wrapper as a
+    # SEPARATE command. No first-file toolchain-canary.sh special case
+    # here (see the header comment above): scripts/lib/endian-canary.sh,
+    # run once before this loop, already proved compiler identity AND
+    # genuine big-endian execution end to end with the IDENTICAL
+    # cross-compiler/qemu invocation every file below reuses, so every
+    # file in this loop is treated uniformly.
+    bn="$(basename "$f" .nim)"
+    cmd+=$'\n'"nim c $cc_flag $cpu_flag $cpu_nim_args ${extra_defines[*]:-} -o:build/$bn $f"
+    cmd+=$'\n'"$run_with build/$bn"
+  elif [[ "$canary_done" -eq 0 ]]; then
     # Platform-identity canary (RFC-005 slices 8/9): the first file's
     # compile is routed through a canary instead of a bare `nim c`,
     # proving from Nim's own --listCmd output what actually happened,

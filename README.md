@@ -548,6 +548,7 @@ claimed:
 | Coverage-guided fuzzing -- real campaign with cross-run corpus continuity | nightly | `fuzz` (450s/target default, persisted corpus via proptest's `directoryBasedDatabase`) | n/a | none | fuzz-nightly-campaign |
 | Coverage-guided fuzzing -- periodic corpus snapshot promoted into the committed seed corpus | manual-ritual | hand-curation of interesting entries into `fuzz_common.nim`'s `*Seeds()` procs (the one standing manual duty the no-bots rule imposes) | `scripts/nightly-fuzz.sh` (its corpus staleness canary is the compensating control) | none | fuzz-snapshot-ritual |
 | Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | required-check | `bmc-symex` (`scripts/bmc.sh`, needs the `sello-dev` image) | n/a | none | bmc-symex |
+| Platform breadth (A4) -- big-endian s390x via cross-compile + QEMU user-mode, unit/KAT suite plus a runtime endianness canary | nightly | `s390x` (`scripts/test.sh --cpu s390x`; unit+KAT scope only -- the property suites proved prohibitively slow under emulation, see CLAUDE.md's own record) | n/a | none | s390x-nightly |
 <!-- VALIDATION-MAP:TABLE END -->
 
 **Platform support.** <!-- VALIDATION-MAP:PLATFORM START -->The required

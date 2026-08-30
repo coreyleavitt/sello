@@ -12,22 +12,7 @@ name: nightly
 # (.github/workflows/toolchain-canary.yml, also new in slice 26): its own
 # workflow file, specifically so its advisory, never-gate contract can
 # never taint THIS workflow's own pass/fail badge -- see that file's own
-# header comment. Slice 25 (s390x, A4) and the A9 untainted-memcheck job
-# (also slice 26's own nominal scope, per the RFC's slice list) both
-# remain BLOCKED on the same Corey-owned ghcr `write:packages` credential
-# already blocking slices 10/14/15/17/19-23 (the `sello-dev` image push --
-# see scripts/lib/image-pins.txt's own sello-dev section and the handoff
-# doc's slice 7 entry for the exact unblock steps): s390x needs
-# `sello-dev`'s cross-s390x-gcc16/qemu-linux-user packages, and A9
-# memcheck needs its `valgrind` package -- neither package exists in the
-# always-available base `ghcr.io/coreyleavitt/nim` image this workflow's
-# `fuzz`/`cranked-properties` jobs already run inside. Recorded as blocked
-# extensions of this same file (extend in place once the credential
-# lands), not attempted via a workaround (e.g. `apt-get install valgrind`
-# on a bare `ubuntu-latest` runner would diverge from this project's
-# pinned-image posture -- the suite must run inside the pinned container,
-# and hosted ubuntu cannot run that container WITH valgrind inside without
-# the `sello-dev` image existing).
+# header comment.
 #
 # Reordering note (recorded per RFC-005's own out-of-order-landing
 # convention, restated for this slice): slice 26 needs only the
@@ -35,10 +20,24 @@ name: nightly
 # already-public proptest dependency for its two in-scope deliverables
 # (cranked properties, notification wiring) -- the SAME "needed only the
 # base image" reasoning that already pulled slices 16/18/24 forward -- so
-# it lands ahead of slice 25 and ahead of its own A9 sub-item, exactly as
+# it landed ahead of slice 25 and ahead of its own A9 sub-item, exactly as
 # slice 24's own header predicted ("slice 26 is partially blocked... A6
 # canary + notifications doable" -- see the handoff doc's slice-24
-# control-loop note).
+# control-loop note). Slice 25 (s390x, A4) LANDED in this later session
+# (see the handoff doc's slice 25 entry): by then the ghcr
+# `write:packages` credential that had blocked slices 10/14/15/17/19-23
+# was already resolved (slice 10's own handoff entry), and `sello-dev`'s
+# Containerfile already carried `cross-s390x-gcc16`/`qemu-linux-user`
+# (s390x's own cross-compile+emulation toolchain) from RFC-005 slice 7's
+# own "Image consolidation" pre-authoring -- the package was live in the
+# published image by the time this slice started, so no Containerfile or
+# image-pin change was needed to land the job, only the `s390x` job
+# definition below plus its own new script (`scripts/test.sh --cpu
+# s390x`). The A9 untainted-memcheck job (also nominally slice 26's own
+# scope, per the RFC's slice list) landed in the immediately-following
+# commit, same session, same reasoning (`valgrind` was likewise already
+# live in the published image) -- see that commit and the handoff doc's
+# slice 25 entry.
 #
 # Trigger: `schedule` (cron, quiet UTC hour -- see below) + manual
 # `workflow_dispatch`. The first three inputs (slice 24) exist so that
@@ -477,12 +476,19 @@ jobs:
     # this job (result 'skipped' matches neither arm of the condition
     # below), so this addition is a no-op except when the demo input is
     # actually set.
-    needs: [fuzz, cranked-properties, timeout-demo]
+    # RFC-005 slice 25/A9 addition: `s390x`/`memcheck` join the same
+    # `needs:`/`if:` pattern every other gating job here already uses --
+    # the failure-summary step below queries the Jobs API generically
+    # (`.jobs[]`, not a hardcoded per-job list), so no further change was
+    # needed there for these two jobs' own conclusions to show up in the
+    # table and the timeout-vs-cancel split.
+    needs: [fuzz, cranked-properties, timeout-demo, s390x]
     if: >-
       always() &&
       (needs.fuzz.result == 'failure' || needs.fuzz.result == 'cancelled' ||
        needs.cranked-properties.result == 'failure' || needs.cranked-properties.result == 'cancelled' ||
-       needs.timeout-demo.result == 'failure' || needs.timeout-demo.result == 'cancelled')
+       needs.timeout-demo.result == 'failure' || needs.timeout-demo.result == 'cancelled' ||
+       needs.s390x.result == 'failure' || needs.s390x.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -541,3 +547,69 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/lib/notify-failure.sh nightly-failure "sello nightly workflow is failing" build/nightly-notify-body.md
+
+  # RFC-005 slice 25 (Nightly part 2: s390x big-endian, A4). Cross-compiles
+  # the unit suite for s390x (`--cpu:s390x --os:linux`, sello-dev's
+  # `cross-s390x-gcc16` package) and runs each resulting binary under
+  # `qemu-s390x` user-mode emulation (sello-dev's `qemu-linux-user`
+  # package) -- NOT the whole Nim toolchain under emulation, per the
+  # RFC's own recorded architecture decision (docs/
+  # rfc-005-validation-infra.md lines 385-403). No `-static` linking:
+  # `cross-s390x-gcc16` transitively pulls in a real s390x sysroot
+  # (`cross-s390x-glibc-devel`, `/usr/s390x-suse-linux/sys-root`),
+  # verified empirically this slice (a plain dynamically-linked cross
+  # build ran clean under `qemu-s390x -L <that sysroot>` with no missing-
+  # library errors) -- see scripts/test.sh's own `--cpu s390x` header
+  # comment for the full mechanism and the reproduced
+  # `qemu-s390x: Could not open '/lib/ld64.so.1'` failure this closes.
+  #
+  # PROPERTY-SUITE SCOPE, MEASURED (this slice's own required
+  # investigation, per the RFC's pre-authorized "unit+KATs only if
+  # property wall-clock proves prohibitive" fallback): a single property
+  # suite file (`test_properties_field.nim`, the lightest of the six --
+  # default ~100 examples/property) was run under `qemu-s390x` in
+  # isolation and had NOT completed after 9m30s of real CPU time (killed
+  # at that point, evidence already conclusive) -- versus the ENTIRE
+  # 14-file unit/KAT suite's own measured total of ~82s (compile + run,
+  # summed) under the identical cross-compile+qemu setup. One of six
+  # property files alone already exceeds the RFC's own "~90 min total"
+  # prohibitive threshold by a wide margin once extrapolated across all
+  # six (proptest's own generative search compounds directly with
+  # qemu-user's per-instruction translation overhead on this codebase's
+  # arithmetic-heavy hot paths -- a qualitatively different cost profile
+  # from the fixed-iteration KAT suite). This job therefore invokes the
+  # pre-authorized fallback: UNIT + KAT SUITE ONLY, no property sibling
+  # (this job's own `scripts/ci-setup.sh` writes the bare zero-dependency
+  # `nim.cfg` and never fetches proptest, so `scripts/lib/unit-test-files.sh`'s
+  # own dynamic `_deps/proptest` detection naturally excludes the six
+  # `test_properties_*.nim` files -- the same mechanism every other
+  # unit-only leg in this project's matrix already relies on, e.g.
+  # `unit-linux-amd64-gcc-asan-ubsan`/`unit-linux-i386-gcc`). See
+  # docs/rfc-005-validation-infra.handoff.md's slice 25 entry for the
+  # exact measurement command and killed-process evidence.
+  #
+  # Endianness canary (RFC-005 Part B's own text for this leg: "an
+  # endianness canary test that fails if the binary is actually
+  # little-endian"): `scripts/lib/endian-canary.sh`, run once before the
+  # per-file loop inside `scripts/test.sh --cpu s390x` itself (not a
+  # separate step here) -- see that script's own header comment for the
+  # full runtime-proof design (real in-memory byte order of a known word,
+  # not merely Nim's compile-time `cpuEndian` constant) and its own
+  # red-path demonstration record.
+  #
+  # timeout-minutes: measured real wall clock (compile+run, whole unit
+  # suite) is ~82s locally; 20 minutes budgets generously for a slower
+  # hosted runner plus container pull/checkout overhead while stopping
+  # nowhere near GitHub's 360-minute hosted-job limit -- this job is
+  # nowhere near its own timeout boundary, so (per the `notify` job's own
+  # timeout-vs-cancel design) a timeout here would itself be the anomaly
+  # worth investigating, not routine slack.
+  s390x:
+    name: s390x
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cpu s390x
