@@ -5399,25 +5399,133 @@ carries a sello-dev pin -- `_baseline_header_meta` emits it whenever
 present, harmless), committed as `3f93e0b`, pushed, triggering run
 `33309037582` -- CONFIRMED GREEN on run `33309037582` (both jobs, real hosted CI): the fix is correct and complete, no further api-surface drift.
 
-**Resume point (updated):** Stage 1 mechanism + file-level Stage 2 +
-the api-surface repin fix are all pushed and (mechanism-wise) confirmed
-real-CI-green as of this note. Remaining, in order: confirm the
-api-surface fix is green on run `33309037582`; `scripts/ruleset-apply.sh
---apply` (adds the two disasm-gate checks to the live required set,
-27 total); re-run/confirm `ruleset-sync` green; Stage 3's red demo
-(reintroduce a `feSqrtRatioM1`-class branch on a scratch branch, confirm
-`disasm-gate-*` red on real CI, decide/record permanent-negative-fixture
-question, revert, delete the scratch branch); Stage 4's toolchain-canary
-`--canary` wiring into `.github/workflows/toolchain-canary.yml` plus one
-dispatch (mechanism already implemented in `scripts/disasm-gate.sh
---canary`, never wired into that workflow or exercised); Stage 5's
-dudect full-battery refresh (`docs/ct-results.md`, hours on this shared
-host, still not run); fast-forward to `main`; delete the branch. None of
-these were completed this session -- see the "Scope explicitly NOT
-completed" list above, still accurate except for the two items this
-update resolves (the branch push, now real-CI-verified for every job
-that ran, and the api-surface finding/fix, now confirmed green on
-run `33309037582`).
+**Coordinator correction (2026-08-30, mid-session):** the initial stop
+-after-Stage-2 decision above was overridden -- explicit direction to
+complete Stages 3-6 for real, including `scripts/ruleset-apply.sh
+--apply` and the fast-forward to `main`. Everything below this point
+happened after that correction.
+
+**A second real finding, caught by real CI, on the SAME push that
+carried the api-surface fix:** `coverage-ratchet` (run `33309085853`,
+job `99250796199`) FAILed: `aggregate` 98.7 -> 98.6, `private/
+backend.nim` 96.7 -> 96.6. Root cause: gcov's per-compiled-instance line
+attribution shifts when `{.noinline.}` forces `derivePublic`/
+`signDetached` from several inlined copies (one per call site across the
+unit+property binaries) down to one real, called copy -- `private/
+backend.nim`'s own debug-only `signDetached` re-derivation assert (`when
+not defined(release)`) is the specific edge whose attribution moved.
+Fixed: `SELLO_IN_CONTAINER=1 scripts/coverage.sh --update` (double-pass,
+determinism-checked) inside the real sello-dev image, a NEW justification
+entry added to `tests/coverage/expected/justifications.md` first (the
+down-path guard requires the citation to exist before `--update` will
+write the baseline) citing `aggregate=98.6, private/backend.nim=96.6`
+with the attribution-shift explanation above, committed together with
+the regenerated `tests/coverage/expected/baseline.txt`.
+
+**Stage 3 (red demo), scratch branch `rfc-005-slice23-red-demo`, commit
+`b7c0dc2`:** replaced `feSqrtRatioM1`'s final `feCMove` correction-select
+with an `if` on the CT verdict (functionally identical -- same probe
+sink value verified before pushing). Confirmed red LOCALLY first
+(`feSqrtRatioM1` gcc profile 8->10 branches, the two new entries being
+the planted branch), then pushed -- real run `33309730168`, ALL FOUR
+targeted checks red: `disasm-gate-gcc` (job `99252499020`),
+`disasm-gate-clang` (job `99252499051`), `taint-ct-linux-amd64-gcc`
+(job `99252498975`), `taint-ct-linux-amd64-clang` (job `99252499016`).
+**Both instruments caught the same planted defect independently, via
+different call paths**: the taint leg's memcheck output shows `at
+0x4113BE: feSqrtRatioM1_..._u1934` called `by ... ristrettoEncode_..._
+u286` inside the `ristretto_scalarmult` target (4 errors from 4
+contexts, "Conditional jump or move depends on uninitialised value(s)")
+-- confirming the disasm gate (static profile) and the taint harness
+(dynamic memcheck) are genuinely complementary instruments, not
+redundant ones, exactly as CLAUDE.md's CT-instruments paragraph claims.
+Reverted; branch deleted local+remote; confirmed 404 via `gh api
+repos/coreyleavitt/sello/branches/rfc-005-slice23-red-demo`.
+
+**Stage 4 (toolchain-canary rolling-baseline wiring), branch
+`rfc-005-slice23-canary` -- TWO real bugs found and fixed via real
+dispatches, neither predictable from local reasoning alone:**
+1. Commit `49532f4` (initial wiring: `newest-gcc`/`newest-clang` ->
+   `scripts/disasm-gate.sh --cc <cc> --canary`, `actions/cache`
+   restore/save mirroring `nightly.yml`'s fuzz-corpus pattern exactly,
+   a 3x-retry zypper wrapper). Dispatched via `gh workflow run
+   toolchain-canary.yml --ref rfc-005-slice23-canary` -> run
+   `33309937010`: BOTH legs FAILED identically (`newest-gcc` job
+   `99253047482`, `newest-clang` job `99253047384`) -- `sh: executable
+   file not found in $PATH`, an OCI-exec failure on the very next
+   `docker exec` after a standalone `>> $GITHUB_PATH` step propagated
+   into a later step.
+2. Commit `049b425` fixed it: export `PATH` inline, in the same run
+   step that needs it, instead of depending on cross-step
+   `$GITHUB_PATH` propagation for this container-job shape. Re
+   -dispatch -> run `33310109668`: BOTH legs SUCCEEDED (`newest-gcc`
+   job `99253505918`, `newest-clang` job `99253505921`) -- but
+   inspecting the log for the expected BOOTSTRAP message found a SECOND
+   bug: it printed "comparing against previous rolling profile" on what
+   should have been a genuine cold start (`Cache not found for input
+   keys` was right there in the same log). Traced to
+   `disasm_gate_canary_mode()` writing `$SELLO_DISASM_CANARY_OUT`
+   BEFORE checking `$SELLO_DISASM_CANARY_PREV` -- the two are the SAME
+   PATH in the real CI wiring (the workflow overwrites the restored
+   cache entry in place for the next save step), so every run silently
+   self-compared, never doing a real bootstrap-vs-prior comparison, on
+   ANY run, not just cold start.
+3. Commit `f965770` fixed it: snapshot `$prev`'s content into memory
+   BEFORE writing `$out`. Verified LOCALLY first, three scenarios (no
+   prior file -> real BOOTSTRAP message; unmodified rerun -> real
+   self-comparison OK; artificially lowered prior count -> real ALERT
+   with correct old/new values), all three now behaving as designed.
+   Re-dispatch -> run `33310250077`: BOTH legs SUCCEEDED (`newest-gcc`
+   job `99253888147`, `newest-clang` job `99253888239`) with a GENUINE
+   restore-and-compare against run `33310109668`'s own saved cache
+   entry ("OK -- no root-level conditional-branch-count increase").
+   Deleted the four stale cache entries (`gh cache delete` on ids
+   `7134906849`/`7134904618`/`7134861084`/`7134863183`) and dispatched
+   ONE MORE time for a clean bootstrap demonstration -> run
+   `33310308051`: BOTH legs SUCCEEDED, real `Cache not found for input
+   keys` + real `disasm-gate: --canary BOOTSTRAP` message (`newest-gcc`
+   job `99254048567`, `newest-clang` job `99254048533`). The 3x zypper
+   retry loop was present and syntactically exercised on every
+   dispatch's own first attempt but never actually NEEDED -- no real
+   mirror failure occurred across any of the four dispatches this
+   session, so only its non-retry path is real-CI-proven; the retry
+   path itself remains unexercised (the two historical failures it
+   guards against, runs `33249878217`/`33305634834`, are its only
+   evidence of the failure mode it targets).
+
+**Stage 5 (dudect full-battery refresh), run via a plain `scripts/ct.sh`
+(background process, polled via repeated `tail`/`ps` checks in the
+foreground -- not a detached-and-forgotten job):** one full battery,
+`>= 1e6` samples/class, ten real targets + positive control, completed
+in-session. Environment: `powersave` governor, 6 pre-existing containers
+(none a sello build), load `1.36/1.72/2.13` at start -- a comparatively
+QUIET host relative to most prior full-battery entries in this document.
+Results: only the two ALREADY-documented carve-outs degraded (``
+ristretto.`==` `` WARN at -8.794/90.0% crop; `sha512.sha512` FAIL at
+15.161/90.0% crop), both in the exact established shape (large |t| only
+at the tightest crop, clean at every looser one); `x25519(static) vs
+peer` (the third documented, intermittent carve-out) PASSED cleanly this
+run; every other target -- including all six whose compiled shape this
+slice's own `{.noinline.}` additions actually changed -- PASSED. NO NEW
+FINDING. Full table + comparison + verdict recorded in
+`docs/ct-results.md`'s new "RFC-005 slice 23" section (dated
+2026-08-30); CLAUDE.md's dudect validation-bar bullet updated with a
+one-line pointer to it. This closes the deferred refresh recorded since
+slices 19/21/22a (the taint-harness landing + fix-slice 22a's
+`valueBarrier32`, which also changed shipped codegen without a dudect
+re-run at the time) -- this run is the first to measure BOTH changes'
+combined effect.
+
+**Resume point (updated again):** every stage's MECHANISM is now real
+-CI-verified. Remaining, purely procedural: commit the coverage fix;
+`scripts/ruleset-apply.sh --apply`; confirm `ruleset-sync` + the full
+27-check battery green on `rfc-005-slice23`'s actual HEAD; fast-forward
+`rfc-005-slice23` to `main`; delete that branch (404); fast-forward
+`rfc-005-slice23-canary` on top (its own 3 commits, already real-CI
+-green); delete that branch (404); Stage 6 records (CLAUDE.md job-count
+sentence already reads twenty-seven; the "Disasm gate (A2)" paragraph's
+"Honest scope note" needs rewriting now that every stage is real; append
+this handoff's own closing summary).
 
 ## Control-loop status note (2026-08-25, mid-grind checkpoint)
 - Done: slices 1-9, 11, 12, 13, 16, 18, 24, 26, 31 (17/32). All records

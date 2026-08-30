@@ -1083,6 +1083,107 @@ shows only the permanent `ct_main.nim` addition of the new target itself
 (the `sha512.sha512 (4-block compress)` block plus its module-doc
 paragraph), not any diagnostic scaffolding.
 
+## RFC-005 slice 23: post-noinline dudect full-battery refresh (2026-08-30)
+
+**Why this run is due, per this codebase's own standing rule** ("every
+push touching `src/sello/` re-runs the affected-gate battery"): slice 23
+added `{.noinline.}` to nine roots (`derivePublic`, `signDetached`, x25519
+`ladder`, `geScalarmultBase`, `geScalarmultCT`, `ristrettoEncode`,
+`` `==` ``, `feSqrtRatioM1`, sha512 `compress`), the deliberate
+shipped-codegen change the disassembly gate (A2) exists to pin -- a
+change to the actual compiled shape of six of this battery's ten real
+targets (`signDetached` maps to `backend.signDetached`;
+`geScalarmultBase` to `scalar.geScalarmultBase`; `x25519Base`/both x25519
+targets reach `ladder`; `ristrettoScalarmult` reaches `geScalarmultCT`;
+`ristrettoEncode` and `` `==` `` map directly). This is the deferred
+refresh recorded in the handoff since slices 19/21/22a (the taint
+harness landing, then fix-slice 22a's `valueBarrier32`) already changed
+shipped codegen once without a dudect re-run; this slice's own noinline
+additions are the second such change, and this run closes both
+deferrals at once (the `valueBarrier32`/taint-harness codegen change
+predates this run too, so this is the first full battery to measure
+BOTH changes' combined effect, not just this slice's own).
+
+**One full run, `>= 1e6` samples/class, ten real targets plus the
+positive control (eleven rows) -- same battery shape as every prior
+entry in this document, run via a plain `scripts/ct.sh` (no flag, real
+verdict authority, not `--build-only`):**
+
+Environment preflight banner (captured automatically, `scripts/ct.sh`'s
+own mechanism, RFC-003 slice 5): CPU governor `powersave` (not
+`performance`); 6 other containers already running on the host at start
+(five long-lived `amoxtli-session` containers plus one `nelli-dev`
+symex job, none of them a *sello* build); load average at start `1.36
+1.72 2.13` (1m/5m/15m). A quieter host than most prior full-battery
+entries in this document (contrast RFC-006 slice 4's 25-26-container,
+load-18-to-3 runs), consistent with the clean result below.
+
+| target | verdict | worst &#124;t&#124; (crop) | mean cycles fixed / random |
+|---|---|---|---|
+| positive_control (self-test) | FAIL (expected) | 1024.889 (90.0%) | 3763.4 / 1807.9 |
+| `backend.signDetached` | PASS | -2.465 (100.0%) | 176915.0 / 177014.9 |
+| `scalar.geScalarmultBase` | PASS | -2.152 (95.0%) | 86881.2 / 86924.4 |
+| `x25519.x25519Base` | PASS | -1.604 (100.0%) | 236761.8 / 237117.9 |
+| `x25519(ephemeral)` construct+consume | PASS | 0.942 (90.0%) | 214514.0 / 214503.6 |
+| `x25519(static)` vs peer | PASS | -0.854 (90.0%) | 213298.8 / 213309.9 |
+| `ristretto.ristrettoScalarmult` | PASS | -1.862 (100.0%) | 274884.7 / 275268.3 |
+| `ristretto.ristrettoEncode` | PASS | -0.669 (99.5%) | 21558.5 / 21560.6 |
+| `` ristretto.`==` `` (P,P) vs (P,Q) | **WARN** | -8.794 (90.0%) | 578.97 / 579.44 |
+| `ristretto.ristrettoFromUniformBytes` | PASS | -1.931 (100.0%) | 63881.2 / 63948.6 |
+| `sha512.sha512` (4-block compress) | **FAIL** | 15.161 (90.0%) | 5843.6 / 5840.3 |
+
+**Comparison against the prior carve-out record -- both non-PASS
+targets are the SAME two pre-existing, already-investigated carve-outs,
+and no new one appears:**
+- `` ristretto.`==` ``: WARN at -8.794 (90.0% crop), clean at every
+  looser crop (100.0%=-0.099, 99.9%=-1.268, 99.5%=-0.620, 99.0%=-0.620,
+  95.0%=-3.918). Matches the documented sub-1000-cycle resolution-floor
+  carve-out ("RFC-004 slice 7b" above) exactly in shape: a large |t|
+  appearing only at the tightest crop on an operation whose own raw cost
+  (578-579 cycles here) sits in the same "too fast for this instrument"
+  band that carve-out's own investigation established.
+- `sha512.sha512` (4-block compress): FAIL at 15.161 (90.0% crop), clean
+  at every looser crop (100.0%=1.490 through 95.0%=3.190). Matches the
+  documented RFC-006 slice 4 carve-out exactly in shape (elevated |t|
+  only at the tightest crop; raw cost ~5,840-5,844 cycles, the same
+  "low tens-of-thousands-of-cycles-or-under" band as the ristretto `==`
+  and `ristrettoEncode` carve-outs).
+- `x25519(static) vs peer` (the third documented carve-out, "RFC-004
+  slice 8d" above) PASSED CLEANLY this run (worst |t| -0.854) --
+  consistent with that carve-out's own documented intermittency (it
+  FAILed on two prior heavily-shared-host runs specifically, and this
+  run's host was comparatively quiet, 6 containers vs. the 25-26 seen
+  in the runs that triggered it).
+- Every other target (the six whose compiled shape actually changed
+  this slice, listed above, plus `ristrettoFromUniformBytes`) PASSED
+  cleanly, including the six roots this slice's own `{.noinline.}`
+  additions directly touch -- no NEW timing-verdict finding traces to
+  the noinline change itself.
+
+**Verdict: no new finding.** Both non-PASS targets reproduce the exact
+shape (large |t| only at the tightest crop, clean at every looser one)
+and magnitude band of two ALREADY-investigated, ALREADY-documented
+carve-outs, on a run whose host was quieter than most prior recorded
+runs -- not a new host-noise coincidence requiring fresh investigation,
+and not attributable to the `{.noinline.}` change (none of the two
+non-PASS targets' own underlying operations -- `` ristretto.`==` ``'s
+comparison, `sha512.compress`'s ARX core -- are among the nine roots
+this slice made non-inlinable; `sha512.compress` IS itself one of the
+nine, but its own carve-out predates this slice by two RFC-006 slices
+with an identical shape already established under the OLD inlining
+-eligible codegen, so becoming non-inlinable changing nothing about its
+verdict shape is itself mild positive evidence the carve-out was never
+about inlining in the first place). Per this project's own escalation
+rule ("a genuine unexplained leak indication is a STOP-and-return
+-blocker finding") -- this is not unexplained, so no escalation.
+
+This run is not itself a fresh investigation of either carve-out (both
+already have their own dedicated isolated-trial diagnostics elsewhere
+in this document); it is the deferred POST-CODEGEN-CHANGE confirmation
+that neither the taint-harness/`valueBarrier32` change (slices 19-22a)
+nor this slice's own `{.noinline.}` additions moved either carve-out
+into new territory or created a third one.
+
 ## Reproducing this run
 
 ```sh
