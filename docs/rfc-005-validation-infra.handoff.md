@@ -898,7 +898,7 @@ Phase 2 — heavy deterministic gates (independent after 7):
 - [x] 18. API-surface gate A8 (generator verify-first spike; dual baselines) -- DONE 2026-08-24, taken out of order (see slice 11's/16's precedent and CLAUDE.md) -- slices 10/14/15/17 remain blocked on the same Corey-owned ghcr credential; this slice needed only the base image. Code `ad24138` (mechanism, generator, baseline.sh, both jobs, both baselines), red demo `ec1fde2`, revert `eee808c`. See the full slice entry below for mechanism design, spike findings, run ids, and the red-then-green sequence.
 
 Phase 3 — CT instruments (19→20→21→22→23 chain):
-- [ ] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike)
+- [x] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike) -- DONE 2026-08-30. Repin `8cd8441` (go/no-go GO on both halves, sello-dev repinned + republished), mechanism+targets `e9e2eca` (taint_shim.c/taint.nim, three declassify call sites, codegen-unchanged proof, target_sign/target_x25519_static/target_planted_leak, scripts/ct-taint.sh, zero-annotation arc verified by hand via git stash, schema proof-spike verified empirically). See the full slice entry below for transcripts and run ids.
 - [ ] 20. Secret-target register A7 (per-instrument columns; dudect retrofit; red demo)
 - [ ] 21. Taint targets (all remaining; both verdict arms; zero-annotation arc per target)
 - [ ] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check)
@@ -3981,6 +3981,175 @@ validation bar" section, and updated the API-surface paragraph's
 not fork it," plus the one additive `sello-dev-image:` header fix);
 `09db5e9`'s own CLAUDE.md update appended the false-green finding, the
 real red-demo numbers, and the down-path bug to the same paragraph.
+
+### Slice 19 (taint CT harness A1, mechanism) -- full record
+
+2026-08-30: slice 19 DONE end-to-end, resumed from a stalled prior agent
+(inherited a modified-but-uncommitted Containerfile plus the Stage-1
+go/no-go spike files, per this session's own opening inventory) and
+carried through repin, mechanism, first targets, and the schema
+proof-spike.
+
+**Stage 0 (repin), commit `8cd8441`.** Re-ran the inherited go/no-go
+spike for real, inside the rebuilt `localhost/sello-dev-slice19` image,
+under `valgrind --tool=memcheck --error-exitcode=99 --track-origins=yes`,
+with the dudect harness's own flags (`-d:release`, gcc):
+- Clean half (plain build: taint a 32-byte scalar, run the real
+  `x25519Base` ladder over it, declassify only the derived public key
+  bytes via the spike's own throwaway shim): `ERROR SUMMARY: 0 errors
+  from 0 contexts`, exit 0.
+- Leaky half (`-d:spikeLeaky`: the same setup plus one planted
+  `if (secretBytes[0] and 1'u8) == 0'u8` ahead of the ladder call):
+  `ERROR SUMMARY: 1 errors from 1 contexts`, exit 99, stack trace
+  resolving exactly to `main__spike95gonogo_u8` (the planted `if`),
+  "Uninitialised value was created by a client request at
+  spike_taint_undefined."
+GO on both counts. Pushed the rebuilt image
+(`ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80`,
+superseding `sha256:dc39f87a...`, which stays live on ghcr for history),
+updated `scripts/lib/image-pins.txt`'s `(Containerfile-hash, digest)`
+pair and every `container:` reference in `merge-gate.yml` (four lines:
+`unit-linux-i386-gcc`, `unit-linux-amd64-gcc-libsodium`, `bmc-symex`,
+`coverage-ratchet`), refreshed the coverage-ratchet baseline's
+informational `sello-dev-image:` header line, archived the new image at
+`/home/corey/.cache/sello-dev-image/sello-dev-2026-08-30-acf5b11b.oci-archive`,
+and confirmed `scripts/policy-lint.sh` clean locally before pushing.
+Merge-gate on the new digest: run `33288198858`, all 22 required checks
+green, `13m38s`.
+
+**Stage 1 (mechanism), commit `e9e2eca` (combined with Stage 2, see
+below -- both landed as one coherent, already-verified commit rather
+than an artificially split push).** `src/sello/private/taint_shim.c`
+(the confined FFI exception, `{.compile.}`d only under `-d:selloTaint`)
++ `src/sello/private/taint.nim` (`DeclassId`/`DeclassWidth`/
+`DeclassEntry`, `const declassRegister: array[DeclassId, DeclassEntry]`
+total by construction, `declassify(id, buf)`/`declassify(id, scalar)`
+templates). Mechanism decisions recorded in the module docs themselves
+(see CLAUDE.md's own `private/taint.nim` entry for the summary):
+- **Link-error-outside-the-harness:** the shim's real function bodies
+  are gated on `SELLO_TAINT_HARNESS_ACTIVE`, a macro only
+  `scripts/ct-taint.sh` passes; `-d:selloTaint` alone declares but does
+  not define the two shim functions, so a real call site fails at LINK
+  time, not compile time -- a deliberate, legible failure mode.
+- **Unregistered declassification = compile error:** not a runtime
+  check at all -- `array[DeclassId, DeclassEntry]` forces every enum
+  member to have an entry, so there is no way to construct an
+  "unregistered" `DeclassId` value in the first place. The raw shim
+  binding (`rawDeclassify`) is unexported; the negative fixture
+  `tests/unit/fixtures/reject_taint_raw_shim_call.nim` (driven by
+  `tests/unit/test_taint.nim`, subprocess `nim c -d:selloTaint`) pins
+  that calling it directly, bypassing `declassify`, is a compile error
+  (`undeclared identifier: 'rawDeclassify'`) -- verified this does NOT
+  need the sello-dev image at all: Nim's semantic pass rejects the
+  fixture before ever reaching the C-compile stage that would need
+  `<valgrind/memcheck.h>`, confirmed empirically against both the
+  sello-dev image and the bare base image (`ghcr.io/coreyleavitt/nim`,
+  no valgrind headers) -- same error either way.
+- **Codegen-unchanged proof:** after wiring the three real `declassify`
+  call sites into `private/backend.nim`/`x25519.nim` (see Stage 2
+  below), compiled `-d:release` (no `-d:selloTaint`) via
+  `nim c -d:release --nimcache:<dir> -c tests/unit/test_signing.nim` /
+  `test_x25519.nim` against both the pre-declassify commit and the
+  post-declassify commit, and diffed
+  `nimcache/@psello@sprivate@sbackend.nim.c` /
+  `@psello@sx25519.nim.c` between the two trees with `diff -u`. Every
+  diff hunk is a Nim-internal symbol-suffix renumbering only (e.g.
+  `wipe__...backend_u17` -> `wipe__...backend_u26`, caused by the new
+  `taint.nim` module's own symbols shifting Nim's global unique-id
+  counter) -- no new instruction, call, branch, or memory operation
+  appears anywhere in either diff. Recorded verbatim (with the caveat
+  about the renumbering, not a false "byte-identical" claim) in
+  `taint.nim`'s own module doc.
+- **Harness-only primitives added to the same shim/module** (not
+  originally itemized as a separate deliverable, but needed to build
+  Stage 2's targets at all): `markUndefined`/`markDefined`/
+  `checkDefined`, uncounted, not `DeclassId`-gated -- `markDefined` is
+  the boundary-rule idiom for a secret DH output (`X25519Shared`), kept
+  deliberately outside the registered-disclosure machinery per A1's own
+  text ("disclosing them is not sanctioned").
+
+**Stage 2 (targets), same commit `e9e2eca`.** `tests/ct_taint/`:
+`target_sign.nim` (SEED tainted, `signing.keypair`/`sign`),
+`target_x25519_static.nim` (SCALAR tainted, both verdict arms via
+`-d:x25519SmallOrderPeer`), `target_planted_leak.nim` (the PERMANENT
+negative fixture). `scripts/ct-taint.sh` builds each with the dudect
+flags plus `-d:selloTaint --passC:"-DSELLO_TAINT_HARNESS_ACTIVE"`, runs
+under `valgrind --tool=memcheck --track-origins=yes`, asserts zero
+errors (one, for the negative fixture), then asserts every register
+entry shows a nonzero exercise count across the battery.
+
+Local verification (inside `localhost/sello-dev-slice19` via `podman
+create`/`cp`/`exec`, the alt-root store per this session's inherited
+instructions -- `--root /home/corey/.podman-push --runroot
+/run/user/1000/podman-push`):
+- All three green targets clean (`ERROR SUMMARY: 0 errors`) against the
+  shipped (post-declassify) tree, with real per-target exercise counts
+  printed (`diDerivePublicKey exercises = 1`,
+  `diSignDetachedSignature exercises = 1`,
+  `diX25519ZeroVerdict exercises = 1` on each of the two peer-arm runs).
+- `target_planted_leak` red as required: `ERROR SUMMARY: 1 errors`,
+  stack trace resolving to `NimMainModule` (the planted `if`), taint
+  origin resolving to its own `markUndefined` call -- confirmed the
+  harness still detects a real secret-dependent branch.
+- **Zero-annotation red->green arc, verified by hand, not simulated in
+  a target file:** `git stash push -- src/sello/private/backend.nim
+  src/sello/x25519.nim` to get the real pre-declassify state, rebuilt
+  both targets against it under the identical taint flags, reran under
+  valgrind:
+  - `target_sign` (RED): 10 memcheck errors. The two load-bearing ones:
+    "Uninitialised byte(s) found during client check request at
+    sello_taint_check_defined ... Address ... is 0 bytes inside data
+    symbol 'pubBytes__target95sign_u25'" and the same for
+    `sigBytes__target95sign_u42` -- errors resolve exactly to the
+    harness's own `checkDefined` calls on the two documented disclosure
+    points (the rest are downstream `echo`/digit-formatting fallout of
+    the same undefined bytes, expected noise, not a separate finding).
+    `diDerivePublicKey exercises = 0`, `diSignDetachedSignature
+    exercises = 0` (no declassify call exists in this tree state).
+  - `target_x25519_static` (normal peer, RED): 1 memcheck error,
+    resolving DIRECTLY to `x25519__OOZOOZsrcZselloZx25519_u375` (the
+    real interior `if acc == 0` branch inside the pre-declassify
+    `x25519.nim`'s own compiled code) -- the cleanest possible
+    confirmation of A1's own stated criterion for a branch-shaped
+    disclosure. `diX25519ZeroVerdict exercises = 0`.
+  `git stash pop` restored the shipped (post-declassify) tree; reran the
+  full local suite (`scripts/test.sh` in the base image, no
+  `-d:selloTaint`) to confirm no regression: exit 0, 307 `[OK]`
+  assertions, only the (expected, proptest-not-fetched) property-suite
+  skips.
+
+**Stage 3 (schema proof-spike), recorded in `taint.nim`'s own module
+doc, verified empirically (not merely asserted) via a scratch file
+constructing two REAL `DeclassEntry` literals** (one `width:
+dwDigest64` for a future `sha512` tainted-message/declassified-digest
+entry, one `width: dwVerdictByte` for a future
+`ristretto.toRistrettoStaticSecret` import-reject entry) **against the
+frozen schema — both compiled with no field or type change needed.**
+Verdict: the schema holds; not wired into the live `DeclassId`
+enum/register (no real call site exists yet in `private/sha512.nim`/
+`ristretto.nim` this slice touches).
+
+**Stage 4 (records).** CLAUDE.md gained the `private/taint.nim`/
+`taint_shim.c` module-list entry (11), a `tests/ct_taint/` Tests-section
+bullet, and a `scripts/ct-taint.sh` scripts-list line; this handoff
+entry. Merge-gate on the mechanism+targets push: run `33288822978`, all
+required checks green (confirmed before fast-forwarding to `main`).
+
+**Genuine findings, both infra, no core-arithmetic defect:** (1) the
+`valgrind-client-headers` openSUSE package split (Stage 0, inherited
+from the prior agent's own investigation, re-verified live this
+session); (2) three small Nim indentation/type gotchas in the target
+files (a deeper-than-statement doc comment before a dedented next
+statement triggers "invalid indentation"; `markDefined`/`declassify`'s
+buffer overloads need `var`, not `let`; `keypair(seed)` needs the
+rvalue-argument idiom `keypair(toSeed(bytes))`, not a named `let seed`
+binding, even at module top level) -- none affecting the taint mechanism
+itself, all fixed same-session.
+
+Remaining launch order (unchanged menu, just fewer items): 20-23 (the
+A7 register, remaining taint targets, taint CI jobs, the disasm gate),
+then the A9 memcheck extension of `nightly.yml`, then slice 30, then 32.
+Slices 27-29 stay Corey-physical. 22/32 done at this note.
 
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
