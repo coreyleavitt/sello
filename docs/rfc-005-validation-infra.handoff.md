@@ -911,7 +911,7 @@ Phase 4 — nightly, timing, release:
 - [ ] 27. Timing tier provisioning (**Corey-owned, physical** — will pause loop)
 - [ ] 28. Timing tier runner + workflow
 - [ ] 29. First quiet-box battery + carve-out re-adjudication
-- [ ] 30. Release workflow (5 per-clause red demos)
+- [x] 30. Release workflow (5 per-clause red demos) -- DONE 2026-08-30, taken out of order (slices 27-29, its own numeric predecessors, remain Corey-physical; slice 30's own prior deferral, dated 2026-08-25, was resolved by slice 25/A9 landing all four nightly-qualification producers -- see that note's own resolution paragraph, and this slice's own entry below for the full design, every real-CI run id, and clause (iii)'s degraded-mode design pending 28/29).
 - [x] 31. README evidence table + drift check -- DONE 2026-08-25, taken out of order (slices 25/27-30 blocked on the Corey-owned ghcr credential or Corey-physical hardware; this slice needed only what already exists in the repo). See the full slice entry below for the table design, the `validation-map` gate, and all run ids.
 - [ ] 32. Registry + close-out audit
 
@@ -5916,3 +5916,263 @@ question this slice does not resolve).
   future session should confirm and flip those two checkboxes rather
   than re-do the work), then 30 (now unblocked, per the note above),
   then 32. Slices 27-29 stay Corey-physical.
+
+## RFC-005 slice 30: release workflow -- full record
+
+**Scope landed, unabridged.** `.github/workflows/release.yml`
+(release-gate / release-consumer / release-publish jobs),
+`scripts/lib/release_gate.py` (the four-clause implementation --
+merge-gate, nightly-qualification, timing-freshness, version-consistency
+-- no short-circuit, every clause reported independently),
+`scripts/release-gate.sh` (thin host-runnable entry point),
+`scripts/lib/version-consistency.sh` (deliverable (b), the standalone
+version-only wrapper), `.github/allowed_signers` (the committed SSH
+trust root, verified live against `v0.3.0`'s own tag before being
+committed: "Good git signature for corey@leavitt.dev"), a `SECURITY.md`
+paragraph recording the tag-signing trust root, `.github/rulesets/
+tags.json`'s `refs/tags/scratch/**` exclusion (applied live via
+`scripts/ruleset-apply.sh --apply`), `scripts/lib/validation_map_check.py`'s
+new `release-gate` table category (a genuine fourth category -- neither
+required-check nor nightly fit a job that runs once per tagged release
+and never gates a push), three new README validation-map rows, and a
+new CLAUDE.md paragraph (the clauses, the sub-verdict split within
+clause (iii) and what `--stale-accept` can/cannot override, the
+release-notes-body-is-the-CHANGELOG-section decision, the scratch-tag
+convention, the `--timing-fixture` test hook, the consumer-test
+mechanism, the artifact, and what slices 28/29 unlock).
+
+**Design decisions made and recorded (the task's own "decide, record"
+instructions), restated here for a future session's quick reference:**
+- Clause (ii) qualifies on ONE nightly.yml run where all four subset
+  jobs (`fuzz`/`s390x`/`memcheck`/`cranked-properties`) succeeded on the
+  SAME head SHA -- not four independently-newest per-job successes
+  stitched across different SHAs. Stitching would let four different
+  nights jointly satisfy the subset with no single SHA ever actually
+  carrying all four, defeating the ancestry/no-diff check's own meaning.
+- Clause (iii)'s STALE verdict splits into two overridable sub-verdicts
+  (ABSENT, WINDOW_EXCEEDED) and three HARD FAILs `--stale-accept` can
+  NEVER rescue (NON_ANCESTOR, CORE_DIFF, CITATION_MISSING) -- the RFC's
+  own text says a release may proceed on *stale* evidence, not *wrong*
+  evidence; a notation string can attest to "knowingly accepted old
+  evidence," never to "this evidence is even about the released code."
+- The release-notes body IS `CHANGELOG.md`'s `## [x.y.z]` section, full
+  stop -- one definition (`release_gate.py --print-body`), two
+  consumers (the `--stale-accept` notation grep, and `gh release create
+  --notes-file` verbatim). No second "release notes" input was added.
+- Scratch tags (`scratch/vX.Y.Z[-suffix]`) are excluded from the `tags`
+  ruleset's `~ALL` update/deletion protection so red/green demo tags are
+  genuinely deletable; `release.yml`'s own trigger stays narrow (`push:
+  tags: v*` only) so a scratch tag push never auto-triggers an unwanted
+  run -- every scratch demo runs exclusively via `workflow_dispatch`
+  with explicit `tag`/`stale_accept`/`timing_fixture` inputs.
+- `--timing-fixture SHA,DATE` is a documented, off-by-default test hook
+  substituting a literal (SHA, date) pair for the real `timing.yml`/
+  `evidence`-branch query -- used only to witness clause (iii)'s
+  ancestry/window/diff logic ahead of slices 28/29, always logged loudly
+  as a fixture, never used on a real release. It skips the
+  `docs/ct-results.md` citation check (a fixture SHA was never really
+  adjudicated there).
+- Consumer-test mechanism, verified empirically before being wired in
+  (see the local transcript below): `nimble install -y
+  "https://github.com/<repo>@#<tag>"` followed by a plain `nim c -r
+  consumer.nim` -- no `--path`/`--nimblePath` flag needed.
+
+**Local pre-verification (before any CI run, per this project's own
+"verify-first" precedent):** every clause function (`clause_merge_gate`,
+`clause_nightly_qualification`, `clause_timing` -- both fixture and
+real-workflow-absent paths, `clause_version_consistency`) was exercised
+locally against real repo state (a local-only, unpushed test tag on
+`main` HEAD, deleted immediately after each check) before being wired
+into CI, catching two real bugs pre-CI: (1) `gh api` silently switches
+GET to POST the instant any `-f` flag is present, which 404'd every
+check-runs/workflow-runs query until fixed to build the query string
+manually and pass `-X GET` explicitly; (2) an earlier ordering mistake
+in local ad-hoc testing (querying against a tag ref before it was
+actually created) gave a false "not an ancestor" result -- resolved by
+sequencing, not a code bug. The `nimble install` + `nim c -r` consumer
+mechanism was independently verified against a real, already-published
+tag (`v0.3.0`) in a bare `podman run` of the pinned base image before
+being wired into `release.yml`, confirming the exact command line that
+works with no extra flags.
+
+**Real-CI run ids, in the order they happened:**
+- Branch `rfc-005-slice30` merge-gate, first push (commit `bb4875b`):
+  run `33318814203` -- FAILED on two checks: `policy-lint` (actionlint's
+  shellcheck flagged SC2129 -- three individual `>> "$GITHUB_OUTPUT"`
+  redirects in the `vars` step, combined into one `{ ...; } >>` block in
+  the fix) and `ruleset-sync` (the intended `tags.json` drift, not yet
+  applied live -- expected, per this project's own standing "commit the
+  ruleset edit, watch ruleset-sync go red, then apply" ritual). Fixed
+  same-session (commit `d48fa8d`), `scripts/ruleset-apply.sh --apply`
+  ran for real (evidence/main/tags ids 21282944/21282945/21282947, tags
+  ruleset's live diff matched exactly the committed `scratch/**`
+  exclusion, nothing else). Re-trigger run `33320093129`: 27/27 green.
+- Fast-forwarded `rfc-005-slice30` to `main` (`git push origin
+  rfc-005-slice30:main`); branch deleted both locally and on `origin`
+  (404-confirmed). This ALSO auto-triggered a second, independent
+  merge-gate run on the `main` push event for the identical SHA (run
+  `33320824230`, expected GitHub behavior this session had not
+  anticipated when the first four red-clause demos were dispatched too
+  early -- see below) -- confirmed green (27/27) before the affected
+  demos were redispatched.
+- Scratch commit `ace0005` (branch `rfc-005-slice30-missing-nightly-demo`,
+  a trailing comment appended to `src/sello/field.nim`): merge-gate run
+  `33320846189`, 27/27 green.
+- Scratch commit `7954aa0` (branch
+  `rfc-005-slice30-green-witness-demo`, `CHANGELOG.md`'s `[0.5.0]`
+  section gains a `timing-evidence: stale` sentence): merge-gate run
+  `33320854749`, 27/27 green.
+- Orphan commit `f199aaa` (branch `rfc-005-slice30-nonancestor-source`,
+  no shared history with `main` at all) -- pushed only to make its SHA
+  fetchable by `release.yml`'s `fetch-depth: 0` checkout; never itself
+  tagged or gated.
+- **Red demo 1 (stale window):** tag `scratch/v0.5.0-stale-window` at
+  `main` HEAD (`d48fa8d`). First dispatch, run `33320890701` -- FAILED,
+  but on the WRONG grounds (clause (i) merge-gate also read FAIL,
+  because the second, main-push-triggered merge-gate run above was
+  still in-flight at dispatch time and its own fresh, null-conclusion
+  check-runs on that exact SHA out-"latest"-ed the already-green
+  branch-push run's check-runs -- a real, if narrow, timing hazard this
+  session hit live: cutting a release (or running this gate) within
+  seconds of a fast-forward, before that FF's own re-triggered
+  merge-gate settles, can transiently under-report clause (i) even
+  though the code is genuinely green). Redispatched after
+  `33320824230` went green: run `33321536294` -- clause (i)/(ii)/(iv)
+  PASS, clause (iii) STALE (`timing.yml` absent, no `--stale-accept`),
+  isolating exactly this clause. `release-gate` job FAILED as required;
+  `release-consumer`/`release-publish` both SKIPPED.
+- **Red demo 2 (non-ancestor timing SHA):** tag
+  `scratch/v0.5.0-nonancestor-timing` at `main` HEAD, `--timing-fixture
+  f199aaa5834116b75a5327d4306b0d136af4562a,2026-08-30` (the orphan
+  commit above). First dispatch `33320891726` hit the identical
+  premature-clause-(i) hazard as demo 1; redispatched as run
+  `33321537474` -- clause (iii) FAIL ("is NOT an ancestor"), every
+  other clause PASS.
+- **Red demo 3 (ancestor with subsequent `src/sello/` diff):** tag
+  `scratch/v0.5.0-core-diff` at `main` HEAD, `--timing-fixture
+  3ae80e5a660a8f0ed6d339dd8a416c15c5f52877,2026-08-30` (`v0.1.0`'s own
+  commit, dated today so ONLY the diff check, not the freshness window,
+  is under test). First dispatch `33320892800` hit the same hazard;
+  redispatched as run `33321538529` -- clause (iii) FAIL ("is an
+  ancestor, but src/sello/ changed"), every other clause PASS.
+- **Red demo 4 (version mismatch):** tag
+  `scratch/v0.9.9-version-mismatch` at `main` HEAD. First dispatch
+  `33320894114` hit the same hazard; redispatched as run `33321539439`
+  -- clause (iv) FAIL (nimble/milpa.kdl/CHANGELOG all say `0.5.0`),
+  clause (iii) incidentally STALE (real, non-fixture query -- disclosed,
+  expected, not the point of this demo), clauses (i)/(ii) PASS.
+- **Red demo 5 (missing nightly qualification):** tag
+  `scratch/v0.5.0-missing-nightly` at commit `ace0005` (merge-gate
+  already green on that exact SHA from its own branch push, so clause
+  (i) was never in question here). Run `33321581498` -- clause (ii)
+  FAIL, and via the honest, only-possible sub-path for a BRAND-NEW
+  `src/sello/`-touching commit: the newest fully-qualifying nightly run
+  IS an ancestor (every nightly run is, transitively, since it ran
+  against an earlier `main` SHA), but `src/sello/` changed between it
+  and this tag -- i.e. no nightly run has ever seen this exact SHA's
+  code, which is precisely "missing nightly qualification" for a commit
+  that did not exist at any past nightly's run time. Clause (i)/(iv)
+  PASS, clause (iii) incidentally STALE (disclosed, not the point).
+- **Green witness:** tag `scratch/v0.5.0-green` at commit `7954aa0`
+  (signature verified locally before dispatch: `git -c
+  gpg.ssh.allowedSignersFile=.github/allowed_signers tag -v
+  scratch/v0.5.0-green` -> "Good git signature for
+  corey@leavitt.dev"). Dispatched with `stale_accept=true`, run
+  `33322076007`: ALL THREE JOBS GREEN. `release-gate`: merge-gate PASS,
+  nightly-qualification PASS, timing-freshness
+  PASS-VIA-STALE-ACCEPT ("overridden: 'timing-evidence: stale' present
+  in the release-notes body"), version-consistency PASS, overall PASS.
+  `release-consumer`: `nimble install` + `import sello` sign/verify
+  roundtrip, green in 23s. `release-publish`: tag signature verified in
+  CI against `.github/allowed_signers`, tarball + sha256 built, GitHub
+  release created (`--prerelease`, since the tag is `scratch/*`) with
+  both assets attached, body = the CHANGELOG section carrying the
+  notation.
+
+**Cleanup, every item 404-confirmed:** `gh release delete
+scratch/v0.5.0-green --yes` (release gone, confirmed via `gh api
+repos/.../releases/tags/scratch%2Fv0.5.0-green` -> 404); all six scratch
+tags deleted via `gh api -X DELETE .../git/refs/tags/scratch%2F<name>`
+-- caught one real gotcha here: this host's git config carries
+`push.followTags = true`, so an UNRELATED `git push origin --delete
+<three demo branches>` (run while the six scratch tags still existed
+LOCALLY, not yet `git tag -d`'d) silently RE-PUSHED all six local
+scratch tags to `origin` as a side effect, undoing the just-completed
+`gh api` deletions; caught immediately by a post-cleanup verification
+pass (every ref explicitly re-queried, not assumed), fixed by deleting
+the LOCAL tags first (`git tag -d`) and then re-running the six `gh api
+-X DELETE` calls, re-verified 404 on all six. All three demo branches
+(`rfc-005-slice30-missing-nightly-demo`,
+`rfc-005-slice30-green-witness-demo`,
+`rfc-005-slice30-nonancestor-source`) deleted both locally and on
+`origin`, 404-confirmed. `main`'s own `CHANGELOG.md`/`src/sello/field.nim`
+were never touched by any demo (every edit lived only on a since-deleted
+scratch branch) -- confirmed clean via `git status`/`grep`/`tail` on
+`main` after cleanup.
+
+**What slices 28/29 must produce for clause (iii) to go green without
+`--stale-accept`, restated concretely for slice 32's own benefit:**
+slice 28 stands up `.github/workflows/timing.yml` (a real workflow
+`clause_timing`'s `workflow_exists` check can find) with at least one
+successful run inside the 14-day freshness window; slice 29 publishes
+that battery's raw results to the durable orphan `evidence` branch AND
+adjudicates every dudect carve-out target in `docs/ct-results.md`,
+citing that publication's run-id or SHA in text -- `clause_timing`'s
+citation check greps `docs/ct-results.md` for the qualifying run's own
+`id` (as a bare integer) or its SHA (12-char-prefix or full) verbatim,
+so the adjudication paragraph must actually name one of those, not just
+allude to "the latest battery."
+
+**What slice 32 inherits -- the exact release ritual, step by step:**
+1. Bump `sello.nimble`'s `version`, `milpa.kdl`'s `version`, and add a
+   new `## [x.y.z] - YYYY-MM-DD` `CHANGELOG.md` heading with real
+   release notes (this text becomes the GitHub release body verbatim).
+2. `scripts/lib/version-consistency.sh vX.Y.Z` locally to confirm all
+   four copies of the version agree before tagging anything.
+3. Land that version-bump commit on `main` via the normal branch ->
+   merge-gate-green -> fast-forward flow (this repo's standing branch
+   model) -- do NOT tag until this commit's own merge-gate check-runs
+   are green on the exact SHA that will be tagged.
+4. `git tag -s -m "..." vX.Y.Z <sha>` (or `-m` alone, since
+   `tag.gpgsign=true` is already set locally) on that exact green SHA.
+5. `scripts/release-gate.sh vX.Y.Z` locally FIRST (no `--stale-accept`)
+   to see the real clause table before pushing the tag -- if clause
+   (iii) is genuinely fresh (slices 28/29 landed and a timing run is
+   inside the window), this should read all-PASS with no flag needed;
+   if clause (iii) reads STALE and a maintainer judgment call is made to
+   ship anyway, add the `timing-evidence: stale` sentence to this
+   version's own `CHANGELOG.md` section BEFORE tagging (so the tag's own
+   commit carries the notation the release body will show), and re-tag
+   if the commit changed.
+6. `git push origin vX.Y.Z` -- this alone triggers `release.yml` for
+   real (the `push: tags: v*` trigger), `stale_accept` hardcoded false
+   on that path. If step 5 required a stale-accept ship, the push-
+   triggered run will correctly FAIL clause (iii) even with the
+   notation present (push runs never carry `stale_accept=true` by
+   design) -- in that case, use `gh workflow run release.yml --ref main
+   -f tag=vX.Y.Z -f stale_accept=true` as the actual release-cutting
+   dispatch instead of relying on the tag push alone; the tag itself is
+   already pushed and immutable (the `tags` ruleset), only the
+   EVALUATION needs the dispatch route for the override to apply.
+7. Confirm all three jobs green, confirm the GitHub release was created
+   (NOT `--prerelease` this time -- `release-publish`'s own
+   `prerelease` output is `false` for any non-`scratch/*` tag,
+   automatic).
+8. The nimble registry PR (slice 32's own remaining scope) references
+   this now-published, gate-passed release.
+
+**Escalations: none.** No wrong-spec discovery, no genuine fork with no
+confident recommendation. The one real, load-bearing finding worth
+flagging for a future session: cutting (or gate-checking) a release
+within moments of a fast-forward-to-`main` push can transiently
+under-report clause (i), because the fast-forward itself re-triggers an
+independent merge-gate run on the identical SHA (a `push` trigger fires
+on ref updates, not on "have I seen this commit before") -- a maintainer
+following the ritual above should let that second run settle (or simply
+wait ~30s and re-check) before trusting a red clause (i) verdict on a
+SHA that was JUST fast-forwarded to `main`. This is disclosed here as an
+operational note, not fixed in `release_gate.py` itself: the "latest
+check-run by started_at wins" design is correct and intentional (an
+in-flight rerun on the exact tagged SHA should read as not-yet-green),
+and the real fix is procedural (don't gate-check a SHA within seconds of
+its own fast-forward), not a code change.
