@@ -45,6 +45,7 @@ import sello/scalar
 import sello/challenge
 import sello/private/ct
 import sello/private/sha512
+import sello/private/taint
 
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy. The pure-Nim
@@ -54,6 +55,15 @@ import sello/private/sha512
 {.push checks: off.}
 
 proc derivePublic*(seed: array[32, byte]): array[32, byte] =
+  ## Cites: diDerivePublicKey -- the returned public key is declassified
+  ## (RFC-005 slice 19, A1's taint CT harness) immediately after
+  ## assignment, before return: a derived ed25519 public key is public
+  ## data the moment this call returns it, so withholding definedness
+  ## from `result` under the taint harness would only hide the disclosure
+  ## from that instrument, not from any real consumer. See
+  ## `private/taint.nim`'s own module doc for the full mechanism (a
+  ## compile-time no-op in every normal build).
+  ##
   ## RFC 8032 §5.1.5 public-key derivation: A = clamp(SHA-512(seed)[0..31])
   ## * B, canonically encoded. `seed` and the intermediate hash/scalar are
   ## secret; both live in fixed-size stack arrays with zero heap
@@ -100,6 +110,7 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
     a = toSecretScalar(aBytes)
 
     result = pointEncode(geScalarmultBase(a))
+    declassify(diDerivePublicKey, result)
 
     ct.wipe(h)
     ct.wipe(aBytes)
@@ -111,6 +122,13 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
 
 proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
                     msg: openArray[byte]): array[64, byte] =
+  ## Cites: diSignDetachedSignature -- the returned signature (`R || S`)
+  ## is declassified (RFC-005 slice 19, A1's taint CT harness)
+  ## immediately after assembly, before return: an ed25519 signature is
+  ## published data by definition. See `private/taint.nim`'s own module
+  ## doc for the full mechanism (a compile-time no-op in every normal
+  ## build).
+  ##
   ## RFC 8032 §5.1.6 detached signature (Ed25519: no context, no prehash):
   ##   h = SHA-512(seed); a = clamp(h[0..31]); prefix = h[32..63]
   ##   A = publicBytes                      -- see below, not re-derived
@@ -215,6 +233,7 @@ proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
 
     for i in 0 ..< 32: result[i] = R[i]
     for i in 0 ..< 32: result[32 + i] = S[i]
+    declassify(diSignDetachedSignature, result)
 
     ct.wipe(aBytes)
     ct.wipe(a)

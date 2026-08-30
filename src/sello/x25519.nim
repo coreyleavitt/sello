@@ -80,6 +80,7 @@ import std/[hashes, options, sysrand]
 import sello/field
 import sello/private/ct
 import sello/private/secret_hooks
+import sello/private/taint
 
 ## Compiler-enforced effect contract (janus consumer finding 3): nothing
 ## in this module raises or touches global GC'd state except the four
@@ -446,6 +447,15 @@ proc x25519EphemeralPair*(): tuple[secret: X25519EphemeralSecret, public: X25519
   result.public = toX25519Public(ladder(result.secret.bytes, toBytes(X25519BasePoint)))
 
 func x25519*(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Shared] =
+  ## Cites: diX25519ZeroVerdict -- the OR-accumulated all-zero verdict
+  ## byte (`acc`) is declassified (RFC-005 slice 19, A1's taint CT
+  ## harness) immediately before the branch that reads it: the
+  ## small-order-or-not fact is exactly what this function's own returned
+  ## `Option` discriminant hands the caller regardless, so branching on it
+  ## openly costs no additional secrecy. See `private/taint.nim`'s own
+  ## module doc for the full mechanism (a compile-time no-op in every
+  ## normal build).
+  ##
   ## Shared-secret computation: X25519(secret, peer). Returns none if the
   ## result is all zero -- the peer supplied a small-order point, and the
   ## "shared secret" would be attacker-known (RFC 7748 §6.1 zero-output
@@ -477,6 +487,7 @@ func x25519*(secret: X25519StaticSecret; peer: X25519Public): Option[X25519Share
   var s = ladder(secret.bytes, array[32, byte](peer))
   var acc: byte = 0
   for b in s: acc = acc or b
+  declassify(diX25519ZeroVerdict, acc)
   try:
     if acc == 0:
       result = none[X25519Shared]()

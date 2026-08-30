@@ -11,6 +11,7 @@ unit_test_files=(
   tests/unit/test_field.nim
   tests/unit/test_scalar.nim
   tests/unit/test_ct.nim
+  tests/unit/test_taint.nim
   tests/unit/test_signing.nim
   tests/unit/test_ed25519.nim
   tests/unit/test_facade.nim
