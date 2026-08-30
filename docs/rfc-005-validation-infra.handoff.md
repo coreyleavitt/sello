@@ -899,7 +899,7 @@ Phase 2 — heavy deterministic gates (independent after 7):
 
 Phase 3 — CT instruments (19→20→21→22→23 chain):
 - [x] 19. Taint CT harness A1 mechanism (go/no-go FIRST; shim TU; declassify; 2 targets; schema proof-spike) -- DONE 2026-08-30. Repin `8cd8441` (go/no-go GO on both halves, sello-dev repinned + republished), mechanism+targets `e9e2eca` (taint_shim.c/taint.nim, three declassify call sites, codegen-unchanged proof, target_sign/target_x25519_static/target_planted_leak, scripts/ct-taint.sh, zero-annotation arc verified by hand via git stash, schema proof-spike verified empirically). See the full slice entry below for transcripts and run ids.
-- [ ] 20. Secret-target register A7 (per-instrument columns; dudect retrofit; red demo)
+- [x] 20. Secret-target register A7 (per-instrument columns; dudect retrofit; red demo) -- DONE 2026-08-29/30. `tests/registers/secret_targets.nim` (37 entries, `array[SecretTargetId, SecretTargetEntry]`), `secret_target_check.py` (two-rule completeness, new required check `secret-target-register`), `ct_main.nim`'s compile-time assert-against retrofit, `ct-taint.sh`'s taint-column check, `disasmRoots()` prepared for slice 23, `tests/unit/test_registers.nim`. See the full slice entry below for the design, both real-CI red demos, and run ids.
 - [ ] 21. Taint targets (all remaining; both verdict arms; zero-annotation arc per target)
 - [ ] 22. Taint CI + doc drift (gcc+clang jobs required; anchor drift check)
 - [ ] 23. Disasm gate A2 ({.noinline.} roots + full battery refresh; nimcache-C resolver; per-backend baselines)
@@ -4151,6 +4151,230 @@ A7 register, remaining taint targets, taint CI jobs, the disasm gate),
 then the A9 memcheck extension of `nightly.yml`, then slice 30, then 32.
 Slices 27-29 stay Corey-physical. 22/32 done at this note.
 
+### Slice 20 (secret-target register A7) -- full record
+
+2026-08-29/30: slice 20 DONE end-to-end. Read A7's own text
+(`docs/rfc-005-validation-infra.md` lines 444-497) plus the A1/A2 target
+lists it cross-links against (lines 115-352), `tests/ct/ct_main.nim`,
+`tests/ct_taint/` + `scripts/ct-taint.sh`, `src/sello/private/taint.nim`,
+`src/sello.nim`, `tests/api/api_surface_gen.py`, before writing any code.
+
+**Schema, `tests/registers/secret_targets.nim`.** `array[SecretTargetId,
+SecretTargetEntry]`, 37 entries -- complete by construction, same shape
+family as `private/taint.declassRegister`. Per entry: `qualifiedProc`
+(module-qualified name; for a facade-exported entry, the EXACT
+`<resolved-module>.<symbol>` token `api_surface_gen.py`'s own resolver
+produces), `facadeExported`/`ruleBasis` (`"rule1"`/`"rule2"`/`"curated"`),
+`secretShape` (free text -- which parameter/type is secret), three
+`Coverage` cells (`dudect`/`taint`/`disasm`, each `ckDirect(name)` |
+`ckCoveredBy(id)` | `ckExempt(rationale)`), `declassIds: seq[DeclassId]`
+(imported from `private/taint`, type-checked, not stringly-typed), and a
+free-text `note`. Vocabulary decision for "not yet wired" (this slice's
+own instruction, so slice 21 can flip cells to `direct` with no schema
+change): NOT a fourth `Coverage` variant -- a temporary exemption's
+rationale references the module's own `const Pending = "PENDING (slice
+21) -- ..."` BY IDENTIFIER (never re-typed as a literal string at any of
+its 28 call sites); a permanent exemption's rationale is always a
+literal string. Every coverage-check greps for that distinction (bare
+`Pending` identifier vs. a literal string) to print an honest
+skip-with-notation line, verified this actually works below.
+
+**Full entry inventory (37), by rule/curation:**
+- Rule 1 (13 distinct facade tokens, several split across multiple
+  entries by secret-shape): `x25519.x25519` (stX25519EphemeralConsume,
+  stX25519StaticDH), `x25519.x25519Base` (stX25519Base, bundles both
+  overloads), `x25519.toBytes` (stX25519ToBytesStatic/Shared),
+  `x25519.wipe` (stX25519WipeStatic/Shared/Ephemeral),
+  `signing.keypair` (stKeypairSeed, stKeypairExpectedPublic),
+  `signing.sign` (stSign), `signing.wipe` (stSigningWipeSeed/Keypair),
+  `signing.public` (stPublic), `signing.toSeedBytes` (stToSeedBytes),
+  `ristretto.ristrettoScalarmultBase` (stRistrettoScalarmultBase, bundles
+  both overloads), `ristretto.ristrettoScalarmult`
+  (stRistrettoScalarmultStatic/Ephemeral), `ristretto.toBytes`
+  (stRistrettoToBytesStatic/Shared), `ristretto.wipe`
+  (stRistrettoWipeStatic/Ephemeral/Shared).
+- Rule 2 (4 tokens): `x25519.toX25519StaticSecret`, `signing.toSeed`,
+  `ristretto.toRistrettoStaticSecret`, `ristretto.toRistrettoStaticSecretWide`.
+- Curated (non-facade or non-role-typed, named explicitly by A1's target
+  list or an existing dudect/taint target): `private/backend.derivePublic`,
+  `private/backend.signDetached`, `scalar.geScalarmultBase`,
+  `x25519.ladder`, `scalar.geScalarmultCT`, `ristretto.ristrettoEncode`,
+  `` ristretto.`==` ``, `ristretto.ristrettoFromUniformBytes`,
+  `private/sha512.sha512`, `wipe.wipe`.
+
+**Coverage totals (verified via a local Nim probe, `tests/registers/
+probe_check.nim`, deleted before commit per the scratch-file rule):**
+dudect direct=10 (matching `ct_main.nim`'s 10 real, non-positive-control
+targets exactly), taint direct=6 (`sign` x4: stDerivePublic,
+stSignDetached, stToSeed, stKeypairSeed; `x25519_static_normal` x2:
+stX25519StaticDH, stToX25519StaticSecret), taint coveredBy=1, taint
+pending(slice 21)=28, taint permanent-exempt=2 (the two `X25519Shared`/
+`RistrettoShared` secret-OUTPUT boundary-rule entries),
+`disasmRoots()` = `["derivePublic", "signDetached", "geScalarmultBase",
+"ladder", "geScalarmultCT", "ristrettoEncode", "` + "`" + `==` + "`" + `", "compress"]`
+-- exactly A2's own eight enumerated roots, an unplanned but welcome
+cross-check that the curation was faithful to the RFC text.
+
+**Dudect retrofit (b), `tests/ct/ct_main.nim`.** Imports the register;
+every real `runDudect` call site now sources its printed name from
+`secretTargetRegister[id].dudect.name` (identity is the one legitimate
+drive-from). A `static:` block (compile-time, not runtime -- chosen per
+this slice's own instruction, since `scripts/build-smoke.sh`'s
+`scripts/ct.sh --build-only` already compiles this file on every push)
+proves bidirectional set equality between a hand-maintained
+`dudectTargetIds` const array and the register's own `ckDirect`-dudect
+entries, both directions (count match, every `dudectTargetIds` member is
+`ckDirect`, every `ckDirect` register entry is in `dudectTargetIds`).
+
+**Taint column (c), `scripts/ct-taint.sh`.** A new python3 step (after
+the existing per-`DeclassId` exercise-completeness check) text-scans the
+register (light single-pass regex over `SecretTargetEntry(...)` blocks,
+isolating each entry's `taint:` field span up to the next `disasm:`
+label -- same register-shaped precedent `gates-manifest-check.sh`'s own
+awk scan establishes), asserts every `ckDirect` taint cell's name is one
+of the target identities the script's own `run_target` calls actually
+ran (`sign`, `x25519_static_normal`, `x25519_static_smallorder`), and
+prints (never silently swallows) the pending/permanent-exempt/coveredBy
+counts. Not itself a required CI check (`ct-taint.sh` needs the
+`sello-dev` image for valgrind and is a maintainer-run instrument, same
+register as `ct.sh`/`fuzz.sh`), so verified by extracting and running the
+embedded python block standalone against the real register (`python3
+/tmp/extracted_ct_taint_check.py`) rather than a full valgrind pass --
+matched the local Nim probe's totals exactly (direct=6, coveredBy=1,
+pending=28, permanent=2) before ever touching the register's shipped
+version.
+
+**Two-rule completeness check (d).** `tests/registers/
+secret_target_check.py` imports `tests/api/api_surface_gen.py` directly
+(`sys.path` insert, reusing its `parse_exports`/`build_corpus_index`/
+`resolve` -- no second signature scanner) and, per facade export entry's
+jsondoc-resolved `code` string, checks rule 1 (a depth-counted paren scan
+isolates the parameter list -- NOT a `\((.*?)\):` regex, which a first
+pass wrongly used and undercounted rule 1 by exactly the three `wipe`
+overloads, since a void proc's code has no `): ReturnType` trailing its
+param list at all; caught against a real `nim jsondoc` run before ever
+pushing, fixed same-session) for any of the 8 enumerated secret-role type
+names as a whole word, and rule 2 (`to\w*Secret\w*|toSeed\w*` symbol
+pattern plus a bare `array[` first-parameter type). Checked against BOTH
+build configs. **Mechanism placement, recorded per the task's own
+"pick with a recommendation" instruction:** a NEW required check
+(`secret-target-register`, `scripts/secret-target-register-check.sh`),
+not a `tests/unit/` unit-suite member -- it needs the host `nim jsondoc`
+toolchain the same way `api-surface`/`api-surface-libsodium` do (a
+heavier, host-toolchain-shaped dependency than the rest of the unit
+suite, which is deliberately toolchain-light so it runs identically on
+every hosted-native leg incl. macOS/Windows), so it followed that gate's
+own placement precedent exactly rather than forcing `nim jsondoc` onto
+every unit-suite-running leg. `gates.txt`/`merge-gate.yml` gained one row
+each (23 required checks total, up from 22); CLAUDE.md's job-count prose
+updated. `tests/unit/test_registers.nim` (in the plain unit suite, cheap
+and toolchain-light) separately pins the register's OWN internal
+consistency (no multi-hop `coveredBy` chains, every `ckDirect`/`ckExempt`
+cell well-formed, `disasmRoots()`'s dedup invariant, the dudect-direct
+count) -- a fast complement, not a substitute for the jsondoc-driven
+check.
+
+**Disasm containment (e), prepared only.** `disasmRoots(): seq[string]`
+exported from the register, deduplicated union of every `ckDirect`
+disasm cell (8 names, see above) -- the exact set slice 23's disasm gate
+will assert `⊆` the pinned baseline's root set against. No gate consumes
+it yet.
+
+**Local verification, before ever pushing:**
+- `tests/registers/secret_targets.nim` compiles standalone
+  (`nim c --path:src`) and via a scratch probe confirming the coverage
+  totals above.
+- `tests/ct/ct_main.nim` compiles clean (`-d:release`, full `nim.cfg`
+  paths) with the retrofit.
+- **Dudect red demo (local, before the real-CI one below):** removing
+  `stGeScalarmultBase` from `dudectTargetIds` while leaving its register
+  entry `ckDirect` produced a genuine Nim COMPILE-TIME failure (the
+  `static:` block's `doAssert`, surfaced as `AssertionDefect` during
+  compilation, not a runtime crash) with the exact named diagnostic
+  ("...disagree in COUNT..."); restored and re-diffed byte-identical to
+  confirm a clean revert before proceeding.
+- `scripts/secret-target-register-check.sh` run against the real
+  register: `rule1 required=13 rule2 required=4, all present in
+  register: True` for both configs.
+- **Completeness-check red demo (local):** renaming one entry's
+  `qualifiedProc` produced `FAIL -- rule 1 ... has no register entry for:
+  ['signing.toSeedBytes']`, exit 1; restored and re-diffed clean.
+- `bash scripts/gates-manifest-check.sh` (23 checks both sides),
+  `bash scripts/policy-lint.sh` (actionlint clean, all 5 content
+  assertions pass incl. the sello-dev Containerfile-hash pin), `bash
+  scripts/validation-map-check.sh` (unaffected by this slice) all green
+  locally before pushing.
+- Full `scripts/test.sh` run inside the base image: exit 0, `test_registers.nim`'s
+  8 assertions green alongside the rest of the (proptest-skipped) suite.
+
+**CI, real runs (branch `rfc-005-slice20`).**
+- Push 1 (mechanism commit `a125c4f`): run `33291519444`. 22/23 jobs
+  green; `ruleset-sync` red as EXPECTED (the live GitHub ruleset's
+  required-check set still had 22 entries; `gates.txt`/`merge-gate.yml`
+  now have 23) -- confirmed via the job's own log:
+  `DRIFT (leg 2...) required by gates.txt (and not actively waived) but
+  missing from the live main ruleset: secret-target-register`, plus the
+  matching leg-3 JSON diff adding the `secret-target-register` context
+  object. `secret-target-register` and `validation-map` (and every other
+  job) themselves passed on this same run.
+- `scripts/ruleset-apply.sh` (dry run, then `--apply`): both confirmed
+  the exact expected single-line diff (`"context":
+  "secret-target-register"` added to `main.json`'s required-check
+  array), UPDATEd all three live rulesets (`evidence`/`main`/`tags`, ids
+  21282944/21282945/21282947).
+- Re-trigger commit `cbf0fff` (empty, per slice 31's own precedent) --
+  run `33292547458`: 23/23 green, `ruleset-sync` now clean (`leg 1/2/3
+  OK`). **This is the CI-green state the branch fast-forwards to main
+  from.**
+- **Red demo 1 (dudect, DoD (f)):** scratch branch
+  `rfc-005-slice20-red-demo` (off the now-green `rfc-005-slice20` tip),
+  `stGeScalarmultBase` dropped from `dudectTargetIds` (the local repro
+  above, now pushed for real) -- run `33293087699`, job `build-smoke`
+  (id `99208015291`) `completed`/`failure` within ~3 polling intervals
+  (compile fails fast); rest of the run cancelled once confirmed
+  (`gh run cancel`) rather than waited out, since the compile failure was
+  already the evidence needed. Branch deleted both locally and on
+  `origin` (`git ls-remote --heads` empty afterward, 404-equivalent).
+- **Red demo 2 (rule 1, DoD (f)'s "if (d) landed as a required check,
+  also show a rule-1 red"):** scratch branch `rfc-005-slice20-red-demo2`,
+  a new scratch `signing.scratchTakesSeed*(s: Seed): int = 0` proc
+  exported from the facade with NO register entry -- run `33293184794`,
+  job `secret-target-register` (id `99208279417`) `completed`/`failure`;
+  log-equivalent to the local repro (`rule 1 ... has no register entry
+  for: ['signing.scratchTakesSeed']`). One real, honest finding from
+  this demo's first attempt: an inline `#`-comment appended to the new
+  `export` line in `src/sello.nim` broke `api_surface_gen.py`'s own
+  export-line parser (it does not strip trailing comments, undocumented
+  as a blind spot until this demo hit it) -- produced a DIFFERENT, also
+  correct but less legible red (`export '...  # RFC-005 slice 20...' not
+  found anywhere in the curated CORPUS`); removed the inline comment to
+  get the clean, intended rule-1 diagnostic before pushing for real.
+  Rest of the run cancelled once confirmed. Branch deleted both locally
+  and on `origin`, 404-confirmed.
+
+**Genuine findings, both infra, no core-arithmetic defect:** (1) the
+`param_section` void-proc regex bug undercounting rule 1 by the three
+`wipe` overloads (caught locally against a real `nim jsondoc` run before
+ever pushing); (2) `api_surface_gen.py`'s inline-comment blind spot on an
+`export` line (caught by the red-demo-2 rehearsal, not previously
+disclosed in that generator's own module doc -- worth a future note
+there, not fixed this slice since it is pre-existing `api_surface_gen.py`
+code this slice's scope did not include touching).
+
+**Mutation catalog:** unaffected -- no `src/sello/` file this slice
+touched appears in `tests/mutation/mutants/`'s exact-string patch
+targets (the two red-demo scratch edits to `signing.nim`/`src/sello.nim`
+were on scratch branches, reverted-by-deletion, never merged).
+
+Remaining launch order (unchanged menu): 21 (remaining taint targets,
+flipping this slice's own `PENDING (slice 21)` cells to `direct` as each
+target lands -- the exact "no schema change" property this slice's
+vocabulary decision was built for), 22 (taint CI jobs + anchor drift
+check), 23 (the disasm gate, consuming `disasmRoots()` for real), then
+the A9 memcheck extension of `nightly.yml`, then slice 30, then 32.
+Slices 27-29 stay Corey-physical. 23/32 done at this note.
+
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -4305,4 +4529,34 @@ Slices 27-29 stay Corey-physical. 22/32 done at this note.
   launch order: 19-23, 25 (all formerly credential-blocked, same as
   before), then the A9 memcheck extension of nightly.yml, then slice 30,
   then 32. Slices 27-29 stay Corey-physical. 21/32 done at this note.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 19.
+  Slice 19 is DONE (2026-08-30, landed in numeric order -- see its own
+  full-record entry above): the taint CT harness's A1 mechanism
+  (`private/taint.nim`/`taint_shim.c`, `DeclassId`/`declassRegister`,
+  `declassify` templates) plus its first two real targets
+  (`target_sign.nim`, `target_x25519_static.nim`) landed via
+  `scripts/ct-taint.sh` (needs `sello-dev`, repinned this slice for
+  `valgrind-client-headers`). Not a required CI check yet (slice 22's
+  own job). Slice 20 is DONE (2026-08-30, landed in numeric order --
+  see its own full-record entry above): `tests/registers/
+  secret_targets.nim` (37 entries) landed as the checked fact-set
+  `ct_main.nim`'s dudect harness (a compile-time assert-against, caught
+  by the existing `build-smoke` required check) and `ct-taint.sh`'s
+  taint harness (a new python-driven column check, not itself a
+  required check) are both retrofitted to assert their own coverage
+  against; a NEW required check, `secret-target-register`
+  (`scripts/secret-target-register-check.sh`), landed the two-rule
+  completeness half (23 required checks total, up from 22) --
+  `scripts/ruleset-apply.sh --apply` applied cleanly (evidence/main/tags
+  ids 21282944/21282945/21282947), re-trigger run `33292547458` 23/23
+  green. Both DoD red demos confirmed via real CI runs on scratch
+  branches (dudect: run `33293087699`, job `build-smoke`
+  `99208015291`; rule 1: run `33293184794`, job
+  `secret-target-register` `99208279417`), both reverted and both
+  branches deleted (404-confirmed). Two genuine infra findings, both
+  fixed same-session, no core-arithmetic finding (see the slice's own
+  full record). `disasmRoots()` prepared for slice 23, unconsumed.
+  Remaining launch order: 21-23, 25 (all formerly credential-blocked,
+  same as before), then the A9 memcheck extension of nightly.yml, then
+  slice 30, then 32. Slices 27-29 stay Corey-physical. 23/32 done at
+  this note.
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, first re-check `gh auth token` scopes for write:packages; if present, resume RFC order at slice 21.
