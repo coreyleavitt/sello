@@ -124,7 +124,94 @@ EOF
     echo "ct-taint: OK -- ${local_id} exercised (see ${local_log})." >&2
   done
 
-  echo "ct-taint: ALL TARGETS PASSED (clean where expected, red where expected, every register entry exercised)." >&2
+  echo "ct-taint: checking register taint-column coverage (assert-against, RFC-005 slice 20/A7)..." >&2
+  # tests/registers/secret_targets.nim's `taint` coverage cell is asserted
+  # here rather than in Nim (ct_main.nim's own compile-time assert-against
+  # is possible because dudect's target set is enumerable at compile time
+  # via one const array; this harness's targets are separate PROCESSES run
+  # by this script, so their "name" identity only exists here, in bash) --
+  # every `ckDirect` taint cell's `name` must be one of the target
+  # identities this script actually ran above; a `ckExempt` cell whose
+  # rationale begins with the literal "PENDING (slice 21)" is printed as
+  # an honest skip, never silently treated as covered (this slice's own
+  # scope (c) instruction: "never silently green").
+  python3 - <<'PYEOF'
+import re
+import sys
+
+names_run = {"sign", "x25519_static_normal", "x25519_static_smallorder"}
+# ^ the identity anchors this script's own run_target calls above use --
+# "planted_leak" is deliberately excluded: it is the harness's own
+# PERMANENT negative fixture, not a secret_targets.nim register entry.
+
+text = open("tests/registers/secret_targets.nim").read()
+# One block per `SecretTargetEntry(...)` -- split on the entry-opening
+# marker so each block's own `taint:` field cannot bleed into another
+# entry's (the register's own author-facing formatting keeps one entry
+# per `id: st...,` / `taint: Coverage(...)` pair; this is the same
+# light, single-pass text-scan register gates-manifest-check.sh's own
+# awk scan already precedents for a hand-written, reviewed source file).
+blocks = re.split(r'\n  st\w+: SecretTargetEntry\(', text)[1:]
+
+# Each entry's field order is fixed (qualifiedProc, facadeExported,
+# ruleBasis, secretShape, dudect, taint, disasm, declassIds, note), so the
+# taint cell is isolated as the span from its own `taint: Coverage(` up to
+# the NEXT field's `disasm:` label -- robust to the cell's rationale text
+# spanning one line or several. A `ckExempt` cell whose rationale is the
+# BARE identifier `Pending` (referencing this module's own `const Pending
+# = "PENDING (slice 21) -- ..."`, never re-typed as a literal string at
+# each of its 28 call sites) is the temporary/slice-21 register; every
+# other `ckExempt` cell's rationale is a literal string -- a PERMANENT,
+# stated design boundary.
+direct_names = []
+pending_count = 0
+permanent_exempt_count = 0
+covered_by_count = 0
+for block in blocks:
+    m = re.search(r'\n    id: (\w+),', block)
+    entry_id = m.group(1) if m else "<unknown>"
+    tm = re.search(r'taint: Coverage\(.*?\n    disasm:', block, re.S)
+    if not tm:
+        sys.stderr.write(f"ct-taint: FAIL -- could not isolate a taint "
+                          f"cell for register entry {entry_id}.\n")
+        sys.exit(1)
+    span = tm.group(0)
+    if 'kind: ckDirect' in span:
+        nm = re.search(r'name: "([^"]*)"', span)
+        direct_names.append((entry_id, nm.group(1) if nm else "<unnamed>"))
+    elif 'kind: ckCoveredBy' in span:
+        covered_by_count += 1
+    elif re.search(r'rationale:\s*Pending\b', span):
+        pending_count += 1
+    else:
+        permanent_exempt_count += 1
+
+missing = [(eid, name) for eid, name in direct_names if name not in names_run]
+if missing:
+    sys.stderr.write(
+        "ct-taint: FAIL -- the following register entries are taint-"
+        "ckDirect but name a target this script did not run: "
+        + ", ".join(f"{eid} -> {name!r}" for eid, name in missing) + "\n")
+    sys.exit(1)
+
+print(f"ct-taint: OK -- {len(direct_names)} taint-direct register "
+      f"entr{'y' if len(direct_names) == 1 else 'ies'} all correspond to "
+      f"a target actually run this invocation: "
+      + ", ".join(f"{eid}->{name}" for eid, name in direct_names))
+print(f"ct-taint: {covered_by_count} register entr"
+      f"{'y is' if covered_by_count == 1 else 'ies are'} taint-coveredBy "
+      f"another entry (not independently asserted here).")
+print(f"ct-taint: {pending_count} register entr"
+      f"{'y is' if pending_count == 1 else 'ies are'} taint-PENDING "
+      f"slice 21 (named in A1's own target list, no live target yet -- "
+      f"printed for visibility, never silently treated as covered).")
+print(f"ct-taint: {permanent_exempt_count} register entr"
+      f"{'y is' if permanent_exempt_count == 1 else 'ies are'} taint-"
+      f"exempt permanently (a stated design boundary, e.g. the secret-"
+      f"OUTPUT-disclosure rule).")
+PYEOF
+
+  echo "ct-taint: ALL TARGETS PASSED (clean where expected, red where expected, every register entry exercised, register taint column checked)." >&2
 }
 
 if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then

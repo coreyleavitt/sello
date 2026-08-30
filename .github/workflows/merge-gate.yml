@@ -371,6 +371,36 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: SELLO_IN_CONTAINER=1 scripts/coverage.sh
 
+  # RFC-005 slice 20 (secret-target register, A7). Runs
+  # tests/registers/secret_target_check.py's two-rule completeness check
+  # (rule 1: every exported proc accepting an enumerated secret-role type
+  # -- Seed, Keypair, X25519StaticSecret, X25519EphemeralSecret,
+  # X25519Shared, RistrettoStaticSecret, RistrettoEphemeralSecret,
+  # RistrettoShared -- appears in tests/registers/secret_targets.nim;
+  # rule 2: every exported secret-import constructor, a to*Secret*/
+  # toSeed*-pattern proc taking a bare array, appears too) against both
+  # build configs. Reuses tests/api/api_surface_gen.py's own `nim
+  # jsondoc`-based facade-signature resolver rather than a second
+  # signature scanner (this slice's own explicit instruction; a naive
+  # grep over signatures was tried and rejected by the RFC's own round-2
+  # note). Same base image as api-surface above, no libsodium-devel
+  # needed for the selloLibsodium config either, for the identical
+  # `nim jsondoc`-never-compiles-C reason that gate's own job comment
+  # records. This is the register's own completeness half; the register
+  # is also what tests/ct/ct_main.nim's dudect harness (a compile-time
+  # assert-against, caught by build-smoke below on every push) and
+  # tests/ct_taint/'s taint harness (scripts/ct-taint.sh, not part of
+  # this required set -- see CLAUDE.md's own Tests-section entry) are
+  # retrofitted to assert their own coverage columns against.
+  secret-target-register:
+    name: secret-target-register
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: SELLO_IN_CONTAINER=1 scripts/secret-target-register-check.sh
+
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
   # proptest dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the

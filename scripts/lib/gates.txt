@@ -272,6 +272,17 @@
 # scripts/lib/coverage-down-path.sh + tests/coverage/expected/
 # justifications.md -- never by this check itself).
 #
+# RFC-005 slice 20 (secret-target register, A7): the plain, unwrapped
+# scripts/secret-target-register-check.sh invocation -- needs only the
+# base ghcr.io/coreyleavitt/nim image (the two-rule completeness check
+# shells out to `nim jsondoc`, same as the api-surface gate's own
+# generator, which never needs a C compiler/linker -- see that script's
+# own header comment). Asserts tests/registers/secret_targets.nim (the
+# fact-set tests/ct/ct_main.nim's dudect harness and tests/ct_taint/'s
+# taint harness are both retrofitted to assert-against, per this slice)
+# has an entry for every exported proc accepting a secret-role type and
+# every exported secret-import constructor, across both build configs.
+#
 # check-name                          script-invocation
 api-surface                         scripts/api-surface-check.sh plain
 api-surface-libsodium               scripts/api-surface-check.sh selloLibsodium
@@ -295,3 +306,4 @@ validation-map                      scripts/validation-map-check.sh
 mutation                            scripts/mutation.sh
 bmc-symex                           scripts/bmc.sh 450
 coverage-ratchet                    scripts/coverage.sh
+secret-target-register              scripts/secret-target-register-check.sh

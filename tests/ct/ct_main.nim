@@ -200,6 +200,7 @@ import sello/scalar
 import sello/x25519
 import sello/ristretto
 import ./dudect
+import ../registers/secret_targets
 
 # ---------------------------------------------------------------------------
 # Fixed public inputs, shared across classes for a given target
@@ -540,6 +541,68 @@ proc opSha512Compress(msg: array[512, byte]): uint64 =
   acc
 
 # ---------------------------------------------------------------------------
+# RFC-005 slice 20 (A7): assert-against the secret-target register.
+#
+# `dudectTargetIds` names every `SecretTargetId` this file builds a real
+# dudect report for -- the register's own `dudect` coverage cell for
+# each id is required to be `ckDirect`, and every `ckDirect` register
+# entry is required to appear in this list. Both directions are proved
+# at COMPILE TIME (a `static:` block over the const `secretTargetRegister`
+# table), not at runtime: `scripts/build-smoke.sh`'s
+# `scripts/ct.sh --build-only` compiles this file on every push
+# (CLAUDE.md's own Build-smoke-check paragraph), so a register entry
+# deliberately marked `ckDirect` with no corresponding call site below --
+# or a call site whose id was quietly dropped from this list -- fails
+# the REQUIRED `build-smoke` check before any timing sample is ever
+# drawn, exactly matching A7's own "assert-against, not drive-from"
+# design (docs/rfc-005-validation-infra.md lines 444-497) and this
+# slice's own scope (b) instruction to prefer a compile-time assertion
+# over a startup one, since build-smoke only ever compiles this binary,
+# never runs it. Every `runDudect` call site above sources its printed
+# name from `secretTargetRegister[id].dudect.name` directly (identity is
+# the one legitimate drive-from, per A7's own text) rather than a second,
+# independently-typed string literal that could silently drift from the
+# register.
+#
+# The positive control (`leakyOp`) is NOT a sello function and carries
+# no register entry -- excluded from this list by design, matching the
+# hard-failure loop at the bottom of this file, which already excludes
+# it from the real-target verdict check by name.
+const dudectTargetIds = [
+  stSignDetached, stGeScalarmultBase, stX25519Base, stX25519EphemeralConsume,
+  stX25519StaticDH, stRistrettoScalarmultStatic, stRistrettoEncode,
+  stRistrettoEqual, stRistrettoFromUniformBytes, stSha512Message,
+]
+
+static:
+  var directIds: seq[SecretTargetId]
+  for entry in secretTargetRegister:
+    if entry.dudect.kind == ckDirect:
+      directIds.add(entry.id)
+  doAssert directIds.len == dudectTargetIds.len,
+    "ct_main.nim's dudectTargetIds (" & $dudectTargetIds.len &
+    " ids) and the register's own ckDirect-dudect entries (" &
+    $directIds.len & " ids) disagree in COUNT -- see this block's own " &
+    "comment; a register entry was added or removed on one side " &
+    "without the other."
+  for id in dudectTargetIds:
+    doAssert secretTargetRegister[id].dudect.kind == ckDirect,
+      "ct_main.nim's dudectTargetIds names " & $id & ", but its " &
+      "register entry's dudect coverage cell is not ckDirect -- either " &
+      "this file's own runDudect call site was removed (drop the id " &
+      "from dudectTargetIds too) or the register entry's dudect cell " &
+      "was changed away from direct() without updating this file."
+  for id in SecretTargetId:
+    if secretTargetRegister[id].dudect.kind == ckDirect:
+      doAssert id in dudectTargetIds,
+        "register entry " & $id & " is dudect-ckDirect(\"" &
+        secretTargetRegister[id].dudect.name & "\") but ct_main.nim's " &
+        "dudectTargetIds does not list it -- a register entry " &
+        "deliberately absent from the dudect list, exactly the red " &
+        "this slice's DoD demonstrates. Add a real runDudect call site " &
+        "for it below, or correct the register."
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
@@ -571,47 +634,47 @@ when isMainModule:
       var s: array[32, byte]
       for i in 0 ..< 32: s[i] = byte(i)
       s
-    reports.add runDudect("backend.signDetached", n, fixedSeed, randomBytes32, opSignDetached)
+    reports.add runDudect(secretTargetRegister[stSignDetached].dudect.name, n, fixedSeed, randomBytes32, opSignDetached)
 
   block:
     let fixedScalar = clampedRandomScalar()
-    reports.add runDudect("scalar.geScalarmultBase", n, fixedScalar, clampedRandomScalar, opGeScalarmultBase)
+    reports.add runDudect(secretTargetRegister[stGeScalarmultBase].dudect.name, n, fixedScalar, clampedRandomScalar, opGeScalarmultBase)
 
   block:
     let fixedSecret = randomBytes32()
-    reports.add runDudect("x25519.x25519Base", n, fixedSecret, randomBytes32, opX25519Base)
+    reports.add runDudect(secretTargetRegister[stX25519Base].dudect.name, n, fixedSecret, randomBytes32, opX25519Base)
 
   block:
     # Both classes do identical work (see module doc comment and
     # opX25519EphemeralConsume's own doc comment) -- `true`/`false` here
     # are arbitrary, unread labels, not a fixed-vs-random secret pair.
     proc makeDummyRandomLabel(): bool = true
-    reports.add runDudect("x25519(ephemeral) construct+consume", n, true,
+    reports.add runDudect(secretTargetRegister[stX25519EphemeralConsume].dudect.name, n, true,
       makeDummyRandomLabel, opX25519EphemeralConsume)
 
   block:
     let fixedSecret = randomBytes32()
-    reports.add runDudect("x25519(static) vs peer", n, fixedSecret, randomBytes32, opX25519StaticDH)
+    reports.add runDudect(secretTargetRegister[stX25519StaticDH].dudect.name, n, fixedSecret, randomBytes32, opX25519StaticDH)
 
   block:
-    reports.add runDudect("ristretto.ristrettoScalarmult", n,
+    reports.add runDudect(secretTargetRegister[stRistrettoScalarmultStatic].dudect.name, n,
       fixedRistrettoStaticBytes64, randomBytes64, opRistrettoScalarmult)
 
   block:
-    reports.add runDudect("ristretto.ristrettoEncode", n,
+    reports.add runDudect(secretTargetRegister[stRistrettoEncode].dudect.name, n,
       fixedRistrettoPoint, randomRistrettoPoint, opRistrettoEncode)
 
   block:
-    reports.add runDudect("ristretto.`==` (P,P) vs (P,Q)", n,
+    reports.add runDudect(secretTargetRegister[stRistrettoEqual].dudect.name, n,
       fixedRistrettoPoint, randomRistrettoPoint, opRistrettoEqual)
 
   block:
-    reports.add runDudect("ristretto.ristrettoFromUniformBytes", n,
+    reports.add runDudect(secretTargetRegister[stRistrettoFromUniformBytes].dudect.name, n,
       fixedUniformBytes64, randomBytes64, opRistrettoFromUniformBytes)
 
   block:
     let fixedMsg512 = randomBytes512()
-    reports.add runDudect("sha512.sha512 (4-block compress)", n,
+    reports.add runDudect(secretTargetRegister[stSha512Message].dudect.name, n,
       fixedMsg512, randomBytes512, opSha512Compress)
 
   for r in reports:
