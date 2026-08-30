@@ -145,21 +145,59 @@ jobs:
   # (verified via a fresh `podman run` before committing the fix, same as
   # every other package in this line).
   #
-  # BLOCKED EXTENSION, recorded honestly rather than attempted (per this
-  # slice's own task instruction): A6's own text asks that these two legs
-  # run "through the disasm gate" with a PER-COMPILER ROLLING BASELINE
-  # (round-2 semantics: alert only on root-level conditional-branch-count
-  # INCREASES relative to that SAME compiler's own previous canary
-  # profile, first-run bootstrap recorded as such) -- the disasm gate
-  # itself does not exist in this repository yet (RFC-005 slice 23,
-  # itself blocked on the same Corey-owned ghcr `write:packages`
-  # credential blocking slices 10/14/15/17/19-22/25). Per the slice-16
-  # build-smoke precedent ("covers exactly the harnesses that exist
-  # today"), these two legs land here as plain suite-build/run jobs NOW;
-  # slice 23 extends THIS SAME workflow/these same two jobs in place with
-  # the rolling-baseline disasm semantics once the disasm gate lands --
-  # not a new job, not a new workflow, not attempted here as a
-  # placeholder mechanism of its own.
+  # DISASM-GATE ROLLING-BASELINE EXTENSION (RFC-005 slice 23, A6's own
+  # "per-compiler rolling baseline" semantics, landed in place -- not a
+  # new job, not a new workflow, per the slice-16 build-smoke precedent
+  # this comment used to only promise). Instead of `scripts/test.sh`,
+  # each leg now runs `scripts/disasm-gate.sh --cc <cc> --canary`: NO
+  # comparison against the pinned per-backend baseline
+  # (tests/ct_disasm/expected/{gcc,clang}.txt, which is a fixed-compiler
+  # -version artifact this rolling, UNPINNED compiler would perpetually
+  # disagree with on benign codegen churn) -- instead a per-leg rolling
+  # profile of root-level conditional-branch COUNTS, persisted across
+  # runs via `actions/cache`, compared ONLY on those counts (never the
+  # ordered branch list itself, which the round-2 text explicitly scopes
+  # this comparison away from), alerting only on an INCREASE, with a
+  # first-run bootstrap logged as such rather than treated as a finding
+  # -- see `scripts/disasm-gate.sh`'s own `--canary` mode header
+  # paragraph for the exact mechanism (`SELLO_DISASM_CANARY_PREV`/
+  # `SELLO_DISASM_CANARY_OUT`, root->count TSV shape). `--canary` mode
+  # NEVER exits nonzero for an alert (A6: "failures notify, never gate")
+  # -- consistent with this whole workflow's own advisory posture, so no
+  # `if:`/exit-code plumbing was needed to keep an alert from failing the
+  # leg.
+  #
+  # Cache key, mirroring nightly.yml's own fuzz-corpus cache EXACTLY (the
+  # same main-scoped, run_id-unique-key / branch-prefix-restore-keys
+  # shape, per this slice's own instruction "cache keys must be
+  # main-scoped like the fuzz corpus"): `sello-disasm-canary-<leg>-v1-
+  # <ref>-<run_id>` for `key` (always unique, so restore never exact
+  # -matches; the point is the `restore-keys` prefix fallback), `sello-
+  # disasm-canary-<leg>-v1-<ref>-` for `restore-keys` (same-branch-only,
+  # newest-first). `<leg>` (`gcc`/`clang`) keeps the two legs' own
+  # rolling baselines independent, matching A6's "each canary compiler
+  # keeps its OWN rolling baseline" text literally. No version string is
+  # embedded in the key: the underlying gcc/clang package is itself
+  # unpinned and rolling, so "the previous canary profile" means "the
+  # previous run of THIS SAME LEG," version drift included as part of
+  # what the leg watches -- `disasm-gate.sh --canary`'s own log output
+  # separately echoes the resolved `gcc --version`/`clang --version`
+  # (already captured by each leg's own install step below) alongside
+  # the count comparison, so a version bump co-occurring with a count
+  # increase is visible in the same run's log without needing a second,
+  # version-keyed cache dimension.
+  #
+  # zypper RETRY LOOP (this slice's own addition): the two most recent
+  # SCHEDULED runs of this workflow (33249878217, 33305634834) failed
+  # both legs at the `zypper --non-interactive --gpg-auto-import-keys
+  # refresh`/`install` step on a Tumbleweed MIRROR error, not a compiler
+  # finding of any kind -- a transient infra flake this leg's own
+  # ADVISORY posture should absorb rather than report as a false
+  # "toolchain drift" signal. `retry_zypper()` below retries the
+  # refresh+install pair up to 3 times with a linear backoff (5s, 10s),
+  # logging each attempt; a THIRD failure still fails the step for real
+  # (a persistent, non-transient outage remains a real, reportable
+  # condition -- this is a flake absorber, not a "never fail" override).
   newest-gcc:
     name: newest-gcc
     runs-on: ubuntu-latest
@@ -168,18 +206,57 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
+      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo; retried up to 3x on transient mirror errors)
         run: |
-          zypper --non-interactive --gpg-auto-import-keys refresh
-          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk
+          retry_zypper() {
+            local attempt
+            for attempt in 1 2 3; do
+              if zypper --non-interactive --gpg-auto-import-keys refresh                  && zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk; then
+                return 0
+              fi
+              echo "toolchain-canary: zypper refresh/install attempt ${attempt}/3 failed" >&2
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 5))
+              fi
+            done
+            echo "toolchain-canary: zypper refresh/install failed 3/3 attempts -- not absorbing further (a persistent outage is a real, reportable condition)." >&2
+            return 1
+          }
+          retry_zypper
           gcc --version
       - name: install pinned Nim (isolates the gcc-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
-      # scripts/test.sh itself already checks for and prepends
-      # $HOME/.sello-nim/current/bin (see its own header) -- no manual PATH
-      # plumbing needed here, matching the nim-devel/nim-latest-stable
-      # legs' own plain `ci-setup.sh && ... test.sh` shape exactly.
-      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh
+      # scripts/disasm-gate.sh itself already checks for and prepends
+      # $HOME/.sello-nim/current/bin (via scripts/test.sh's own
+      # convention it shares no code with but matches) -- actually see
+      # the note below: disasm-gate.sh does NOT do this PATH prepend
+      # itself (unlike scripts/test.sh), so this leg exports PATH
+      # directly rather than relying on a mechanism disasm-gate.sh
+      # doesn't have.
+      - name: prepend pinned Nim to PATH (disasm-gate.sh, unlike scripts/test.sh, does not do this itself)
+        run: echo "$HOME/.sello-nim/current/bin" >> "$GITHUB_PATH"
+      - name: restore disasm-gate rolling canary profile (gcc)
+        id: restore-disasm-canary-gcc
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/disasm-canary-gcc.tsv
+          key: sello-disasm-canary-gcc-v1-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            sello-disasm-canary-gcc-v1-${{ github.ref_name }}-
+      - run: |
+          echo "toolchain-canary: disasm-canary-gcc cache matched key: ${{ steps.restore-disasm-canary-gcc.outputs.cache-matched-key || '(none -- cold start / first run on this branch)' }}"
+      - run: >-
+          scripts/ci-setup.sh &&
+          SELLO_IN_CONTAINER=1
+          SELLO_DISASM_CANARY_PREV=build/disasm-canary-gcc.tsv
+          SELLO_DISASM_CANARY_OUT=build/disasm-canary-gcc.tsv
+          scripts/disasm-gate.sh --cc gcc --canary
+      - name: save disasm-gate rolling canary profile (gcc)
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/disasm-canary-gcc.tsv
+          key: sello-disasm-canary-gcc-v1-${{ github.ref_name }}-${{ github.run_id }}
 
   newest-clang:
     name: newest-clang
@@ -189,16 +266,50 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo)
+      - name: install newest packaged gcc/clang + build deps (UNPINNED -- rolling repo; retried up to 3x on transient mirror errors)
         run: |
-          zypper --non-interactive --gpg-auto-import-keys refresh
-          zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk
+          retry_zypper() {
+            local attempt
+            for attempt in 1 2 3; do
+              if zypper --non-interactive --gpg-auto-import-keys refresh                  && zypper --non-interactive install -y gcc gcc-c++ clang tar xz curl gzip gawk; then
+                return 0
+              fi
+              echo "toolchain-canary: zypper refresh/install attempt ${attempt}/3 failed" >&2
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 5))
+              fi
+            done
+            echo "toolchain-canary: zypper refresh/install failed 3/3 attempts -- not absorbing further (a persistent outage is a real, reportable condition)." >&2
+            return 1
+          }
+          retry_zypper
           clang --version
       - name: install pinned Nim (isolates the clang-version variable)
         run: scripts/ci-nim-setup.sh --expect-arch x86_64
-      # See the newest-gcc job's own comment: scripts/test.sh handles the
-      # $HOME/.sello-nim PATH prepend itself.
-      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang
+      - name: prepend pinned Nim to PATH (disasm-gate.sh, unlike scripts/test.sh, does not do this itself)
+        run: echo "$HOME/.sello-nim/current/bin" >> "$GITHUB_PATH"
+      - name: restore disasm-gate rolling canary profile (clang)
+        id: restore-disasm-canary-clang
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/disasm-canary-clang.tsv
+          key: sello-disasm-canary-clang-v1-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            sello-disasm-canary-clang-v1-${{ github.ref_name }}-
+      - run: |
+          echo "toolchain-canary: disasm-canary-clang cache matched key: ${{ steps.restore-disasm-canary-clang.outputs.cache-matched-key || '(none -- cold start / first run on this branch)' }}"
+      - run: >-
+          scripts/ci-setup.sh &&
+          SELLO_IN_CONTAINER=1
+          SELLO_DISASM_CANARY_PREV=build/disasm-canary-clang.tsv
+          SELLO_DISASM_CANARY_OUT=build/disasm-canary-clang.tsv
+          scripts/disasm-gate.sh --cc clang --canary
+      - name: save disasm-gate rolling canary profile (clang)
+        if: always()
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: build/disasm-canary-clang.tsv
+          key: sello-disasm-canary-clang-v1-${{ github.ref_name }}-${{ github.run_id }}
 
   # --- milpa@HEAD -----------------------------------------------------------
   #
