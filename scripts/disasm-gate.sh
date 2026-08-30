@@ -194,10 +194,30 @@ disasm_gate_canary_mode() {
     /^== root: / { name = $0; sub(/^== root: /, "", name); sub(/ ==$/, "", name) }
     /^branch-count: / { c = $0; sub(/^branch-count: /, "", c); print name "\t" c }
   ')"
+
+  # BUG FIX (RFC-005 slice 23 stage 4, caught by a real dispatch): $out
+  # and $SELLO_DISASM_CANARY_PREV are THE SAME PATH in the real CI
+  # wiring (the workflow restores the prior cache entry to that path,
+  # then this script overwrites it in place so the NEXT run's cache
+  # -save step picks up the fresh profile). Writing $out BEFORE reading
+  # $prev would silently clobber the previous profile with the fresh
+  # one first, making every comparison a no-op self-compare (and a true
+  # bootstrap -- no previous file at all -- indistinguishable from a
+  # normal run, since the file "exists" the instant it's written). Snap
+  # -shot $prev's content into memory FIRST, THEN write $out, so the
+  # comparison below is always against what was ACTUALLY there before
+  # this invocation touched anything.
+  local prev="${SELLO_DISASM_CANARY_PREV:-}"
+  local prev_snapshot=""
+  local have_prev=0
+  if [[ -n "$prev" && -f "$prev" ]]; then
+    prev_snapshot="$(cat "$prev")"
+    have_prev=1
+  fi
+
   echo "$fresh_counts" > "$out"
 
-  local prev="${SELLO_DISASM_CANARY_PREV:-}"
-  if [[ -z "$prev" || ! -f "$prev" ]]; then
+  if [[ "$have_prev" -eq 0 ]]; then
     echo "disasm-gate: --canary BOOTSTRAP -- no previous rolling profile found (\$SELLO_DISASM_CANARY_PREV unset or missing). Recording this run's profile as the new baseline for next time; nothing to compare against yet." >&2
     echo "disasm-gate: canary profile (bootstrap):" >&2
     cat "$out" >&2
@@ -218,7 +238,7 @@ disasm_gate_canary_mode() {
       echo "disasm-gate: --canary ALERT -- root '$name' conditional-branch count INCREASED: ${prev_count} -> ${new_count} (${cc_name}). Failures notify, never gate (A6) -- this is a finding for the toolchain-canary workflow's notify job, not a script exit failure." >&2
       increased=1
     fi
-  done < "$prev"
+  done <<< "$prev_snapshot"
 
   if [[ "$increased" -eq 0 ]]; then
     echo "disasm-gate: --canary OK -- no root-level conditional-branch-count increase vs. the previous ${cc_name} profile." >&2
