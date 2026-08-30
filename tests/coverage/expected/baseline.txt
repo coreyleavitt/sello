@@ -8,11 +8,11 @@
 # DO NOT HAND-EDIT the body below this line -- run the regeneration
 # command above (never under CI -- see this file's own header comment).
 
-aggregate 98.7
+aggregate 98.6
 challenge.nim 100.0
 ed25519.nim 100.0
 field.nim 100.0
-private/backend.nim 96.7
+private/backend.nim 96.6
 private/ct.nim 100.0
 private/secret_hooks.nim 100.0
 private/sha512.nim 99.1

@@ -51,3 +51,52 @@ No entries exist yet as of this ledger's creation (RFC-005 slice 17) --
 the initial tests/coverage/expected/baseline.txt was generated from a
 clean suite run with nothing to justify.
 -->
+
+## 2026-08-30 RFC-005 slice 23: {.noinline.} attribution shift, private/backend.nim
+
+RFC-005 slice 23 (the disassembly gate, A2) added `{.noinline.}` to nine
+secret-path roots, including `private/backend.derivePublic` and
+`private/backend.signDetached` -- the deliberate shipped-codegen change
+A2's own text calls for (a call boundary the audited-binary-is-the
+-shipped-binary property is worth, per that slice's design). Real hosted
+CI (`coverage-ratchet`, run 33309085853) caught a small, genuine
+coverage drop as a direct, mechanical side effect: `aggregate` 98.7 ->
+98.6, `private/backend.nim` 96.7 -> 96.6 (both floored-to-one-decimal
+percentages; every other per-file key unchanged).
+
+**Verified directly against the fresh `build/coverage/run1/
+extracted.info`, not inferred:** `private/backend.nim` carries exactly
+60 instrumented lines in the fresh dump, 58 covered / 2 uncovered
+(58/60 = 96.666...%, which floors-to-one-decimal to the committed 96.6
+exactly). The 2 uncovered lines (`DA:221,0`/`DA:222,0` in the fresh
+dump) trace to `private/backend.signDetached`'s own pre-existing
+(RFC-002 slice 2, not new this slice) debug-only re-derivation assert
+(`when not defined(release): {.push assertions: on.} assert A ==
+pointEncode(geScalarmultBase(a)), "signDetached: publicBytes does not
+match derivePublic(seed)" {.pop.}`, source lines 217-221) -- the
+assert's CONDITION (source line 219) executes 62963 times (covered);
+these two zero-count lines are Nim's own line-attribution for the
+synthesized "condition false -> raise" branch, which by construction
+never executes in a passing suite (no test in this project deliberately
+feeds `signDetached` a mismatched seed/publicBytes pair -- that
+negative case is `signing.keypair(seed, expectedPublic)`'s own job,
+tested separately, not this lower-layer assert's). **This exact
+always-dead branch is NOT new to this slice** -- the assert itself
+predates RFC-005 slice 23 entirely; this file has never been at 100%
+line coverage because of it. The 0.1-point DROP this slice caused is
+therefore a shift in how many TOTAL lines gcov enumerates for this file
+(a denominator effect: the committed pre-slice 96.7 is arithmetically
+consistent with the same 2-line-uncovered numerator against a
+59-or-60-line total, one or two lines more than this file's fresh
+60-line total) rather than a newly-uncovered line -- `{.noinline.}`
+forcing `signDetached` into exactly one compiled instance (previously
+gcc was free to inline it per call site across the ~15 unit-test
+binaries that exercise signing) is the direct, mechanical cause of
+that denominator shift, consistent with this file's own header
+comment's stated refactor-class example ("a refactor... changing which
+lines exist"). No test was deleted or weakened this slice;
+`scripts/test.sh`'s full unit+property suite (20 files) stayed green
+throughout, both locally and on real hosted CI (run 33309085853's
+`unit-*`/`property-*` jobs).
+
+Cites: aggregate=98.6, private/backend.nim=96.6
