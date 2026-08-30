@@ -262,7 +262,7 @@ func rotr64(x: uint64; n: int): uint64 {.inline.} =
   ## function's Sigma functions are built from.
   (x shr n) or (x shl (64 - n))
 
-func compress(state: var array[8, uint64]; blk: array[128, byte]) =
+func compress(state: var array[8, uint64]; blk: array[128, byte]) {.noinline.} =
   ## FIPS 180-4 Sec 6.4.2 -- processes exactly one 128-byte message block,
   ## updating `state` in place. Wipes its own message schedule `W` and
   ## working variables before returning, on every call (module doc's

@@ -285,7 +285,7 @@ const
 
 {.push checks: off.}
 
-func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] =
+func ladder(k: array[32, byte]; u: array[32, byte]): array[32, byte] {.noinline.} =
   ## RFC 7748 §5: X25519(k, u) with scalar clamping. The u input's top
   ## bit is masked by feFromBytes, as the RFC requires.
   var e = k

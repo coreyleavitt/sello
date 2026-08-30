@@ -790,7 +790,7 @@ func feBytesCanonicalCT*(bytes: array[32, byte]): bool {.inline.} =
     diff = diff or (roundTrip[i] xor bytes[i])
   diff == 0
 
-func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] =
+func feSqrtRatioM1*(u, v: Fe): tuple[wasSquare: bool, root: Fe] {.noinline.} =
   ## RFC 9496 §4.2 `SQRT_RATIO_M1`, constant-time. NOT a branch-to-cmov
   ## transliteration of the two-case check the deleted vartime predecessor
   ## (`field.feSqrtRatioVartime`, RFC-003 slice 1 item 3, removed by

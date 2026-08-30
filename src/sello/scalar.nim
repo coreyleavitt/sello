@@ -465,7 +465,7 @@ func recodeScalarRadix16*(s: array[32, byte]): array[64, int32] =
     result[i] -= carry shl 4
   result[63] += carry
 
-func geScalarmultBase*(s: SecretScalar): GeP3 =
+func geScalarmultBase*(s: SecretScalar): GeP3 {.noinline.} =
   ## r = [s]B — fixed-base scalar multiplication via the compile-time
   ## GeBaseTable and cmovCached's constant-time select. Ports ref10's
   ## ge_scalarmult_base structure (public domain): recode into signed
@@ -653,7 +653,7 @@ func geScalarmultBase*(s: SecretScalar): GeP3 =
 
 {.push checks: off.}
 
-func geScalarmultCT*(s: SecretScalar; p: GeP3): GeP3 =
+func geScalarmultCT*(s: SecretScalar; p: GeP3): GeP3 {.noinline.} =
   ## r = [s]p — variable-base scalar multiplication, CONSTANT-TIME on `s`.
   ## The CT sibling of `geScalarmultBase` (CT fixed-base) and
   ## `scalarmultVartime` (vartime variable-base) -- see the region doc

@@ -1,0 +1,229 @@
+# kind: regenerable
+# generator: disasm-gate per-root conditional-branch profile (gcc)
+# regeneration command: scripts/disasm-gate.sh --cc gcc --update
+# compiler: Nim Compiler Version 2.2.10 [Linux: amd64]
+# image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+# sello-dev-image: ghcr.io/coreyleavitt/sello-dev@sha256:acf5b11b31c16121fe62844095a75bef56b84bb380cb9bbc132a3a177ca66f80
+#
+# DO NOT HAND-EDIT the body below this line -- run the regeneration
+# command above (never under CI -- see this file's own header comment).
+
+== root: derivePublic ==
+symbol: derivePublic__OOZOOZsrcZselloZprivateZbackend
+clone-variants: (none)
+branch-count: 8
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 1: jne self+0x1e0
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 2: jne self+0x1e0
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 3: jne self+0x1e0
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 4: jne self+0x1e0
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 5: jne self+0x1e0
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 6: jne self+0x221
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 7: jne self+0x221
+  [derivePublic__OOZOOZsrcZselloZprivateZbackend] 8: jne self+0x221
+
+== root: signDetached ==
+symbol: signDetached__OOZOOZsrcZselloZprivateZbackend
+clone-variants: (none)
+branch-count: 20
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 1: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 2: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 3: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 4: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 5: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 6: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 7: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 8: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 9: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 10: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 11: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 12: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 13: jne self+0x498
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 14: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 15: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 16: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 17: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 18: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 19: jne self+0x52d
+  [signDetached__OOZOOZsrcZselloZprivateZbackend] 20: jne self+0x52d
+
+== root: ladder ==
+symbol: ladder__OOZOOZsrcZselloZx25519
+clone-variants: (none)
+branch-count: 39
+  [ladder__OOZOOZsrcZselloZx25519] 1: jne self+0x44d8
+  [ladder__OOZOOZsrcZselloZx25519] 2: jne self+0x42d0
+  [ladder__OOZOOZsrcZselloZx25519] 3: jne self+0x42d0
+  [ladder__OOZOOZsrcZselloZx25519] 4: je self+0x44e8
+  [ladder__OOZOOZsrcZselloZx25519] 5: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 6: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 7: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 8: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 9: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 10: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 11: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 12: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 13: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 14: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 15: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 16: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 17: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 18: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 19: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 20: jne self+0x44b0
+  [ladder__OOZOOZsrcZselloZx25519] 21: jne self+0x42d0
+  [ladder__OOZOOZsrcZselloZx25519] 22: jne self+0x42d0
+  [ladder__OOZOOZsrcZselloZx25519] 23: jne self+0x42d0
+  [ladder__OOZOOZsrcZselloZx25519] 24: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 25: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 26: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 27: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 28: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 29: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 30: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 31: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 32: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 33: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 34: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 35: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 36: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 37: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 38: jne self+0x42d8
+  [ladder__OOZOOZsrcZselloZx25519] 39: jne self+0x42d8
+
+== root: geScalarmultBase ==
+symbol: geScalarmultBase__OOZOOZsrcZselloZscalar
+clone-variants: (none)
+branch-count: 17
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 1: jb self+0x1a
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 2: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 3: jb self+0x86
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 4: jb self+0x15b
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 5: jb self+0x19d
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 6: jne self+0x4caa
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 7: je self+0x4dd1
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 8: je self+0x218
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 9: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 10: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 11: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 12: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 13: jne self+0x4d34
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 14: jb self+0x4de5
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 15: jne self+0x4de3
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 16: je self+0x53b4
+  [geScalarmultBase__OOZOOZsrcZselloZscalar] 17: je self+0x4f00
+
+== root: geScalarmultCT ==
+symbol: geScalarmultCT__OOZOOZsrcZselloZscalar
+clone-variants: (none)
+branch-count: 19
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 1: jb self+0x1d
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 2: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 3: jb self+0x89
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 4: jne self+0x4701
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 5: jb self+0x2f7
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 6: jne self+0x2f5
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 7: jb self+0x3fd9
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 8: jb self+0x4023
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 9: jne self+0x45c7
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 10: jb self+0x4096
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 11: jne self+0x4094
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 12: jne self+0x45c2
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 13: je self+0x4773
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 14: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 15: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 16: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 17: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 18: jne self+0x4651
+  [geScalarmultCT__OOZOOZsrcZselloZscalar] 19: jne self+0x4715
+
+== root: ristrettoEncode ==
+symbol: ristrettoEncode__OOZOOZsrcZselloZristretto
+clone-variants: (none)
+branch-count: 32
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 1: jne self+0x5206
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 2: jne self+0x5218
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 3: jne self+0x4ee9
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 4: jne self+0x4ee9
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 5: jne self+0x4ee9
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 6: jne self+0x4ee9
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 7: jne self+0x4ee9
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 8: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 9: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 10: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 11: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 12: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 13: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 14: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 15: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 16: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 17: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 18: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 19: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 20: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 21: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 22: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 23: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 24: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 25: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 26: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 27: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 28: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 29: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 30: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 31: jne self+0x51f6
+  [ristrettoEncode__OOZOOZsrcZselloZristretto] 32: jne self+0x51f6
+
+== root: `==` ==
+symbol: eqeq___OOZOOZsrcZselloZristretto
+clone-variants: (none)
+branch-count: 1
+  [eqeq___OOZOOZsrcZselloZristretto] 1: jne self+0xc08
+
+== root: feSqrtRatioM1 ==
+symbol: feSqrtRatioM1__OOZOOZsrcZselloZfield
+clone-variants: (none)
+branch-count: 8
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 1: jne self+0x44cd
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 2: jne self+0xb4e
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 3: jne self+0x10e0
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 4: jne self+0x1650
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 5: jne self+0x1bb0
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 6: jne self+0x2130
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 7: jne self+0x2690
+  [feSqrtRatioM1__OOZOOZsrcZselloZfield] 8: jne self+0x2bf0
+
+== root: compress ==
+symbol: compress__OOZOOZsrcZselloZprivateZsha512
+clone-variants: (none)
+branch-count: 5
+  [compress__OOZOOZsrcZselloZprivateZsha512] 1: jne self+0xc2b
+  [compress__OOZOOZsrcZselloZprivateZsha512] 2: je self+0xb22
+  [compress__OOZOOZsrcZselloZprivateZsha512] 3: jg self+0x9e0
+  [compress__OOZOOZsrcZselloZprivateZsha512] 4: jne self+0xbfb
+  [compress__OOZOOZsrcZselloZprivateZsha512] 5: jne self+0xbfb
+
+== root: feCMove ==
+symbol: feCMove__OOZOOZsrcZselloZfield
+clone-variants: (none)
+branch-count: 2
+  [feCMove__OOZOOZsrcZselloZfield] 1: jne self+0x113
+  [feCMove__OOZOOZsrcZselloZfield] 2: jbe self+0x80
+
+== root: feCSwap ==
+symbol: feCSwap__OOZOOZsrcZselloZfield
+clone-variants: (none)
+branch-count: 2
+  [feCSwap__OOZOOZsrcZselloZfield] 1: jne self+0x150
+  [feCSwap__OOZOOZsrcZselloZfield] 2: jbe self+0xa0
+
+== root: cmovCached ==
+symbol: cmovCached__OOZOOZsrcZselloZscalar
+clone-variants: (none)
+branch-count: 7
+  [cmovCached__OOZOOZsrcZselloZscalar] 1: jne self+0x1c7
+  [cmovCached__OOZOOZsrcZselloZscalar] 2: jne self+0x1d8
+  [cmovCached__OOZOOZsrcZselloZscalar] 3: jne self+0x1d8
+  [cmovCached__OOZOOZsrcZselloZscalar] 4: jne self+0x1d8
+  [cmovCached__OOZOOZsrcZselloZscalar] 5: jne self+0x1d8
+  [cmovCached__OOZOOZsrcZselloZscalar] 6: jne self+0xbd
+  [cmovCached__OOZOOZsrcZselloZscalar] 7: jne self+0x1d8

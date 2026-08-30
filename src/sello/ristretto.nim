@@ -220,7 +220,7 @@ func ristrettoUnchecked*(p: GeP3): RistrettoPoint {.inline.} =
     {.pop.}
   RistrettoPoint(p: p)
 
-func `==`*(a, b: RistrettoPoint): bool =
+func `==`*(a, b: RistrettoPoint): bool {.noinline.} =
   ## Cites: diRistrettoEqualVerdict -- the CT verdict byte is declassified
   ## (RFC-005 slice 21, A1's taint CT harness) immediately before return:
   ## the boolean this function hands back IS the disclosure the caller
@@ -441,7 +441,7 @@ func ristrettoDecode*(e: RistrettoEncoded): Option[RistrettoPoint] =
 # ristrettoEncode -- RFC 9496 §4.3.2
 # ---------------------------------------------------------------------------
 
-func ristrettoEncode*(pt: RistrettoPoint): RistrettoEncoded =
+func ristrettoEncode*(pt: RistrettoPoint): RistrettoEncoded {.noinline.} =
   ## **Taint posture (RFC-005 slice 21, A1's taint CT harness) --
   ## deliberately NO interior `declassify` call, unlike
   ## `backend.derivePublic`/`x25519.x25519Base`'s assign-result/

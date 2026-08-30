@@ -54,7 +54,7 @@ import sello/private/taint
 {.push raises: [], gcsafe.}
 {.push checks: off.}
 
-proc derivePublic*(seed: array[32, byte]): array[32, byte] =
+proc derivePublic*(seed: array[32, byte]): array[32, byte] {.noinline.} =
   ## Cites: diDerivePublicKey -- the returned public key is declassified
   ## (RFC-005 slice 19, A1's taint CT harness) immediately after
   ## assignment, before return: a derived ed25519 public key is public
@@ -121,7 +121,7 @@ proc derivePublic*(seed: array[32, byte]): array[32, byte] =
     ct.wipe(a)
 
 proc signDetached*(seed: array[32, byte]; publicBytes: array[32, byte];
-                    msg: openArray[byte]): array[64, byte] =
+                    msg: openArray[byte]): array[64, byte] {.noinline.} =
   ## Cites: diSignDetachedSignature -- the returned signature (`R || S`)
   ## is declassified (RFC-005 slice 19, A1's taint CT harness)
   ## immediately after assembly, before return: an ed25519 signature is
