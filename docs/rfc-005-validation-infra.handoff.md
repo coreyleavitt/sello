@@ -4642,7 +4642,7 @@ for real), then the A9 memcheck extension of `nightly.yml`, then slice
 
 
 
-## RFC-005 slice 22: taint CI + doc-anchor drift check (MECHANISM DONE, BLOCKED on a genuine clang-leg CT finding)
+## RFC-005 slice 22: taint CI + doc-anchor drift check (LANDED -- see fix-slice 22a below for the clang-leg CT defect fix, and "RFC-005 slice 22 Part 2" further below for the real landing)
 
 **Scope delivered.** (a) `scripts/lib/taint_anchor_check.py`, a static text
 scan over `private/taint.nim`'s own `DeclassId`/`declassRegister` source
@@ -5019,6 +5019,122 @@ only a timing re-measurement could validate. `docs/mutation-results.md`
 regenerated wholesale by the real 84-mutant run (84/84 killed, 3
 retired-equivalent: F05, F31, H07).
 
+## RFC-005 slice 22 Part 2: the real landing, both taint legs live-required
+
+With fix-slice 22a's value barrier merged to `main`, slice 22's own
+mechanism (held back after its first attempt found the clang defect) was
+landed for real.
+
+**Branch-history note.** The original `rfc-005-slice22` branch (commits
+`b44ccb0`/`cfc0044`) could not be cleanly rebased onto the new `main`:
+both its own commits and fix-slice 22a's CLAUDE.md edits touch the same
+handful of very-long-single-line paragraphs (this file's own convention
+— one giant paragraph per line, no wrapping), and `git rebase`'s 3-way
+merge on those lines produced conflicts that were real but not
+substantive (independently-authored prose covering the same ground, not
+a logical clash). Rather than hand-resolve a diff3 conflict inside a
+multi-thousand-character line repeatedly, a fresh branch
+(`rfc-005-slice22-land`, from the new `main`) cherry-picked the actual
+mechanism files verbatim from `cfc0044`'s tree (`.github/workflows/
+merge-gate.yml`, `scripts/build-smoke.sh`, `scripts/ct-taint.sh`,
+`scripts/lib/gates.txt`, `scripts/lib/taint_anchor_check.py`,
+`README.md` — `git checkout cfc0044 -- <files>`), then CLAUDE.md and this
+handoff doc were hand-edited fresh to describe the real, landed,
+both-legs-green state rather than replayed as a conflicted merge. The
+original `rfc-005-slice22` branch was deleted (404-confirmed) once its
+content was fully carried forward this way — nothing from it was lost,
+only the branch pointer.
+
+**A genuine finding from this same-branch-content mechanic, disclosed
+rather than silently fixed:** fix-slice 22a's own CLAUDE.md commit (now
+on `main` at `6a88c6b`/`1384c66`) turned out to already carry slice 22's
+"Taint CT jobs" paragraph and "taint-based deterministic CT harness"
+bullet, word-for-word, describing `taint-ct-linux-amd64-gcc`/`-clang` as
+existing CI jobs — because fix-slice 22a's own worktree copy of
+CLAUDE.md was taken from the `rfc-005-slice22` branch checkout (which
+already had `cfc0044`'s CLAUDE.md content) before fix-slice 22a's own
+edits were layered on top, rather than from a clean pre-slice-22
+baseline. The result: for the short window between fix-slice 22a landing
+and this Part 2 landing, `main`'s CLAUDE.md described two CI jobs that
+`main`'s own `.github/workflows/merge-gate.yml` did not yet contain — a
+real, if short-lived, doc/implementation mismatch, exactly the drift
+class `validation-map`/`gates-manifest-sync` exist to catch (neither
+caught this one, since both scan the workflow file and `gates.txt`
+against each other and against CLAUDE.md's job-count prose only
+loosely, not this specific paragraph's job-existence claims). This Part 2
+landing closes the gap for real (the jobs now exist), so no further
+action was taken beyond recording the finding here and in CLAUDE.md's
+own updated prose.
+
+**Mechanism landed, confirmed on real hosted CI.** Push (branch
+`rfc-005-slice22-land`, commit `a8e863c`), run `33305659451`: every job
+green except `ruleset-sync` (job `99241646985`), which failed exactly as
+designed -- `required by gates.txt (and not actively waived) but missing
+from the live main ruleset: taint-ct-linux-amd64-clang,
+taint-ct-linux-amd64-gcc` -- confirming the two new jobs were genuinely
+not yet live-required. `taint-ct-linux-amd64-gcc` (job `99241646969`,
+70s) and `taint-ct-linux-amd64-clang` (job `99241647000`, 56s) both ran
+real and green -- the clang leg's own headline result, first real green
+confirmation on hosted CI (not just local podman) that the value barrier
+holds under the pinned image's real clang 22.1.8.
+
+**`scripts/ruleset-apply.sh --apply`** (dry run first, confirmed the
+planned diff: `main`'s required-check array gaining exactly
+`taint-ct-linux-amd64-clang`/`taint-ct-linux-amd64-gcc`, `evidence`/
+`tags` no-op) then applied for real: all three rulesets `UPDATED`
+(`evidence` id `21282944`, `main` id `21282945`, `tags` id `21282947`).
+Re-triggered via `gh run rerun 33305659451 --failed` (cheaper than a new
+push -- only `ruleset-sync` had failed): green on retry (job
+`99243892555`, 8s), confirming live-matches-committed with both taint
+jobs now present. Full run `33305659451` conclusion: `success`, 25/25
+required checks green, including `taint-ct-linux-amd64-gcc`
+(`99243903587`) and `taint-ct-linux-amd64-clang` (`99243906357`)
+re-confirmed green on the same commit post-apply.
+
+**Fast-forwarded to `main`** (`git push origin
+rfc-005-slice22-land:main`, `1384c66..a8e863c`), branch deleted
+(404-confirmed).
+
+**Red demo (i): the planted-leak fixture flipped to expected-clean,
+shown red on both legs.** Scratch branch
+`rfc-005-slice22-red-demo-planted-leak` (from `main`), one-line change to
+`scripts/ct-taint.sh`: `run_target "planted_leak" ... "leaky"` ->
+`... "clean"` (the permanent negative fixture's own expectation flipped
+to demand zero errors from a target that always produces one). Run
+`33306554213`: `taint-ct-linux-amd64-gcc` (job `99244016056`) and
+`taint-ct-linux-amd64-clang` (job `99244016065`) both `completed
+failure`, real hosted CI, both with the identical diagnostic: `ct-taint:
+FAIL -- planted_leak expected ZERO memcheck errors, got 1 (exit 99). See
+build/ct_taint_planted_leak.memcheck.log.` -- the harness's own
+regression pin firing correctly on both backends. Reverted (branch
+deleted, 404-confirmed).
+
+**Red demo (ii): an anchor-drift red, a renamed `Cites:` id.** Scratch
+branch `rfc-005-slice22-red-demo-anchor-drift` (from `main`), one-line
+change to `src/sello/private/backend.nim`: `## Cites: diDerivePublicKey`
+-> `## Cites: diDerivePublicKeyRENAMED`. Run `33307049416`:
+`taint-ct-linux-amd64-clang` (job `99245325068`) and
+`taint-ct-linux-amd64-gcc` (job `99245325190`) both `completed failure`,
+both failing at the doc-anchor drift check -- the very first step of
+every `scripts/ct-taint.sh` invocation, before either backend even
+compiles a target -- with the precise two-directional diagnostic
+`taint_anchor_check.py`'s own design promises: `diDerivePublicKey:
+anchor 'backend.derivePublic' -- no '## Cites: diDerivePublicKey'
+doc-comment line ...` (the register side, now missing its citation) AND
+`src/sello/private/backend.nim:58: cites unknown DeclassId
+'diDerivePublicKeyRENAMED' (not a member of the live DeclassId enum ...)`
+(the source side, now citing a nonexistent id) -- both directions of the
+check caught in one demo, matching the mechanism's own documented design
+exactly. Reverted (branch deleted, 404-confirmed).
+
+**Records.** CLAUDE.md: the merge-gate job-count paragraph, the "Taint CT
+jobs" paragraph, and the taint-instruments validation-bar bullet all
+rewritten from the original held-back/NOT-YET-live framing to the
+landed, both-legs-green, 25-required-checks state, with the original
+finding preserved as history rather than deleted (the clang defect and
+its fix are still described, just past tense). This handoff doc's own
+slice 22 section header updated to point here.
+
 ## Notes for resuming sessions
 - Environment: no host Nim; podman + ghcr.io/coreyleavitt/nim:2.2.10;
   network session-dependent — do network steps early. `rm` aliased
@@ -5203,23 +5319,30 @@ retired-equivalent: F05, F31, H07).
   same as before), then the A9 memcheck extension of nightly.yml, then
   slice 30, then 32. Slices 27-29 stay Corey-physical. 23/32 done at
   this note.
-  Slice 22 is MECHANISM-DONE, BLOCKED-ON-DECISION (2026-08-30 -- see its
-  own full-record entry above): the doc-anchor drift check, the
-  `--cc`/`--build-only` flags on `scripts/ct-taint.sh`, and both new CI
-  jobs (`taint-ct-linux-amd64-gcc`/`-clang`) landed and were verified
-  both locally (podman) and via a real hosted CI run (branch
-  `rfc-005-slice22`, commit `b44ccb0`, run `33297839211`) -- but
-  `taint-ct-linux-amd64-clang` is a genuine, reproducible CT finding
-  (`feCMove`/`feCSwap` trip Valgrind's CMOV-policy error class under
-  clang specifically, first evidence of this codebase's CT-critical
-  arithmetic ever being exercised under clang at all), so
-  `scripts/ruleset-apply.sh --apply` was deliberately NOT run and the
-  branch was NOT fast-forwarded to `main` -- landing either would make a
-  reproducibly-red check live-required, blocking every future push
-  project-wide. THIS IS A GENUINE HUMAN-DECISION BLOCKER, not a
-  credential wait: see the slice's own entry above for the four ranked
-  options recorded for Corey. The grind loop should NOT proceed past
-  slice 22 (i.e. should not start slice 23) until Corey has chosen one
-  of those options and the chosen fix (if any) has landed on
-  `rfc-005-slice22` or a successor branch.
-- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). On resume, FIRST check whether Corey has made a decision on slice 22's clang-leg CT finding (see that slice's own entry above) -- do not silently proceed to slice 23 without it. If a decision is recorded, resume RFC order there; if not, surface the open decision rather than guessing.
+  Slice 22 is DONE (2026-08-30, the hold cleared -- see fix-slice 22a's
+  own full-record entry and slice 22 Part 2's own full-record entry,
+  both above): the doc-anchor drift check, the `--cc`/`--build-only`
+  flags on `scripts/ct-taint.sh`, and both new CI jobs
+  (`taint-ct-linux-amd64-gcc`/`-clang`) landed for real. The original
+  finding stands as recorded history -- `taint-ct-linux-amd64-clang` was
+  a genuine, reproducible CT finding (`feCMove`/`feCSwap` trip Valgrind's
+  CMOV-policy error class under clang specifically, first evidence of
+  this codebase's CT-critical arithmetic ever being exercised under
+  clang at all) -- but it is RESOLVED, not open: fix-slice 22a fixed the
+  defect at its root (`private/ct.nim`'s `valueBarrier32`, a BoringSSL/
+  BearSSL-style value barrier), both legs confirmed clean under both
+  compilers (local podman and real hosted CI), `scripts/ruleset-apply.sh
+  --apply` ran for real (25 required checks total, up from 23), and both
+  red demos (planted-leak-flip, anchor-id-rename) confirmed the taint
+  harness's own regression pins fire correctly on both backends. No
+  human decision remains open on this slice. Remaining launch order: 23
+  (the disasm gate, consuming `disasmRoots()` for real -- itself now
+  informed by this slice's own clang-vs-gcc codegen divergence finding,
+  a live example of exactly the class of evidence A2's CMOV policy
+  exists to catch), 25 (both formerly credential-blocked, now
+  unblocked), then the A9 memcheck extension of nightly.yml, then slice
+  30, then 32. Slices 27-29 stay Corey-physical. 25/32 done at this
+  note (slice 22 counted once, its fix folded into the same count as an
+  amendment rather than a separate numbered slice, matching this
+  project's own "fix-slice" naming convention).
+- Resume command: `/loop /tdd rfc-005 til done` (this note is written by the control loop; per-slice detail lives in the slice records above). Slice 22's grind-state hold is CLEARED -- resume RFC order at slice 23 with no open decision to surface.
