@@ -88,13 +88,15 @@ jobs:
             stale_accept="${{ inputs.stale_accept }}"
             timing_fixture="${{ inputs.timing_fixture }}"
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "stale_accept=$stale_accept" >> "$GITHUB_OUTPUT"
-          echo "timing_fixture=$timing_fixture" >> "$GITHUB_OUTPUT"
-          case "$tag" in
-            scratch/*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
-            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
-          esac
+          {
+            echo "tag=$tag"
+            echo "stale_accept=$stale_accept"
+            echo "timing_fixture=$timing_fixture"
+            case "$tag" in
+              scratch/*) echo "prerelease=true" ;;
+              *) echo "prerelease=false" ;;
+            esac
+          } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
