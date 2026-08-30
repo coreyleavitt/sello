@@ -132,6 +132,9 @@ slice-17 wall-clock finding landed. Recommended fix (not applied by this
 audit, per the "list, don't fix silently" instruction): reword the cell
 to `` full unit+property suite, fixed proptest seeds, single-pass by
 default (`--verify-determinism` opts into the double-pass check) ``.
+**Fixed in commit `7aa37a0ebb70ec225104c22cd4d6b5a22abb4217`** (RFC-005
+slice 32, this doc's own follow-up slice): the README row's Mechanism
+cell now reads exactly the recommended wording above.
 
 **Finding 2 — A2 (the disassembly gate) has no dedicated row in
 CLAUDE.md's "The validation bar" bullet list or README's validation-map
@@ -151,6 +154,12 @@ have been added in the same commit as the check, per the RFC's own
 audit): add a validation-bar bullet (`` A **disassembly gate**... `` )
 and a corresponding README validation-map row, Row key `disasm-gate`,
 Category `required-check`.
+**Fixed in commit `7aa37a0ebb70ec225104c22cd4d6b5a22abb4217`** (RFC-005
+slice 32, this doc's own follow-up slice): CLAUDE.md's "The validation
+bar" bullet list gained a dedicated disassembly-gate bullet (immediately
+after the taint-based CT harness bullet), and README's validation-map
+table gained the `disasm-gate` row, Category `required-check`, Carve-out
+doc `tests/ct_disasm/expected/justifications.md`.
 
 No other validation-bar line, and no other A1-A9 item, was found to
 overclaim or underclaim its live mechanism as of this audit's live
