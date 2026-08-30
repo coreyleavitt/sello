@@ -13,8 +13,9 @@ corrections (i)-(iii), plus this slice's own (b)/(c)/(d) scope):
       claim is enforced by more than one category of mechanism -- e.g.
       the dudect harness is BOTH a required-check, compile-smoke-only,
       row AND a manual-ritual, real-verdict, row). Each row carries a
-      Category (required-check / nightly / manual-ritual) and the
-      per-category assertion the RFC's round-2 correction (i) demands:
+      Category (required-check / nightly / manual-ritual / release-gate)
+      and the per-category assertion the RFC's round-2 correction (i)
+      demands:
         - required-check: the Mechanism cell's job name exists in
           .github/workflows/merge-gate.yml AND scripts/lib/gates.txt.
           (Not re-querying the live GitHub ruleset here too: the
@@ -31,6 +32,14 @@ corrections (i)-(iii), plus this slice's own (b)/(c)/(d) scope):
           scripts/lib/validation-map-pending.txt allowlist, or one of
           the small, hardcoded NONE_BY_DESIGN_ROWKEYS below (a ritual
           the RFC never demanded a freshness canary for at all).
+        - release-gate (RFC-005 slice 30): the Mechanism cell's job name
+          exists in .github/workflows/release.yml -- a fourth category,
+          not folded into required-check (it never blocks a push to
+          main) or nightly (no schedule; fires per tagged release). Its
+          Freshness-canary cell is always "n/a", same as required-check/
+          nightly: a release-gate job re-verifies its own clauses from
+          scratch at every tag-cut, with no calendar-staleness concept
+          of its own.
 
   (ii) Badge-URL branch-pin: every "badge.svg" URL in README.md carries
        "?branch=main" (an unpinned badge reflects the latest run on ANY
@@ -83,6 +92,7 @@ README = REPO_ROOT / "README.md"
 GATES_TXT = REPO_ROOT / "scripts" / "lib" / "gates.txt"
 MERGE_GATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "merge-gate.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "nightly.yml"
+RELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 IMAGE_PINS = REPO_ROOT / "scripts" / "lib" / "image-pins.txt"
 PENDING_ALLOWLIST = REPO_ROOT / "scripts" / "lib" / "validation-map-pending.txt"
 
@@ -93,7 +103,18 @@ PLATFORM_END = "<!-- VALIDATION-MAP:PLATFORM END -->"
 CTSCOPE_START = "<!-- VALIDATION-MAP:CT-SCOPE START -->"
 CTSCOPE_END = "<!-- VALIDATION-MAP:CT-SCOPE END -->"
 
-VALID_CATEGORIES = {"required-check", "nightly", "manual-ritual"}
+VALID_CATEGORIES = {"required-check", "nightly", "manual-ritual", "release-gate"}
+# "release-gate" (RFC-005 slice 30): a job in the tag-triggered, NOT
+# push-gating .github/workflows/release.yml -- neither "required-check"
+# (it never blocks a push to main; it runs only on a `v*` tag push or an
+# explicit workflow_dispatch) nor "nightly" (no schedule; it fires per
+# release, not per night) fits, so this is a genuinely new fourth
+# category rather than a forced fit into an existing one. Checked the
+# same way as "nightly": the Mechanism cell's job name must exist in
+# .github/workflows/release.yml, and the Freshness canary cell must be
+# "n/a" (every release-gate run re-verifies its own clauses from
+# scratch at tag-cut time -- there is no calendar-staleness concept for
+# a check that runs once per release, unlike a manual-ritual row).
 
 EXPECTED_COLUMNS = 6  # Claim | Category | Mechanism | Freshness canary | Carve-out doc | Row key
 
@@ -259,7 +280,9 @@ def first_backtick_token(cell: str) -> str | None:
 
 
 def check_table_rows(rows: list[list[str]], gate_names: set[str], mg_job_names: set[str],
-                      nightly_job_names: set[str], pending: dict[str, str]) -> None:
+                      nightly_job_names: set[str], pending: dict[str, str],
+                      release_job_names: set[str] | None = None) -> None:
+    release_job_names = release_job_names or set()
     seen_keys: set[str] = set()
     for cells in rows:
         claim, category, mechanism, freshness, carveout, rowkey = cells
@@ -283,7 +306,7 @@ def check_table_rows(rows: list[list[str]], gate_names: set[str], mg_job_names: 
             elif not (REPO_ROOT / token).is_file():
                 fail(f"validation-map table: row {rowkey!r} Carve-out doc references a missing file: {token}")
 
-        if category in ("required-check", "nightly"):
+        if category in ("required-check", "nightly", "release-gate"):
             if freshness != "n/a":
                 fail(f"validation-map table: row {rowkey!r} is category {category!r} but Freshness canary cell is {freshness!r}, expected 'n/a' (only manual-ritual rows carry a freshness canary)")
             job = first_backtick_token(mechanism)
@@ -295,11 +318,16 @@ def check_table_rows(rows: list[list[str]], gate_names: set[str], mg_job_names: 
                     fail(f"validation-map table: row {rowkey!r} names required-check job {job!r}, not present in scripts/lib/gates.txt")
                 if job not in mg_job_names:
                     fail(f"validation-map table: row {rowkey!r} names required-check job {job!r}, not present in {MERGE_GATE_WORKFLOW.relative_to(REPO_ROOT)}")
-            else:  # nightly
+            elif category == "nightly":
                 if job not in nightly_job_names:
                     fail(f"validation-map table: row {rowkey!r} names nightly job {job!r}, not present in {NIGHTLY_WORKFLOW.relative_to(REPO_ROOT)}")
                 if job in gate_names:
                     fail(f"validation-map table: row {rowkey!r} names {job!r} as a nightly job, but it is ALSO a required-check in scripts/lib/gates.txt -- pick the category that matches where it actually gates")
+            else:  # release-gate
+                if job not in release_job_names:
+                    fail(f"validation-map table: row {rowkey!r} names release-gate job {job!r}, not present in {RELEASE_WORKFLOW.relative_to(REPO_ROOT)}")
+                if job in gate_names:
+                    fail(f"validation-map table: row {rowkey!r} names {job!r} as a release-gate job, but it is ALSO a required-check in scripts/lib/gates.txt -- pick the category that matches where it actually gates")
             continue
 
         # category == "manual-ritual": the Freshness canary cell is the
@@ -405,6 +433,7 @@ def main() -> int:
     gate_names = gates_check_names(GATES_TXT)
     mg_job_names = extract_job_names(MERGE_GATE_WORKFLOW)
     nightly_job_names = extract_job_names(NIGHTLY_WORKFLOW)
+    release_job_names = extract_job_names(RELEASE_WORKFLOW)
     pending = load_pending_allowlist(PENDING_ALLOWLIST)
     image_pins_text = read(IMAGE_PINS)
 
@@ -413,7 +442,7 @@ def main() -> int:
         if table_block is not None:
             rows = parse_table(table_block)
             if rows:
-                check_table_rows(rows, gate_names, mg_job_names, nightly_job_names, pending)
+                check_table_rows(rows, gate_names, mg_job_names, nightly_job_names, pending, release_job_names)
 
         check_badges(readme_text)
         check_platform_block(readme_text, gate_names, mg_job_names)

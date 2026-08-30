@@ -1,0 +1,47 @@
+# .github/allowed_signers -- RFC-005 slice 30: the committed trust root
+# the release workflow's `release-publish` job verifies a release tag's
+# SSH signature against (`git -c gpg.ssh.allowedSignersFile=.github/
+# allowed_signers tag -v <tag>`), rather than querying GitHub's own
+# signing-key API. Two deliberate reasons, both recorded here rather than
+# left implicit:
+#
+#   1. No API dependency: GitHub's REST API has no endpoint that returns
+#      "the SSH public keys this account has registered for signing" --
+#      only the web UI exposes that, and the `verification` field GitHub
+#      attaches to a tag/commit object reflects GitHub's OWN opinion of
+#      the signature, checked against whatever it has on file at read
+#      time. Verifying with git itself against a file this repository
+#      controls needs no GitHub-side state at all.
+#   2. A reviewable trust root IN-REPO, matching SECURITY.md's "Trust
+#      root / security posture" section: every reader can see exactly
+#      which key(s) this project trusts to sign a release tag, in a
+#      diff-reviewable commit, rather than "whatever GitHub currently has
+#      on file for this account" (which could include a key added for an
+#      unrelated purpose, or be silently rotated with no repo-side
+#      record of the change).
+#
+# Format: git's own ssh "allowed signers" file
+# (https://man.openbsd.org/ssh-keygen#ALLOWED_SIGNERS), one principal per
+# line -- `<principal> <key-type> <base64-key>`. The principal is matched
+# against the tag/commit's own committer/tagger email by `git tag -v`/
+# `git verify-commit`; it does not need to be a real, reachable address.
+#
+# corey@leavitt.dev is the tagger identity every sello release tag has
+# used to date (verified against v0.1.0 through v0.3.0's own tag
+# objects); the key below is Corey's SSH signing key
+# (~/.ssh/id_ed25519.github.pub on the maintainer's own machine, the same
+# key `git config user.signingkey` already points at locally --
+# `gpg.format=ssh`, `tag.gpgsign=true`). A real, live verification against
+# this exact file (`git -c gpg.ssh.allowedSignersFile=.github/
+# allowed_signers tag -v v0.3.0`) was run before this file was committed:
+# "Good git signature for corey@leavitt.dev".
+#
+# Rotation ritual: if the signing key ever changes, add a NEW line here
+# (never delete the old one outright without cause -- a still-valid
+# historical tag signed under the old key must keep verifying), then
+# start signing new tags with the new key. This file is covered by
+# scripts/policy-lint.sh only insofar as release.yml itself is a workflow
+# file (SHA-pinned actions, permissions, etc.) -- this file's own content
+# is reviewed by ordinary commit review, the same trust model as every
+# other committed pin file in this repo (gates.txt, image-pins.txt).
+corey@leavitt.dev ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPncHlWCX2SvPGgm6Y+gGArbDZ1TrRh29Ef9HzOUCJZ+

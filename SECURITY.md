@@ -48,6 +48,17 @@ runner-registration credential to custody yet. That changes once RFC-005's
 Phase 4 timing-tier work provisions a physical runner (tracked as its own
 slice); this paragraph will be revisited then.
 
+**Release tag signatures (RFC-005 slice 30).** Every release tag is
+signed (`gpg.format=ssh`, the maintainer's own SSH key) and verified by
+the release workflow's `release-publish` job against a committed trust
+root, `.github/allowed_signers` -- git's own signature verification
+(`git tag -v`) against a file this repository controls, not a query
+against GitHub's signing-key API (which has no endpoint exposing that
+data at all, and would otherwise root trust in "whatever GitHub has on
+file for this account right now" instead of a reviewable, diffable
+commit). See `.github/allowed_signers`'s own header comment for the full
+rationale and rotation ritual.
+
 The items below are recorded as of 2026-08-24, split by how they were
 established:
 

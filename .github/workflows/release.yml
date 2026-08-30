@@ -1,0 +1,211 @@
+name: release
+
+# RFC-005 slice 30: the release workflow. Verifies, independently and
+# without short-circuit (docs/rfc-005-validation-infra.md lines
+# ~868-897), that a tagged SHA is actually releasable -- (i) merge-gate
+# green on the tagged SHA; (ii) the nightly release-qualification subset
+# (fuzz, s390x, memcheck, cranked-properties) green on an ancestor SHA
+# with no src/sello/ diff since; (iii) a timing-tier run within the
+# 14-day freshness window, ancestor, no src/sello/ diff since, cited in
+# docs/ct-results.md -- overridable ONLY via an explicit stale-accept
+# input that machine-checks the `timing-evidence: stale` notation in the
+# release-notes body (never for a non-ancestor/core-diff/citation-missing
+# hard fail); and version-consistency (nimble == CHANGELOG heading == tag
+# == milpa.kdl). Then: a clean-environment consumer test (bare pinned
+# image, `nimble install` against the tag, compile+run a trivial `import
+# sello` program), and the artifact itself (a signed tag, verified here
+# against the committed .github/allowed_signers trust root, plus a
+# checksummed source tarball attached to a GitHub release).
+#
+# scripts/release-gate.sh (delegating to scripts/lib/release_gate.py) is
+# the one audited implementation of every clause above -- this workflow
+# is a thin conductor around it, matching every other workflow in this
+# repo's own "the scripts are the entry point" convention.
+#
+# Trigger, deliberately narrow (RFC-005 slice 30's own scratch-tag
+# design decision, recorded here): a real release is `push: tags: v*`
+# ONLY. Scratch/demo tags (`scratch/v*`, excluded from the `tags`
+# ruleset's update/deletion protection -- .github/rulesets/tags.json --
+# so they can be created and deleted freely for a red/green demo) are
+# evaluated EXCLUSIVELY via `workflow_dispatch`, never a push trigger --
+# this keeps every demo run under explicit, one-shot operator control
+# (which tag, whether --stale-accept, whether a --timing-fixture is in
+# play) with no risk of an unwanted auto-triggered run the moment a
+# scratch tag is pushed. `workflow_dispatch` is also how a maintainer
+# exercises --stale-accept for a REAL release cut on stale timing
+# evidence -- push-triggered runs never carry stale_accept (the
+# `event_name == 'push'` branch below hardcodes it false), matching
+# RFC-005 Part B's "the stale-accept input is the only path past a red
+# freshness gate," deliberately kept off the unattended push path.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to evaluate (e.g. v0.5.0, or a scratch/v*-suffixed demo tag)'
+        required: true
+        type: string
+      stale_accept:
+        description: 'Accept a STALE (absent/expired) timing-tier verdict -- requires the literal "timing-evidence: stale" notation in the CHANGELOG release-notes body. Never overrides a non-ancestor/core-diff/citation-missing hard fail.'
+        required: false
+        type: boolean
+        default: false
+      timing_fixture:
+        description: 'DEMO/TEST HOOK ONLY, never for a real release: "SHA,ISO-DATE" to substitute for the real timing-tier query, witnessing clause (iii)''s ancestry/window/diff logic ahead of RFC-005 slices 28/29. Leave empty for a real run.'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  release-gate:
+    name: release-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+    outputs:
+      tag: ${{ steps.vars.outputs.tag }}
+      prerelease: ${{ steps.vars.outputs.prerelease }}
+    steps:
+      - id: vars
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${{ github.ref_name }}"
+            stale_accept="false"
+            timing_fixture=""
+          else
+            tag="${{ inputs.tag }}"
+            stale_accept="${{ inputs.stale_accept }}"
+            timing_fixture="${{ inputs.timing_fixture }}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "stale_accept=$stale_accept" >> "$GITHUB_OUTPUT"
+          echo "timing_fixture=$timing_fixture" >> "$GITHUB_OUTPUT"
+          case "$tag" in
+            scratch/*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ steps.vars.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: release gate (all clauses, no short-circuit)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=(scripts/release-gate.sh "${{ steps.vars.outputs.tag }}")
+          if [ "${{ steps.vars.outputs.stale_accept }}" = "true" ]; then
+            args+=(--stale-accept)
+          fi
+          if [ -n "${{ steps.vars.outputs.timing_fixture }}" ]; then
+            args+=(--timing-fixture "${{ steps.vars.outputs.timing_fixture }}")
+          fi
+          "${args[@]}"
+
+  # Clean-environment consumer test (RFC-005 Part B's round-2 addition):
+  # the zero-dependency claim's only end-to-end proof is a bare container
+  # with NO repo checkout at all, resolving the tag purely through
+  # nimble's own git-ref install syntax -- verified empirically against
+  # this exact image/command before this workflow was written:
+  # `nimble install -y "https://github.com/<repo>@#<tag>"` followed by a
+  # plain `nim c -r` (no extra --path/--nimblePath needed; nim's compiler
+  # already searches nimble's global package db).
+  release-consumer:
+    name: release-consumer
+    needs: release-gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    container:
+      image: ghcr.io/coreyleavitt/nim@sha256:cd4708fb29d16ec4256a0bdcf8a4873b1f5a7a7200e32890ed52d5893227e780
+    steps:
+      - name: nimble install + trivial import sello consumer compile+run
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-gate.outputs.tag }}"
+          nimble install -y "https://github.com/${{ github.repository }}@#${tag}"
+          mkdir -p /tmp/consumer && cd /tmp/consumer
+          printf '%s\n' \
+            'import sello' \
+            '' \
+            'let kp = keypair()' \
+            'let sig = kp.sign("hello")' \
+            'doAssert kp.public.verify("hello", sig)' \
+            'echo "sello release-consumer smoke: OK"' \
+            > consumer.nim
+          nim c -r consumer.nim
+
+  # The release artifact: a signed tag (verified here against the
+  # committed .github/allowed_signers trust root -- SECURITY.md's own
+  # "Release tag signatures" paragraph) plus a checksummed source tarball
+  # attached to a GitHub release, body = the tag's own CHANGELOG.md
+  # section (the SAME text scripts/lib/release_gate.py's --stale-accept
+  # path checked for the `timing-evidence: stale` notation -- one body,
+  # one place that notation can live, so a published release always
+  # visibly discloses exactly what the gate let past).
+  release-publish:
+    name: release-publish
+    needs: [release-gate, release-consumer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ needs.release-gate.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: verify tag signature against the committed trust root
+        run: |
+          set -euo pipefail
+          git -c gpg.ssh.allowedSignersFile=.github/allowed_signers \
+            tag -v "${{ needs.release-gate.outputs.tag }}"
+
+      - name: build checksummed source tarball
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-gate.outputs.tag }}"
+          safe_tag="${tag//\//-}"
+          mkdir -p build/release
+          git archive --format=tar.gz --prefix="sello-${safe_tag}/" \
+            -o "build/release/sello-${safe_tag}.tar.gz" "$tag"
+          ( cd build/release && sha256sum "sello-${safe_tag}.tar.gz" > "sello-${safe_tag}.tar.gz.sha256" )
+
+      - name: extract release-notes body (the tag's CHANGELOG.md section)
+        run: |
+          set -euo pipefail
+          python3 scripts/lib/release_gate.py "${{ needs.release-gate.outputs.tag }}" --print-body \
+            > build/release/body.md
+
+      - name: create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ needs.release-gate.outputs.tag }}"
+          safe_tag="${tag//\//-}"
+          extra_flags=()
+          if [ "${{ needs.release-gate.outputs.prerelease }}" = "true" ]; then
+            extra_flags+=(--prerelease)
+          fi
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file build/release/body.md \
+            "${extra_flags[@]}" \
+            "build/release/sello-${safe_tag}.tar.gz" \
+            "build/release/sello-${safe_tag}.tar.gz.sha256"

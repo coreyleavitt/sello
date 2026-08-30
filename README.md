@@ -510,7 +510,7 @@ prose is the value -- but its load-bearing columns (**Category**,
 **Mechanism**, **Freshness canary**, **Carve-out doc**, **Row key**) are
 checked on every push by the `validation-map` gate
 (`scripts/validation-map-check.sh`), so this table cannot silently drift
-from what CI actually runs. **Category** is one of three kinds, each with
+from what CI actually runs. **Category** is one of four kinds, each with
 its own mechanical proof that the named mechanism is real, not merely
 claimed:
 
@@ -528,6 +528,10 @@ claimed:
   `scripts/lib/validation-map-pending.txt` allowlist recording which
   future slice owes the real canary, or an explicit `none (by design)`
   for a ritual the RFC never demanded a freshness canary for at all).
+- **release-gate** -- a job in the tag-triggered `release.yml` workflow
+  (checked: the job name exists there). Neither required-check (it never
+  blocks a push to `main`) nor nightly (no schedule; it runs once per
+  tagged release), so it gets its own category rather than a forced fit.
 
 <!-- VALIDATION-MAP:TABLE START -->
 | Claim | Category | Mechanism | Freshness canary | Carve-out doc | Row key |
@@ -550,6 +554,9 @@ claimed:
 | Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | required-check | `bmc-symex` (`scripts/bmc.sh`, needs the `sello-dev` image) | n/a | none | bmc-symex |
 | Platform breadth (A4) -- big-endian s390x via cross-compile + QEMU user-mode, unit/KAT suite plus a runtime endianness canary | nightly | `s390x` (`scripts/test.sh --cpu s390x`; unit+KAT scope only -- the property suites proved prohibitively slow under emulation, see CLAUDE.md's own record) | n/a | none | s390x-nightly |
 | Untainted memcheck (A9) -- Valgrind memcheck over the unit suite for uninitialized reads and invalid accesses | nightly | `memcheck` (`scripts/memcheck.sh`) | n/a | none | memcheck-nightly |
+| Release workflow -- a tagged release is only cut once merge-gate, nightly-qualification, and timing-tier freshness (or an explicit, notation-checked stale-accept override) all independently pass, plus nimble/CHANGELOG/tag/milpa.kdl version agreement | release-gate | `release-gate` (`scripts/release-gate.sh`, tag push or `workflow_dispatch`) | n/a | none | release-gate-clauses |
+| Release workflow -- clean-environment consumer proof: `nimble install` against the tag in a bare pinned container, then compile and run a trivial `import sello` program | release-gate | `release-consumer` | n/a | none | release-consumer |
+| Release workflow -- artifact: a signed tag verified against the committed `.github/allowed_signers` trust root, plus a checksummed source tarball attached to a GitHub release | release-gate | `release-publish` | n/a | none | release-publish |
 <!-- VALIDATION-MAP:TABLE END -->
 
 **Platform support.** <!-- VALIDATION-MAP:PLATFORM START -->The required
