@@ -1,0 +1,25 @@
+# quipu work-status tracker config (tool source: ~/projects/quipu; instance:
+# quipu.leavitt.dev). This file owns the REPO-side conventions; where the
+# tracker runs, and which repos it mounts, is the instance config's business.
+title = "sello"
+label = "RFC"
+# sello's docs live flat under docs/ as rfc-NNN-slug.md (label-prefixed,
+# three-digit), not docs/rfc/NNNN-slug.md -- quipu's label-derived filename
+# pattern accepts both; numbers canonicalize to the same zero-padded form.
+docs_dir = "docs"
+
+# sello blocking state follows the rfc-flow "Open forks" convention plus the
+# grind's own registers: "awaiting Corey" / "Corey-owned" / "Corey-physical"
+# in handoff checkpoints, "BLOCKED on" in slice lists.
+awaiting_pattern = "awaiting|needs[ -]corey|corey[- ](owned|physical|gated)|owner[- ]call|open forks|blocked on"
+
+# Synced mode, not push: the hub runs on this same host and bind-mounts this
+# repo read-only, so there is no token and no client-side parse. `push` is
+# deliberately absent -- setting it true would make the hub refuse, since a
+# locally-mounted project may not also be pushed to (one source of truth).
+# This host's stub resolver blocks *.leavitt.dev (tailnet-only name), so
+# every generated curl pins the tailscale IP; regeneration preserves this.
+[hub]
+url = "https://quipu.leavitt.dev"
+curl_args = "--resolve quipu.leavitt.dev:443:100.101.212.69"
+project = "sello"

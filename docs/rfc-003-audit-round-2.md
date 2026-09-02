@@ -1,6 +1,6 @@
 # RFC-003: Compromise audit, round 2 — remediation
 
-- **Status:** scope approved by Corey 2026-08-07 ("roll all of it into rfc-003") — every
+- **Status:** implemented — scope approved by Corey 2026-08-07 ("roll all of it into rfc-003") — every
   confirmed finding from the round-2 compromise audit; the two borderline items are
   recorded as considered-and-declined non-goals below.
 - **Scope source:** post-RFC-002 `/architect` compromise audit (four lenses:

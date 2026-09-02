@@ -1,6 +1,6 @@
 # RFC-002: Design-audit remediation
 
-- **Status:** approved by Corey 2026-08-06 ("fix all of these to the full standard")
+- **Status:** implemented — approved by Corey 2026-08-06 ("fix all of these to the full standard")
 - **Scope source:** post-RFC-001 `/architect` compromise audit (three lenses: disclosed-exemption
   re-litigation, fresh-eyes design hunt, verification-infrastructure audit). Nine confirmed
   compromises against the PhD-CS bar; all six remediation groups approved, including mutation

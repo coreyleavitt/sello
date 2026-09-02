@@ -1,6 +1,6 @@
 # RFC-005: Validation infrastructure — suite gaps, CI, and the public evidence story
 
-- **Status:** ACCEPTED (stage 3 opened 2026-08-24 — Corey's sign-off given by
+- **Status:** in-progress — ACCEPTED (stage 3 opened 2026-08-24 — Corey's sign-off given by
   launching the implementation grind; architect rounds 1 and 2 applied
   2026-08-23). Drafted 2026-08-14 from the
   first-principles design session (grill) of the same date; the resolved

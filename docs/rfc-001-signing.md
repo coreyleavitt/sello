@@ -1,6 +1,6 @@
 # RFC-001: ed25519 signing milestone (sign, keygen, CT evidence, adapter)
 
-Status: draft — architect rounds 1 and 2 applied
+Status: implemented — (originally: draft) architect rounds 1 and 2 applied
 Scope: completes prompt.md steps 4 and 6, plus the `tests/ct/` harness and packaging.
 
 Non-goals (explicit, so silence isn't ambiguity):
