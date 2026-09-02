@@ -84,7 +84,7 @@ build/CI/validation infrastructure.
   is traceable through `scripts/lib/gates.txt`, enforced live on GitHub's
   branch-protection rulesets, and runnable locally via
   `scripts/merge-gate.sh`. See `docs/rfc-005-validation-infra.md` for the
-  full design and `docs/rfc-005-closeout-audit.md` for a line-by-line
+  full design and `docs/rfc-005-validation-infra.closeout-audit.md` for a line-by-line
   audit of every validation-bar claim against its enforcing mechanism.
   Three slices remain open, all gated on maintainer-owned physical
   hardware provisioning rather than further engineering (RFC-005 slices
