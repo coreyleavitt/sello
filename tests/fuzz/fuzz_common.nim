@@ -23,34 +23,34 @@
 ## i.e. black-box random thereafter with no real guidance. It has been
 ## replaced by an EXTERNAL SanitizerCoverage target
 ## (`fuzz_external_target.nim`, compiled separately with
-## `-fsanitize-coverage=trace-pc -fno-pie` and linked against proptest's
-## vendored `proptest_cov.c` runtime -- see that file's module doc for the
+## `-fsanitize-coverage=trace-pc -fno-pie` and linked against nelli's
+## vendored `nelli_cov.c` runtime -- see that file's module doc for the
 ## oracle logic and `scripts/fuzz.sh` for the two-stage build). This file
 ## now holds only the DRIVER side: strategies over the plain value types,
 ## byte-encoders that prepend the target binary's mode-selector byte, and
-## the run/report loop over `proptest`'s `externalTarget`/`fuzz`. It has
+## the run/report loop over `nelli`'s `externalTarget`/`fuzz`. It has
 ## NO import of any `sello/*` module -- the driver process never touches
 ## sello source; only the separately-compiled, separately-instrumented
 ## `fuzz_external_target` binary does, one fresh subprocess per input
 ## (`[INV-fresh-exec]`, docs/fuzz/FUZZ_PLAN.md D2).
 import std/[os, times, strutils]
-import proptest
+import nelli
 # `integerChoice`/`booleanChoice` (round-3 fix batch B, finding B2): the
-# top-level `proptest` module deliberately does NOT re-export these
+# top-level `nelli` module deliberately does NOT re-export these
 # constructors (see its own module doc: "reach for them via the submodule
 # import only when you have a specific reason -- test fixtures that
 # hand-craft sequences"). Hand-crafting a `seq[ChoiceNode]` for a
 # KNOWN-VALID concrete input, to seed `FuzzSettings.initialIRCorpus`
 # below, is exactly that reason.
-import proptest/choice as ptchoice
+import nelli/choice as ptchoice
 # `toBytes`/`fromBytes` for `seq[ChoiceNode]` (RFC-005 slice 24, corpus
 # continuity A5): full-fidelity binary serialization of a falsifying
 # choice-IR sequence, used ONLY to write a replayable crash artifact
 # alongside its human-readable message (`writeCrashArtifacts` below). Not
-# re-exported by top-level `proptest` (same "submodule import when you
-# have a specific reason" register as `proptest/choice` above) --
+# re-exported by top-level `nelli` (same "submodule import when you
+# have a specific reason" register as `nelli/choice` above) --
 # reaching for a raw crash reproducer's bytes is exactly that reason.
-import proptest/serialize as ptserialize
+import nelli/serialize as ptserialize
 
 # ---------------------------------------------------------------------------
 # Strategies (unchanged in shape from the pre-slice-3 harness)
@@ -73,7 +73,7 @@ type
 
 proc verifyInputs*(): Strategy[VerifyInput] =
   ## Composite strategy over sig || msg || pk -- everything `verify` reads.
-  ## `newStrategy` is proptest's documented escape hatch for a strategy over
+  ## `newStrategy` is nelli's documented escape hatch for a strategy over
   ## a type its combinators don't build directly (no built-in tuple/record
   ## zip combinator; see strategy.nim's `newStrategy` doc comment).
   let sigS = bytes64()
@@ -125,9 +125,9 @@ proc encodeRistrettoDecode*(b: array[32, byte]): seq[byte] =
 
 # ---------------------------------------------------------------------------
 # Corpus seeding (round-3 fix batch B, finding B2) -- SPIKE VERDICT: YES,
-# proptest's external-target fuzz API supports seeding IR-mode's corpus
+# nelli's external-target fuzz API supports seeding IR-mode's corpus
 # with concrete inputs, via `FuzzSettings.initialIRCorpus: seq[seq[
-# ChoiceNode]]` (`_deps/proptest/src/proptest/fuzz.nim`). Prior to this
+# ChoiceNode]]` (`_deps/nelli/src/nelli/fuzz.nim`). Prior to this
 # fix, `fuzz_main.nim`'s module doc claimed no such hook existed
 # ("there is no direct 'seed from raw bytes' hook for IR mode") -- true
 # for a raw-BYTES hook, but `initialIRCorpus` seeds via the typed
@@ -136,7 +136,7 @@ proc encodeRistrettoDecode*(b: array[32, byte]): seq[byte] =
 # replays through `captureIR` and is admitted as a real seed.
 #
 # Evidence this works (not merely "the field exists"), read directly from
-# `_deps/proptest` source (read-only reference, unmodified):
+# `_deps/nelli` source (read-only reference, unmodified):
 #   - `datasource.nim`'s `drawInteger` replay branch: "Replay clamps the
 #     recorded value" (`value = clamp(ds.takeReplay(ckInteger).intVal, min,
 #     max)`) -- a hand-built `integerChoice(byteVal, 0, 255, 0)` node
@@ -456,17 +456,17 @@ proc ristrettoDecodeSeeds*(): seq[seq[ChoiceNode]] =
 # `scripts/build-smoke.sh`'s compile-only path) keeps unchanged -- no
 # corpus directory, no persistence, no new log lines. `scripts/
 # nightly-fuzz.sh` is the one caller that opts in, via `fuzz_main.nim`
-# constructing a real `directoryBasedDatabase` (proptest's own file-backed
-# `ExampleDatabase` -- `_deps/proptest/src/proptest/db.nim`, one
+# constructing a real `directoryBasedDatabase` (nelli's own file-backed
+# `ExampleDatabase` -- `_deps/nelli/src/nelli/db.nim`, one
 # `<testId-as-safe-filename>.bin` per campaign, atomic tmp+rename writes)
 # pointed at `SELLO_FUZZ_CORPUS_DIR`. When active, the fuzz LOOP ITSELF
-# (`proptest/fuzz.nim`'s `fuzz` proc) loads any prior corpus as seeds on
+# (`nelli/fuzz.nim`'s `fuzz` proc) loads any prior corpus as seeds on
 # start and calls `database.saveCorpus` synchronously on every
 # new-coverage admission during the run -- this module does not hand-roll
 # save/restore; it only reports the before/after entry counts (the
 # "corpus-delta summary" the RFC's A5 text calls for) by reading the same
 # DB directly before and after `fuzz()` runs, via the DB's own
-# `loadCorpus`/`fuzzCorpusKey` (both re-exported by top-level `proptest`,
+# `loadCorpus`/`fuzzCorpusKey` (both re-exported by top-level `nelli`,
 # no submodule import needed for these two).
 
 proc sanitizeForFilename(s: string): string =
@@ -552,7 +552,10 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
   var settings = FuzzSettings(
     timeBudget: initDuration(seconds = seconds),
     seed: seedVal,
-    mutationMode: fmIR,
+    # `mutationMode: fmIR` dropped (nelli 0.6.0, RFC-fuzzer-nextgen U3):
+    # IR is now the one mutation kernel `fuzz`/`fuzzWith` drive -- the
+    # byte-mutation mode and its `FuzzSettings.mutationMode` selector are
+    # gone, not merely defaulted, so the field no longer exists to set.
     initialIRCorpus: corpusSeeds,
     database: database,
     persistKey: persistKey)
@@ -565,7 +568,7 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
   # target), so `fuzzCorpusKey(persistKey, "")` folds to the bare
   # `persistKey` (see that proc's own doc comment on the empty-targetId
   # case). Guarded on `loadCorpusImpl != nil`, mirroring exactly the
-  # gate `proptest/fuzz.nim`'s own `fuzz` proc uses before ever calling
+  # gate `nelli/fuzz.nim`'s own `fuzz` proc uses before ever calling
   # through the closure -- an inactive (all-nil) `database` must never be
   # dispatched into.
   let persistActive = persistKey.len > 0 and database.loadCorpusImpl != nil
@@ -578,7 +581,7 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
 
   if persistActive:
     # The loop above already persisted every new-coverage admission live
-    # (`proptest/fuzz.nim`'s `saveCorpusActive` branch) -- this is a
+    # (`nelli/fuzz.nim`'s `saveCorpusActive` branch) -- this is a
     # read-back for the summary line, not a save of our own.
     let corpusAfter = database.loadCorpus(testId).len
     echo "  corpus persistence: key=", testId, " entries after run=", corpusAfter,
@@ -598,9 +601,12 @@ proc runExternalTarget*[T](name: string; strat: Strategy[T];
   if corpusSeeds.len > 0:
     echo "  corpus seeds preloaded: ", corpusSeeds.len, " (0 dropped)"
 
-  let corpusSize = case report.corpus.kind
-                   of fckIR: report.corpus.irEntries.len
-                   of fckBytes: report.corpus.byteEntries.len
+  # `FuzzCorpusKind` is a single-arm enum as of nelli 0.6.0 (RFC-fuzzer-
+  # nextgen U3 removed `fckBytes` along with the byte-mutation kernel that
+  # was its only producer) -- `report.corpus.kind` is always `fckIR`, kept
+  # as a tagged field (not a bare seq) per that type's own doc comment, so
+  # a plain field read replaces the old two-armed case.
+  let corpusSize = report.corpus.irEntries.len
   echo "  iterations:        ", report.iterations
   echo "  coverage edges hit: ", report.coverageHits
   echo "  corpus size:        ", corpusSize
