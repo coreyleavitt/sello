@@ -411,9 +411,8 @@
       tiebreaker run" section and its control-diagnostic appendix.
 
 ## Open forks (awaiting Corey)
-- **Slice 7b `` ristretto.`==` ``/`ristrettoEncode` dudect standing
-  verdict — RESOLVED 2026-08-14 (kept for history; superseded by the
-  tiebreaker entry immediately below).** Full
+- **Slice 7b dudect standing verdict — RESOLVED 2026-08-14** (`` ristretto.`==` ``/`ristrettoEncode`;
+  kept for history, superseded by the tiebreaker entry immediately below). Full
   investigation in `docs/ct-results.md` ("RFC-004 slice 7b: four
   ristretto255 dudect targets"). Summary: `` ristretto.`==` ``'s naive
   single-call RFC-specified class design FAILed twice; a rigorous,
