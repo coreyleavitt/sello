@@ -297,27 +297,76 @@ timeouts, so this is a cost/latency finding, not a correctness one.
 All other jobs completed in line with their historical costs (build
 jobs 0.3-3.1min, `mutation` 5.85min, `bmc-symex` 2.07min).
 
-Branch: `rfc-nelli-migration`, 3 commits (`7b27256` mechanical
-migration, `da2d808` fuzz-harness adaptation, `d55ecaf` this handoff
-doc — see the session's own final report for whether a 4th commit
-updating this section's own numbers was needed, and that commit's own
-run id, before the fast-forward below happened).
+Branch `rfc-nelli-migration` landed as three commits (`7b27256`
+mechanical migration, `da2d808` fuzz-harness adaptation, `7db48af`
+this handoff doc, amended once to fold in the merge-gate timing
+numbers above before its own final green run) — fast-forwarded onto
+`main` at `7db48af` via `git push origin rfc-nelli-migration:main`,
+confirmed fast-forward-eligible first. Branch deleted after
+(`gh api repos/coreyleavitt/sello/branches/rfc-nelli-migration` -> 404
+confirmed).
 
-**Fast-forward:** `git push origin rfc-nelli-migration:main` once the
-handoff-doc commit's own fresh CI run (required, since it's a new SHA)
-also goes green. Branch deleted after (`gh api
-repos/coreyleavitt/sello/branches/rfc-nelli-migration` -> 404 confirms).
+**merge-gate run history on this migration** (all `rfc-nelli-migration`
+pushes, chronological): `33601321155` (`da2d808`, all 27 green, first
+full confirmation this migration's mechanical+fuzz-harness commits are
+sound) -> `33603985719` (`7db48af`, all 27 green again — the SHA that
+actually fast-forwarded onto `main`; `coverage-ratchet` alone took
+70.65min on this run vs 31.12min on the previous one, a real same-job
+variance this doc records honestly rather than picking whichever
+number looked better — see the timing finding above, which this
+variance reinforces rather than contradicts).
 
-## Nightly dispatch
+## Nightly dispatch — real run, confirmed
 
-`nightly.yml`'s `fuzz` job dispatched with `SELLO_FUZZ_ALLOW_COLD_START`
-UNSET (per this doc's own corpus-continuity finding above — the
-existing corpus is expected to auto-upgrade, not need a cold start).
-`cranked-properties` dispatched the same way. See the session's own
-final report for both run ids and their outcomes (corpus load
-confirmed or a genuine format-break finding, cranked wall-clock at the
-recorded 10x factor against the new engine's now-higher per-example
-baseline above).
+`nightly.yml` dispatched via `gh workflow run nightly.yml -f
+allow_cold_start=false` (every other input left at its recorded
+nightly default: `seconds_per_target` 450s, `property_crank` 10x) —
+run **`33610245570`**, overall `status: completed`, `conclusion:
+success`.
+
+- **`fuzz`: success, 31m17s.** The corpus-continuity finding above is
+  now CONFIRMED by a real dispatch, not just source-level reasoning:
+  the job restored the PRE-migration corpus (built entirely by the old
+  proptest/nelli-ec7a405 engine) with real entries for all four
+  targets — `sello-pointDecode` 20, `sello-verify` 46, `sello-x25519`
+  19, `sello-ristrettoDecode` 21 — grew each by +1 to +3 new-coverage
+  entries over the 450s/target campaign, and finished with the
+  staleness canary reporting `OK` and zero crashes on any target.
+  `SELLO_FUZZ_ALLOW_COLD_START` was correctly left unset/false and the
+  corpus loaded and upgraded cleanly, exactly as predicted — no format
+  break, no cold start needed. Per-target campaign results (450s
+  budget, real nightly scale, not the 20s smoke numbers earlier in
+  this doc):
+
+  | target | iterations | edges | crashes |
+  |---|---|---|---|
+  | `ed25519.pointDecode` | 77906 | 350 | 0 |
+  | `ed25519.verify` | 144052 | 568 | 0 |
+  | `x25519` (peer u-coordinate) | 77989 | 341 | 0 |
+  | `ristretto.ristrettoDecode` | 77882 | 396 | 0 |
+
+- **`cranked-properties`: success, 19.78min.** The 10x
+  `SELLO_PROPERTY_CRANK` factor against the new engine's own
+  now-higher per-example baseline (see the merge-gate timing finding
+  above) did NOT blow up into the multi-hour run this doc's own
+  earlier draft worried about — 19.78min is close to what
+  `property-linux-amd64-gcc`'s own 1x merge-gate run took (15.6min),
+  suggesting the crank's wall-clock cost is sublinear in practice
+  (fixed per-job overhead — container setup, milpa fetch, compiles —
+  is a large fraction of the 1x number, and does not itself scale with
+  the crank factor).
+- `s390x` and `memcheck` (both pre-existing nightly jobs, unrelated to
+  this migration's own scope): success, unaffected.
+- `timeout-demo`: skipped, as expected (its own dispatch flag was left
+  at its default `false`).
+
+## Completed in this session (updated)
+
+`main` fast-forwarded to `7db48af`, branch deleted (404 confirmed),
+nightly `fuzz` + `cranked-properties` dispatched for real and both
+green with run id `33610245570` (see above) — every item this doc's
+earlier draft listed as "not yet done" is now done. What remains open
+is genuinely open, not merely unfinished bookkeeping:
 
 ## Not completed in this session (explicit)
 
