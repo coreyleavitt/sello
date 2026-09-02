@@ -2,14 +2,14 @@
 version 1
 strategy "maxver"
 
-dep "proptest" {
+dep "nelli" {
     source {
         kind "git"
         url (url)"https://github.com/coreyleavitt/nelli"
-        ref "ec7a405c354e79c30717b0692ad548bc8bee7414"
+        ref "67f890dee81480bc71fb47e985de05817e631147"
     }
-    identity "dag-sha256:0406e5ace06f9bf3be85cbf993a027f467646f2edfe4395f756dce63a2fd3c2b"
-    version "0.3.4"
+    identity "dag-sha256:45e194f023a71ca6f924cf4e4ee96c1fcc32f927ecb0d6e41c56bc44ec7ad4fe"
+    version "0.7.0"
     declared_version_source "manifest"
     src_dir "src"
     requires "z3"
@@ -17,8 +17,8 @@ dep "proptest" {
         origin "observed"
         kind "git"
         url "https://github.com/coreyleavitt/nelli.git"
-        ref "ec7a405c354e79c30717b0692ad548bc8bee7414"
-        commit_sha "ec7a405c354e79c30717b0692ad548bc8bee7414"
+        ref "67f890dee81480bc71fb47e985de05817e631147"
+        commit_sha "67f890dee81480bc71fb47e985de05817e631147"
     }
 }
 

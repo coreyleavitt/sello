@@ -1,15 +1,15 @@
 ## Property-based coverage for sello/field (RFC-001 finding 10).
 ##
-## Uses proptest (Corey's Hypothesis-style choice-sequence engine for Nim,
-## https://github.com/coreyleavitt/proptest), fetched as an optional milpa
+## Uses nelli (Corey's Hypothesis-style choice-sequence engine for Nim,
+## https://github.com/coreyleavitt/nelli), fetched as an optional milpa
 ## dev-dep -- see milpa.kdl (`optional=#true`) and
 ## docs/rfc-001-signing.handoff.md's B4a summary for the wiring decision.
 ##
-## `import proptest` pulls in the whole library (strategy/engine/dsl plus
-## the stateful/fuzz/mining/bisim/etc. surface), but NOT `proptest/symex`
+## `import nelli` pulls in the whole library (strategy/engine/dsl plus
+## the stateful/fuzz/mining/bisim/etc. surface), but NOT `nelli/symex`
 ## (the only module that imports `z3`) -- confirmed empirically by
 ## compiling this file in the base `ghcr.io/coreyleavitt/nim:2.2.10` image,
-## which has no z3 shared library installed. `proptest/bmc` (also
+## which has no z3 shared library installed. `nelli/bmc` (also
 ## z3-adjacent by name) only imports `strategy`/`datasource`/`stateful`/
 ## `rng`, never `z3` or `symex` -- the whole z3/SMT stack lives behind an
 ## import boundary this file never crosses.
@@ -31,7 +31,7 @@
 ## here.
 
 import std/unittest
-import proptest
+import nelli
 import sello/field
 import ./property_crank
 

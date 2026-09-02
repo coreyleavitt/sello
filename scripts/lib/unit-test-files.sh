@@ -30,11 +30,11 @@ unit_test_files=(
   tests/unit/test_properties_sha512.nim
 )
 
-# proptest is an OPTIONAL milpa dep (see scripts/test.sh's header comment):
-# a fresh clone's plain `milpa fetch` never populates `_deps/proptest`, so
+# nelli is an OPTIONAL milpa dep (see scripts/test.sh's header comment):
+# a fresh clone's plain `milpa fetch` never populates `_deps/nelli`, so
 # the five `test_properties_*.nim` files above fail to compile with a bare
-# "cannot open file: proptest" error mid-loop -- there is no graceful
-# skip today (RFC-003 slice 2 item 4). Detect proptest's presence HERE,
+# "cannot open file: nelli" error mid-loop -- there is no graceful
+# skip today (RFC-003 slice 2 item 4). Detect nelli's presence HERE,
 # once, so both scripts/test.sh and scripts/test-libsodium.sh (which both
 # source this file) can filter the property suites out of the list they
 # actually compile, in the same self-skip register test_libsodium_interop
@@ -43,7 +43,7 @@ unit_test_files=(
 # the gate has to happen in bash, before `nim c` ever runs, since a
 # missing import is a compile-time failure, not a runtime branch).
 skipped_property_files=()
-if [[ ! -d "$(dirname "${BASH_SOURCE[0]}")/../../_deps/proptest" ]]; then
+if [[ ! -d "$(dirname "${BASH_SOURCE[0]}")/../../_deps/nelli" ]]; then
   filtered_test_files=()
   for f in "${unit_test_files[@]}"; do
     case "$f" in

@@ -90,7 +90,7 @@ Never touches the real working tree: everything above operates on a
 throwaway copy under /tmp inside the container, made once at startup and
 reused (mutate-restore in place) across the whole campaign -- reusing the
 scratch copy (rather than re-cloning the repo per mutant) is what lets the
-Nim compiler's own nimcache carry unrelated dependencies (proptest and its
+Nim compiler's own nimcache carry unrelated dependencies (nelli and its
 own transitive deps, when fetched -- sello resolves no unconditional
 dependency at all as of RFC-006) across mutants within the one container
 invocation, instead of paying their full compile cost once per mutant.
@@ -419,7 +419,7 @@ def render_report(catalog, results, elapsed_seconds, unit_test_files, equivalent
     lines.append("")
     lines.append(
         "This is a curated, hand-written mutant catalog, not an exhaustive "
-        "operator sweep: proptest's own `mutation.nim` v1 is `int -> int` "
+        "operator sweep: nelli's own `mutation.nim` v1 is `int -> int` "
         "only and cannot target Nim source directly, so sello builds this "
         "thin patch-based harness in its place (RFC-002 slice 5). Each "
         "mutant is an exact-string OLD -> NEW replacement (see "

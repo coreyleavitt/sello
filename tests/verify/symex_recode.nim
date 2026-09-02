@@ -1,12 +1,12 @@
 ## Machine-checked (Z3-backed) proof of `scalar.recodeScalarRadix16`'s
 ## digit-range invariant (RFC-001 review finding 22), using COREY'S
-## proptest library's symbolic-execution engine (`proptest/symex`).
+## nelli library's symbolic-execution engine (`nelli/symex`).
 ##
 ## Standalone, non-suite binary (mirrors `tests/ct/ct_main.nim`'s and
 ## `tests/fuzz/fuzz_main.nim`'s pattern): NOT part of scripts/test.sh
 ## (needs z3-devel; the ordinary dev loop shouldn't pay for the solver).
 ## Run via `scripts/bmc.sh`, which wraps this in a hard kill-timeout the
-## same way proptest's own `scripts/dt-bounded.sh` does -- symex/Z3 queries
+## same way nelli's own `scripts/dt-bounded.sh` does -- symex/Z3 queries
 ## can hang or exhaust resources on some shapes (see the RESOURCE WALL
 ## note below -- this is not a hypothetical risk in this harness, it is
 ## what actually happened on the first attempt).
@@ -20,7 +20,7 @@
 ##   digits[63]    in [-8, 8]
 ## Previously this was only SAMPLED: `tests/unit/test_properties_scalar.nim`
 ## checks 200 scalars (100 clamped-domain, 100 reduced-mod-L) drawn from
-## proptest's PBT generator, against 2^255 possible bit-255-clear inputs.
+## nelli's PBT generator, against 2^255 possible bit-255-clear inputs.
 ## (A separate, related property -- the RECONSTRUCTION identity, Σ
 ## digits[i]*16^i == s -- is also checked by that same test file's sampled
 ## property, and is additionally now proved for ALL bit-255-clear inputs
@@ -97,7 +97,7 @@
 ## the full composition -- no manual induction step remains. See the "Z3
 ## WHOLE-CHAIN ATTEMPT" section below for the exact encoding and the
 ## empirical tooling limitations that shaped it.
-import proptest/symex
+import nelli/symex
 import sello/scalar  # for the cross-check only, not entered by symex (see below)
 
 # -----------------------------------------------------------------------
@@ -115,7 +115,7 @@ import sello/scalar  # for the cross-check only, not entered by symex (see below
 # carry forks may simply be a large-but-finite BV query that needs more
 # than 300s, or the walker/solver may be hitting a genuine non-termination
 # shape like the "F5 incident" this file's header already cites
-# (docs/symex/... in the proptest repo: a mixed-theory
+# (docs/symex/... in the nelli repo: a mixed-theory
 # int2bv(bv2int(x))-style query spun a full core for 24+ minutes on an
 # unrelated SUT). Either way, "prove the strongest TRACTABLE statement"
 # means backing off to the per-iteration lemma below rather than either
@@ -148,7 +148,7 @@ import sello/scalar  # for the cross-check only, not entered by symex (see below
 #      arithmetic on its `int32` parameters inside that nested call
 #      crashes the walker outright: `Error: unhandled exception: field
 #      'bv32' is not accessible for type 'SymVal' using 'kind = svBV64'
-#      [FieldDefect]`, deep in `proptest/smt/runtime.nim`'s
+#      [FieldDefect]`, deep in `nelli/smt/runtime.nim`'s
 #      `lowerArith`/`overflowCond`. Reproduced on a minimal 1-call and
 #      2-call harness with plain `int32` arithmetic, nothing scalar.nim-
 #      specific about it. Neither `{.push overflowChecks: off.}` at the
@@ -392,7 +392,7 @@ proc oneStep(nibble: int32, carryIn: int32): tuple[digit, carryOut: int32] =
   ## call this exact function in a loop, threading `carryOut` into the
   ## next call's `carryIn` the same way `recodeScalarRadix16`'s own loop
   ## threads its `carry` local -- `symexFind` only inspects a proc's
-  ## PARAMETERS to build its witness tuple (see `proptest/symex`'s
+  ## PARAMETERS to build its witness tuple (see `nelli/symex`'s
   ## `parseProc`/`emitTyAndReader`), so widening the return type from
   ## `int32` to this tuple changes nothing about what gets proved below.
   symexAssume(nibble >= 0'i32 and nibble <= 15'i32)   # a nibble from `s[i] and 0xF` / `(s[i] shr 4) and 0xF`

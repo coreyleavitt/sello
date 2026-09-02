@@ -80,7 +80,7 @@
 # RFC-005 slice 9 (ASan/UBSan job): unit suite only, per Part B's merge-
 # gate paragraph ("ASan/UBSan build of the unit suite") -- there is no
 # property-linux-amd64-*-asan-ubsan sibling the way slice 8 added one for
-# --cc, since the property suites are proptest's own generative harness,
+# --cc, since the property suites are nelli's own generative harness,
 # not sello's unit KATs, and the RFC scopes this leg to the unit suite
 # deliberately. Runs on gcc (scripts/test.sh's own --sanitize header
 # comment has the gcc-over-clang rationale), via the SAME
@@ -107,14 +107,14 @@
 #
 # RFC-005 slice 12 (macOS-arm64 leg): unit suite only, no property
 # sibling (see merge-gate.yml's own job comment for the full rationale --
-# this runner has no milpa/proptest fetch story). Same
+# this runner has no milpa/nelli fetch story). Same
 # SELLO_IN_CONTAINER=1-hardcoded register as the linux/arm64 legs above
 # (no container to dual-mode against on macOS either) plus two additions
 # specific to this leg: `--expect-arch arm64` (NOT `aarch64` -- Darwin's
 # `uname -m` spelling differs from Linux's for the identical physical
-# architecture) and scripts/test.sh's own `--expect-proptest-skip` flag
+# architecture) and scripts/test.sh's own `--expect-nelli-skip` flag
 # (the inverse of every property-* row's implicit "banner absent"
-# expectation: this leg has no proptest fetch story, so the banner's
+# expectation: this leg has no nelli fetch story, so the banner's
 # PRESENCE is the correct, asserted outcome).
 #
 # RFC-005 slice 13 (Windows/MinGW-gcc leg): the last hosted-native matrix
@@ -234,7 +234,7 @@
 # same axis `unit-linux-amd64-gcc-asan-ubsan` already established for a
 # build-config variant of the plain gcc leg), rather than inventing a
 # second axis for one job. Unit suite only, no property sibling -- this
-# job fetches no proptest of its own (scripts/test-libsodium.sh never
+# job fetches no nelli of its own (scripts/test-libsodium.sh never
 # has), so the property files self-skip exactly as they did before this
 # slice, unaffected by SELLO_REQUIRE_LIBSODIUM=1 (a differently-worded,
 # unbracketed banner -- see that script's own header comment for why the
@@ -313,8 +313,8 @@ unit-linux-i386-gcc                 scripts/test.sh --cpu i386
 property-linux-amd64-gcc            scripts/ci-property.sh
 property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
-unit-macos-arm64-clang              scripts/ci-nim-setup.sh --expect-arch arm64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
-unit-windows-amd64-gcc              scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-proptest-skip
+unit-macos-arm64-clang              scripts/ci-nim-setup.sh --expect-arch arm64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-nelli-skip
+unit-windows-amd64-gcc              scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-nelli-skip
 check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh

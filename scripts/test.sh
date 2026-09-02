@@ -3,14 +3,14 @@
 # toolchain image. Replaces the old `nimble test` task now that milpa is
 # the resolver. As of RFC-006 (in-house SHA-512 retired the nimcrypto
 # dependency), a plain `milpa fetch` resolves ZERO dependencies for the
-# core library -- _deps/ is empty unless proptest has been fetched (see
+# core library -- _deps/ is empty unless nelli has been fetched (see
 # below).
 #
 # Usage:  scripts/test.sh              # plain pure-Nim backend, default C compiler (gcc)
 #         scripts/test.sh -d:release   # extra defines forwarded to each nim c
 #         scripts/test.sh --cc clang   # compile with clang instead of gcc (RFC-005 slice 8)
 #         scripts/test.sh --sanitize asan-ubsan   # ASan/UBSan build of the unit suite (RFC-005 slice 9)
-#         scripts/test.sh --expect-proptest-skip   # assert the proptest SKIPPED banner appears (RFC-005 slice 12)
+#         scripts/test.sh --expect-nelli-skip   # assert the nelli SKIPPED banner appears (RFC-005 slice 12)
 #         scripts/test.sh --cpu i386   # 32-bit multilib build, unit+property suite (RFC-005 slice 10)
 #         scripts/test.sh --cc clang -d:release   # leading flags compose with defines
 #         scripts/test.sh --sanitize asan-ubsan --cc clang   # leading flags compose with each other too
@@ -82,17 +82,17 @@
 # weakening: AddressSanitizer's and UndefinedBehaviorSanitizer's own
 # (non-leak) checks are unaffected and stay fully active.
 #
-# --expect-proptest-skip (RFC-005 slice 12, the macOS-arm64 leg): a
-# boolean (no value) leading flag asserting the proptest SKIPPED banner
+# --expect-nelli-skip (RFC-005 slice 12, the macOS-arm64 leg): a
+# boolean (no value) leading flag asserting the nelli SKIPPED banner
 # (see the "Additional prerequisite" paragraph below) DOES appear in this
 # run's own output. This is the exact inverse of scripts/ci-property.sh's
 # own assertion (that job asserts the banner is ABSENT, since it exists to
-# run the property suites for real): a hosted leg with no milpa/proptest
+# run the property suites for real): a hosted leg with no milpa/nelli
 # story of its own (macOS-arm64 today; Windows/MinGW, RFC-005 slice 13)
-# has NO way to populate _deps/proptest, so the skip is the CORRECT,
+# has NO way to populate _deps/nelli, so the skip is the CORRECT,
 # expected outcome there -- and a run where it went silently missing (or
 # where the property suites somehow ran for real, e.g. a future change
-# vendoring proptest into the zero-dep path) should be a red check, not a
+# vendoring nelli into the zero-dep path) should be a red check, not a
 # quietly-different suite. Implemented by tee-ing the run's combined
 # output to a log file and grepping it afterward -- the same mechanism
 # ci-property.sh already uses for its own (inverted) assertion, just
@@ -200,7 +200,7 @@
 # leading flags, three taking a value and one boolean, and every other
 # argument stays an opaque pass-through define as before), so any of them,
 # in any order, may lead the argument list; the loop stops at the first
-# argument that isn't `--cc`/`--sanitize`/`--cpu`/`--expect-proptest-skip`,
+# argument that isn't `--cc`/`--sanitize`/`--cpu`/`--expect-nelli-skip`,
 # and everything from there on is forwarded verbatim as a define. The FIRST
 # unit test file's compile is additionally run
 # through a canary: scripts/lib/toolchain-canary.sh (compiler identity
@@ -223,11 +223,11 @@
 #
 # Mounts: the project + the milpa CAS (at both the canonical path and its
 # host-absolute path, so milpa's absolute dep symlinks under _deps/
-# resolve in-container -- same pattern as proptest's scripts/runtest.sh).
+# resolve in-container -- same pattern as nelli's scripts/runtest.sh).
 #
 # Prerequisite: `milpa fetch` has been run on the host at least once (populates
 # _deps/ and nim.cfg from milpa.lock). Not invoked automatically here, matching
-# proptest's scripts/ convention -- keeps this script network-free and lets
+# nelli's scripts/ convention -- keeps this script network-free and lets
 # `--frozen` verification stay an explicit, separate step (`milpa verify`).
 #
 # SELLO_IN_CONTAINER=1 (RFC-005 slice 1): CI already runs this script
@@ -256,23 +256,23 @@
 # `/dev/...` path, no `ldconfig`). Conclusion: clean, no Linux-isms found.
 #
 # Additional prerequisite for the property-based tests (test_properties_*,
-# RFC-001 finding 10): proptest is an OPTIONAL milpa dep (milpa.kdl:
-# `optional=#true`, auto-gated behind a same-named "proptest" feature flag,
+# RFC-001 finding 10): nelli is an OPTIONAL milpa dep (milpa.kdl:
+# `optional=#true`, auto-gated behind a same-named "nelli" feature flag,
 # RFC #23 §3.2) so consumers of sello never transitively fetch
-# proptest+nim-z3+softlink just by depending on sello. A plain `milpa fetch`
-# prunes it (verified empirically: nim.cfg gains no proptest/z3/softlink
+# nelli+nim-z3+softlink just by depending on sello. A plain `milpa fetch`
+# prunes it (verified empirically: nim.cfg gains no nelli/z3/softlink
 # --path lines and _deps/ is left empty -- there is no other dependency
 # left to populate it). To enable it for local
-# dev, run once: `milpa fetch --features proptest` -- this resolves and
-# fetches proptest AND its own transitive deps (z3, softlink; proptest's own
+# dev, run once: `milpa fetch --features nelli` -- this resolves and
+# fetches nelli AND its own transitive deps (z3, softlink; nelli's own
 # manifest declares z3 unconditionally), and nim.cfg gains their --path
-# lines. Note this also rewrites the *committed* milpa.lock's proptest/z3/
+# lines. Note this also rewrites the *committed* milpa.lock's nelli/z3/
 # softlink entries in your working tree; that's expected milpa behavior
 # (activation is recomputed from the manifest + requested features on every
 # fetch, not preserved from a prior lock state) -- see the B4a summary in
-# docs/rfc-001-signing.handoff.md. `import proptest` compiles fine in this
+# docs/rfc-001-signing.handoff.md. `import nelli` compiles fine in this
 # script's base image with no z3 shared library installed: the only module
-# that imports `z3` is `proptest/symex`, which the top-level `proptest`
+# that imports `z3` is `nelli/symex`, which the top-level `nelli`
 # module never imports (confirmed empirically).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -304,8 +304,8 @@ cpu_name=""
 cpu_flag=""
 cpu_nim_args=""
 run_with=""
-expect_proptest_skip=0
-while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" || "${1:-}" == "--expect-proptest-skip" ]]; do
+expect_nelli_skip=0
+while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" || "${1:-}" == "--expect-nelli-skip" ]]; do
   case "$1" in
     --cc)
       if [[ -z "${2:-}" ]]; then
@@ -370,8 +370,8 @@ while [[ "${1:-}" == "--cc" || "${1:-}" == "--sanitize" || "${1:-}" == "--cpu" |
       esac
       shift 2
       ;;
-    --expect-proptest-skip)
-      expect_proptest_skip=1
+    --expect-nelli-skip)
+      expect_nelli_skip=1
       shift
       ;;
   esac
@@ -459,17 +459,17 @@ for f in "${unit_test_files[@]}"; do
     cmd+=$'\n'"nim c $cc_flag $sanitize_nim_args $cpu_flag $cpu_nim_args ${extra_defines[*]:-} -r $f"
   fi
 done
-# Property suites skipped because _deps/proptest is absent (RFC-003 slice 2
+# Property suites skipped because _deps/nelli is absent (RFC-003 slice 2
 # item 4) -- same loud self-skip register as test_libsodium_interop's
 # runtime skip(), but decided here in bash since the failure mode being
-# avoided (a missing `import proptest`) is a compile error, not something
+# avoided (a missing `import nelli`) is a compile error, not something
 # a runtime skip() inside the test binary could ever reach.
 for f in "${skipped_property_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
-  cmd+=$'\n'"echo 'SKIPPED (proptest not fetched -- run: milpa fetch --features proptest)'"
+  cmd+=$'\n'"echo 'SKIPPED (nelli not fetched -- run: milpa fetch --features nelli)'"
 done
 
-# --expect-proptest-skip's own log capture (RFC-005 slice 12) -- see the
+# --expect-nelli-skip's own log capture (RFC-005 slice 12) -- see the
 # header comment above. Only allocated when the flag is set, so a plain
 # `scripts/test.sh` run's output still streams straight to the terminal
 # with no `tee` indirection at all (byte-identical to every prior slice's
@@ -478,8 +478,8 @@ done
 # real command's exit status past the pipe, not `tee`'s own (always-zero)
 # one.
 run_log=""
-if [[ "$expect_proptest_skip" -eq 1 ]]; then
-  run_log="build/test-proptest-skip-check.log"
+if [[ "$expect_nelli_skip" -eq 1 ]]; then
+  run_log="build/test-nelli-skip-check.log"
   mkdir -p "$(dirname "$run_log")"
 fi
 
@@ -537,20 +537,20 @@ else
   fi
 fi
 
-# --expect-proptest-skip's own assertion, run only after the suite itself
+# --expect-nelli-skip's own assertion, run only after the suite itself
 # has already succeeded (set -e above would have stopped this script
 # already if it hadn't) -- the exact inverse of scripts/ci-property.sh's
 # "assert the SKIPPED banner is ABSENT" check: this leg has no
-# milpa/proptest story, so the banner's PRESENCE is the expected, correct
+# milpa/nelli story, so the banner's PRESENCE is the expected, correct
 # outcome, and its absence (or the property suites somehow having run for
 # real) is what must go red here.
 if [[ -n "$run_log" ]]; then
-  if grep -q 'SKIPPED (proptest not fetched' "$run_log"; then
-    echo "test.sh: proptest SKIPPED banner present, as required (--expect-proptest-skip)." >&2
+  if grep -q 'SKIPPED (nelli not fetched' "$run_log"; then
+    echo "test.sh: nelli SKIPPED banner present, as required (--expect-nelli-skip)." >&2
   else
     echo "" >&2
-    echo "test.sh: FAIL -- --expect-proptest-skip was set but no SKIPPED banner appears in this run's log." >&2
-    echo "test.sh: this leg has no milpa/proptest fetch story of its own, so the property" >&2
+    echo "test.sh: FAIL -- --expect-nelli-skip was set but no SKIPPED banner appears in this run's log." >&2
+    echo "test.sh: this leg has no milpa/nelli fetch story of its own, so the property" >&2
     echo "test.sh: suites are expected to self-skip loudly; either the skip went silent or" >&2
     echo "test.sh: they ran for real -- investigate, do not silence." >&2
     exit 1

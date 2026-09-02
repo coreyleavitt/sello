@@ -1,7 +1,7 @@
 ## Shared crank-factor helper for the property-suite settings constructors
 ## (RFC-005 slice 26, Nightly part 3's "cranked properties" job).
 ##
-## proptest exposes no external "run this whole campaign at N times the
+## nelli exposes no external "run this whole campaign at N times the
 ## examples" knob of its own -- `Settings.maxExamples` is a plain `int`
 ## field each `test_properties_*.nim` file's own per-suite settings
 ## constructor (`covSettings`/`settingsWithExamples`/`settingsForPoints`)

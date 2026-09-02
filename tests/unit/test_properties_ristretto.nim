@@ -1,6 +1,6 @@
 ## Property-based coverage for sello/ristretto (RFC-004 slice 3).
 ##
-## See test_properties_field.nim's module doc comment for the proptest
+## See test_properties_field.nim's module doc comment for the nelli
 ## wiring notes (optional milpa dep, z3-avoidance) -- not repeated here.
 ##
 ## Born this slice: `randomRistrettoPoints()`, THE random-element generator
@@ -20,7 +20,7 @@
 ## special coverage-guided-engine handling).
 
 import std/[unittest, options]
-import proptest
+import nelli
 import sello/ristretto
 import sello/field
 import sello/scalar
@@ -47,7 +47,7 @@ proc randomRistrettoPoints(): Strategy[RistrettoPoint] =
   ## THE random-element generator -- see the module doc comment above.
   ##
   ## Built via `Strategy[RistrettoPoint](run: ...)` directly (the same
-  ## low-level constructor `proptest/strategy.filter` itself uses), NOT
+  ## low-level constructor `nelli/strategy.filter` itself uses), NOT
   ## `randomValidEncodings().filter(...)`/`.map(...)` (slice 3's original
   ## shape), as of RFC-004 slice 4: `.filter()` raises `Rejection` up to
   ## the engine's OWN per-property `maxRejections` counter on every miss,
@@ -109,7 +109,7 @@ proc settingsForPoints(n: int): Settings =
   ## (below): identical to `settingsWithExamples` except `coverageGuided` is
   ## OFF, which is EMPIRICALLY REQUIRED, not a style choice (round-4 slice-4
   ## TDD cycle finding, isolated in a standalone repro before this fix):
-  ## proptest's coverage-guided mutation/exploration engine, run against
+  ## nelli's coverage-guided mutation/exploration engine, run against
   ## `randomRistrettoPoints()`'s internal-retry `Strategy.run` (a variable,
   ## data-dependent number of underlying byte-array draws per call, not the
   ## fixed-shape-per-call pattern `arbitrary`/`filter`-composed strategies
@@ -188,7 +188,7 @@ suite "ristretto property: group axioms":
 # RistrettoPoint by it must not change the encoding. The deterministic
 # two-fixed-point spot check (plus the order-8 NEGATIVE companion pinning
 # the [2]E boundary) lives in test_ristretto.nim, which runs even without
-# proptest fetched; this is the random-P analog.
+# nelli fetched; this is the random-P analog.
 # ---------------------------------------------------------------------------
 
 let e4Points = block:

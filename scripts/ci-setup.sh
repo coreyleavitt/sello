@@ -7,8 +7,8 @@
 # has to install or invoke milpa just to make `import sello` resolve.
 #
 # Idempotent: does nothing if nim.cfg already exists -- never clobbers a
-# milpa-generated nim.cfg (e.g. one carrying proptest/z3/softlink --path
-# lines from a local `milpa fetch --features proptest`), and a second
+# milpa-generated nim.cfg (e.g. one carrying nelli/z3/softlink --path
+# lines from a local `milpa fetch --features nelli`), and a second
 # invocation on an already-set-up checkout is a silent no-op rather than
 # a rewrite.
 #

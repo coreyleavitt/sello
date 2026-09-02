@@ -1,7 +1,7 @@
 ## Machine-checked (Z3-backed) proof of the or-accumulate lemma shared by
 ## `field.feEqualCT`/`field.feIsZeroCT`/`field.feBytesCanonicalCT` (RFC-004
-## slice 1b), using COREY'S proptest library's symbolic-execution engine
-## (`proptest/symex`) -- the same tooling and register `tests/verify/
+## slice 1b), using COREY'S nelli library's symbolic-execution engine
+## (`nelli/symex`) -- the same tooling and register `tests/verify/
 ## symex_mask.nim` and `tests/verify/symex_recode.nim` established. Read
 ## `symex_mask.nim`'s module doc comment first if this is your first time
 ## in `tests/verify/` -- it is the pattern library this harness follows
@@ -167,7 +167,7 @@
 ## imported `feEqualCT`/`feIsZeroCT`/`feBytesCanonicalCT` on concrete
 ## vectors -- so the workaround changes how the proof is encoded, not what
 ## is proved.
-import proptest/symex
+import nelli/symex
 import sello/field
 
 # -----------------------------------------------------------------------

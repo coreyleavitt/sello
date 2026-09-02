@@ -349,7 +349,7 @@ jobs:
           build/milpa-venv-head/bin/milpa --version
 
       - name: milpa@HEAD fetch --locked against this repo's committed milpa.lock
-        run: build/milpa-venv-head/bin/milpa fetch --features proptest --locked
+        run: build/milpa-venv-head/bin/milpa fetch --features nelli --locked
 
   # --- notify ----------------------------------------------------------------
   #

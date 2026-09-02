@@ -22,7 +22,7 @@
 #      SELLO_FUZZ_CORPUS_DIR when it starts (restored by that step, or
 #      genuinely absent on a cold start) and hands that path straight to
 #      tests/fuzz/fuzz_main.nim via the SELLO_FUZZ_CORPUS_DIR env var --
-#      the actual load/save mechanics live in proptest's own
+#      the actual load/save mechanics live in nelli's own
 #      `directoryBasedDatabase` (tests/fuzz/fuzz_common.nim's "Run +
 #      report" section doc paragraph has the full design: one
 #      `<persistKey>.bin` file per campaign, atomically read-modified
@@ -102,7 +102,7 @@
 #     via some other heuristic) means an accidental cache eviction or a
 #     genuinely broken restore step fails loud by DEFAULT, matching this
 #     project's standing "silent skip must be a red check" posture
-#     (scripts/ci-property.sh's own proptest-skip-banner assertion is the
+#     (scripts/ci-property.sh's own nelli-skip-banner assertion is the
 #     precedent this mirrors).
 #   - Consequence: a stale-or-absent verdict at start is recorded and
 #     enforced at the END of this script (after the campaign itself has
@@ -155,8 +155,8 @@ run_in_container() {
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv"
 
-  echo "nightly-fuzz: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
-  "$MILPA_BIN" fetch --features proptest --locked
+  echo "nightly-fuzz: fetching nelli + transitives (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features nelli --locked
 
   corpus_dir="${SELLO_FUZZ_CORPUS_DIR:-build/fuzz-corpus}"
   crash_dir="${SELLO_FUZZ_CRASH_DIR:-build/fuzz-crashes}"

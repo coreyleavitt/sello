@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/mutation.sh — curated mutation-testing harness (RFC-002 slice 5).
 #
-# proptest's own `mutation.nim` v1 is `int -> int` only, so it cannot target
+# nelli's own `mutation.nim` v1 is `int -> int` only, so it cannot target
 # Nim source directly; this is sello's own thin patch-based harness in its
 # place. The actual mutate/compile/run/classify/report loop lives in
 # tests/mutation/run_mutation.py (see its module doc comment for the full
@@ -46,7 +46,7 @@
 # full unit suite per the RFC — do not silently subset"). Everything happens
 # inside ONE podman invocation, not one per mutant: run_mutation.py reuses a
 # single scratch copy of the source tree across the whole campaign, which
-# lets Nim's own nimcache carry unrelated dependencies (proptest and its own
+# lets Nim's own nimcache carry unrelated dependencies (nelli and its own
 # transitive deps, when fetched — sello resolves no unconditional
 # dependency at all as of RFC-006) across mutants instead of paying their
 # full compile cost each time —
@@ -93,8 +93,8 @@
 # depth; see run_mutation.py's module doc comment) — same pattern as
 # scripts/test.sh. Host mode is UNCHANGED by the RFC-005 slice 15 dual-mode
 # retrofit below and continues to rely on the host's own already-fetched
-# `_deps/proptest` (via `milpa fetch --features proptest`, run at least
-# once) exactly as before — it does NOT fetch proptest itself the way the
+# `_deps/nelli` (via `milpa fetch --features nelli`, run at least
+# once) exactly as before — it does NOT fetch nelli itself the way the
 # new SELLO_IN_CONTAINER=1 branch does (see that branch's own comment for
 # why a bare CI checkout needs a different story).
 set -euo pipefail
@@ -119,8 +119,8 @@ fi
 # scripts/lib/unit-test-files.sh and sourced here, not retyped — same single
 # source of truth scripts/test.sh and scripts/test-libsodium.sh already
 # share (round-2 finding 25). Host mode uses whatever this first sourcing
-# finds (host-side _deps/proptest state); the SELLO_IN_CONTAINER=1 branch
-# below re-sources AFTER its own fresh proptest fetch, so its own
+# finds (host-side _deps/nelli state); the SELLO_IN_CONTAINER=1 branch
+# below re-sources AFTER its own fresh nelli fetch, so its own
 # unit_test_files/skipped_property_files reflect the fetch it just did, not
 # this pre-fetch state.
 source "$(dirname "$0")/lib/unit-test-files.sh"
@@ -129,11 +129,11 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   # RFC-005 slice 15 — already inside the pinned image (CI's own
   # `container:` field): no podman wrapper to invoke, and (unlike host
   # mode, which relies on a maintainer's pre-existing `milpa fetch
-  # --features proptest`) no host-side _deps/ to mount either — a CI
-  # checkout starts bare. Fetch proptest ourselves, mirroring
+  # --features nelli`) no host-side _deps/ to mount either — a CI
+  # checkout starts bare. Fetch nelli ourselves, mirroring
   # scripts/ci-property.sh's/scripts/build-smoke.sh's own in-container
   # fetch pattern, so this run exercises the SAME full unit+property suite
-  # a maintainer's local `scripts/mutation.sh` run always has (proptest
+  # a maintainer's local `scripts/mutation.sh` run always has (nelli
   # fetched) — running this job against a reduced, property-suite-less
   # catalog would silently weaken the gate relative to what
   # docs/mutation-results.md's committed "84/84 killed" record actually
@@ -142,16 +142,16 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   # CI.
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv"
-  echo "mutation: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
-  "$MILPA_BIN" fetch --features proptest --locked
+  echo "mutation: fetching nelli + transitives (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features nelli --locked
 
-  # Re-source now that _deps/proptest exists — the sourcing above (before
+  # Re-source now that _deps/nelli exists — the sourcing above (before
   # the fetch) ran against a bare checkout and would have filtered every
   # test_properties_*.nim file out.
   source "$(dirname "$0")/lib/unit-test-files.sh"
 
   if [[ ${#skipped_property_files[@]} -gt 0 ]]; then
-    echo "mutation: FAIL -- proptest was fetched above, but" \
+    echo "mutation: FAIL -- nelli was fetched above, but" \
          "scripts/lib/unit-test-files.sh still reports" \
          "${#skipped_property_files[@]} skipped property file(s)." >&2
     echo "mutation: this should be unreachable in CI; investigate before trusting this run's kill rate." >&2
@@ -175,9 +175,9 @@ else
 
   # Loud degraded-suite warning (mirrors scripts/test.sh's own per-file
   # SKIPPED banner) -- unit-test-files.sh silently drops the four
-  # test_properties_*.nim files from unit_test_files whenever _deps/proptest
+  # test_properties_*.nim files from unit_test_files whenever _deps/nelli
   # is absent (a fresh clone's plain `milpa fetch`, with no
-  # `--features proptest`, never populates it). scripts/test.sh compensates
+  # `--features nelli`, never populates it). scripts/test.sh compensates
   # by echoing a SKIPPED line per omitted file so that's visible in its own
   # output; this script has no equivalent per-file echo (the omitted files
   # never even reach run_mutation.py's argv), so without this banner a
@@ -185,7 +185,7 @@ else
   # off a materially weaker suite with nothing flagging the degradation.
   if [[ ${#skipped_property_files[@]} -gt 0 ]]; then
     echo "=================================================================="
-    echo "WARNING: proptest not fetched (_deps/proptest absent) -- the"
+    echo "WARNING: nelli not fetched (_deps/nelli absent) -- the"
     echo "following property-test files are EXCLUDED from this mutation run:"
     for f in "${skipped_property_files[@]}"; do
       echo "  - $f"
@@ -193,7 +193,7 @@ else
     echo ""
     echo "The kill-rate result below reflects a REDUCED suite, missing all"
     echo "property-based coverage those files provide. For a full-strength"
-    echo "mutation run, fetch proptest first: milpa fetch --features proptest"
+    echo "mutation run, fetch nelli first: milpa fetch --features nelli"
     echo "=================================================================="
   fi
 

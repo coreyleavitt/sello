@@ -23,7 +23,7 @@
 # and nim.cfg, which `import sello` in the extracted fences resolves
 # through) -- or, under SELLO_IN_CONTAINER=1 with no local `_deps/` at
 # all, scripts/ci-setup.sh has written the zero-dependency nim.cfg first
-# (README fences only exercise `import sello`, never proptest).
+# (README fences only exercise `import sello`, never nelli).
 #
 # RFC-005 slice 2 retrofit: this script used to hardcode the podman
 # invocation and skip scripts/lib/milpa-preflight.sh entirely (both

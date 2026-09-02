@@ -28,16 +28,16 @@
 #     experimentation, not assumed: `milpa verify -h` takes no `--features`
 #     flag of its own, so it always recomputes expected activation from the
 #     manifest's ZERO-feature default -- it has no way to know a prior
-#     `milpa fetch --features proptest` (sello's own documented, ordinary
+#     `milpa fetch --features nelli` (sello's own documented, ordinary
 #     local-dev step; see scripts/test.sh's header comment) is what produced
 #     the current, fully self-consistent `_deps/`/`milpa.lock` state. Every
-#     workflow that has ever run the proptest-enabling fetch trips this
+#     workflow that has ever run the nelli-enabling fetch trips this
 #     specific code on every subsequent plain `milpa verify`, forever,
 #     even though nothing is actually stale -- reproduced on this exact
 #     repo while writing this preflight. Treating it as fatal would make
 #     the preflight fail on the very state most of these scripts require
 #     (test.sh/test-libsodium.sh/fuzz.sh/bmc.sh all need the optional
-#     proptest dep fetched). This is a milpa 0.0.1 limitation (verify
+#     nelli dep fetched). This is a milpa 0.0.1 limitation (verify
 #     cannot express "check against a non-default feature selection"), not
 #     drift, so it gets a warning, not a hard stop.
 #
@@ -69,11 +69,11 @@ milpa_preflight() {
   fi
 
   if printf '%s' "$out" | grep -q 'FROZEN-ACTIVE-FLAGS-MISMATCH'; then
-    echo "milpa_preflight: warning -- 'milpa verify' reports a feature-activation mismatch, not real drift (known milpa 0.0.1 limitation: verify has no --features flag of its own and always checks against the zero-feature default, so any host that has ever run 'milpa fetch --features proptest' trips this every time). Continuing." >&2
+    echo "milpa_preflight: warning -- 'milpa verify' reports a feature-activation mismatch, not real drift (known milpa 0.0.1 limitation: verify has no --features flag of its own and always checks against the zero-feature default, so any host that has ever run 'milpa fetch --features nelli' trips this every time). Continuing." >&2
     return 0
   fi
 
-  echo "milpa_preflight: 'milpa verify' failed -- milpa.lock and _deps/ are out of sync. Run 'milpa fetch' (or 'milpa fetch --features proptest' if you need the optional property-testing/fuzzing/Z3 deps -- see scripts/test.sh's header comment) and retry." >&2
+  echo "milpa_preflight: 'milpa verify' failed -- milpa.lock and _deps/ are out of sync. Run 'milpa fetch' (or 'milpa fetch --features nelli' if you need the optional property-testing/fuzzing/Z3 deps -- see scripts/test.sh's header comment) and retry." >&2
   echo "$out" >&2
   return 1
 }

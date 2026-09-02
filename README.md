@@ -153,7 +153,7 @@ Nim >= 2.2.10. **Zero dependencies** -- SHA-512 is implemented in-house
 (`src/sello/private/sha512.nim`, FIPS 180-4); `nimcrypto` was sello's SHA-512
 dependency through the 0.4.0 release and has been fully retired. A plain
 `milpa fetch` (development) or `nimble install` (ecosystem consumers)
-resolves nothing at all for the core library; `proptest` remains, optional
+resolves nothing at all for the core library; `nelli` remains, optional
 and dev-only, for property-based testing (see "Building and testing"
 below).
 
@@ -544,13 +544,13 @@ claimed:
 | Taint-based deterministic CT harness -- real per-executed-path memcheck verdict, gcc and clang backends (a deterministic no-branch/no-index proof, not a statistical timing verdict -- complements the dudect rows above, does not replace them) | required-check | `taint-ct-linux-amd64-gcc` (and `taint-ct-linux-amd64-clang`) | n/a | none | taint-ct |
 | Disassembly gate (A2) -- static conditional-branch-profile check over each CT root's whole compiled function, gcc and clang backends (structural, not statistical or single-path -- complements the dudect and taint rows above, does not replace them) | required-check | `disasm-gate-gcc` (and `disasm-gate-clang`) | n/a | `tests/ct_disasm/expected/justifications.md` | disasm-gate |
 | Mutation testing of the highest-risk arithmetic/boundary logic (84/84 killed) | required-check | `mutation` (`scripts/mutation.sh`, full catalog, unsharded) | n/a | `docs/mutation-results.md` | mutation-catalog |
-| Coverage ratchet -- aggregate + per-file line coverage, monotone per file (not diff coverage) | required-check | `coverage-ratchet` (`scripts/coverage.sh`, full unit+property suite, fixed proptest seeds, single-pass by default -- `--verify-determinism` opts into a build+run-twice determinism check) | n/a | `tests/coverage/expected/baseline.txt` | coverage-ratchet |
+| Coverage ratchet -- aggregate + per-file line coverage, monotone per file (not diff coverage) | required-check | `coverage-ratchet` (`scripts/coverage.sh`, full unit+property suite, fixed nelli seeds, single-pass by default -- `--verify-determinism` opts into a build+run-twice determinism check) | n/a | `tests/coverage/expected/baseline.txt` | coverage-ratchet |
 | Audited alternative implementation builds cleanly (`-d:selloLibsodium`) | required-check | `api-surface-libsodium` (facade compiles and its surface diff is pinned under this config; does not itself run the interop suite below) | n/a | none | libsodium-build |
 | Differential adversarial testing against libsodium, bidirectional interop | required-check | `unit-linux-amd64-gcc-libsodium` (recompiles the unit suite with `-d:selloLibsodium`; `SELLO_REQUIRE_LIBSODIUM=1` makes any skip fatal, so it can never silently degrade to a no-op suite) | n/a | none | libsodium-interop |
 | Property-based testing of field/scalar/ristretto/sha512 primitives | required-check | `property-linux-amd64-gcc` (and `property-linux-amd64-clang`, `property-linux-arm64-gcc`) | n/a | none | property-merge-gate |
 | Property-based testing -- deeper nightly pass at a cranked example count | nightly | `cranked-properties` (10x `maxExamples`, same suites as the merge-gate job above) | n/a | none | property-cranked-nightly |
 | Coverage-guided fuzzing -- target and driver compile, one iteration run | required-check | `build-smoke` (real SanitizerCoverage instrumentation; one deterministic known-valid input, not a campaign) | n/a | none | fuzz-compile-smoke |
-| Coverage-guided fuzzing -- real campaign with cross-run corpus continuity | nightly | `fuzz` (450s/target default, persisted corpus via proptest's `directoryBasedDatabase`) | n/a | none | fuzz-nightly-campaign |
+| Coverage-guided fuzzing -- real campaign with cross-run corpus continuity | nightly | `fuzz` (450s/target default, persisted corpus via nelli's `directoryBasedDatabase`) | n/a | none | fuzz-nightly-campaign |
 | Coverage-guided fuzzing -- periodic corpus snapshot promoted into the committed seed corpus | manual-ritual | hand-curation of interesting entries into `fuzz_common.nim`'s `*Seeds()` procs (the one standing manual duty the no-bots rule imposes) | `scripts/nightly-fuzz.sh` (its corpus staleness canary is the compensating control) | none | fuzz-snapshot-ritual |
 | Machine-checked Z3 proof of `recodeScalarRadix16` plus the CT mask/equality/reduce primitives | required-check | `bmc-symex` (`scripts/bmc.sh`, needs the `sello-dev` image) | n/a | none | bmc-symex |
 | Platform breadth (A4) -- big-endian s390x via cross-compile + QEMU user-mode, unit/KAT suite plus a runtime endianness canary | nightly | `s390x` (`scripts/test.sh --cpu s390x`; unit+KAT scope only -- the property suites proved prohibitively slow under emulation, see CLAUDE.md's own record) | n/a | none | s390x-nightly |
@@ -593,12 +593,12 @@ sello is developed against milpa (Corey's Nim dependency resolver), not
 nimble. As of RFC-006 (in-house SHA-512 retired the `nimcrypto`
 dependency), `milpa.kdl` declares no unconditional dependency at all: a
 plain `milpa fetch` resolves ZERO deps, emitting a `nim.cfg` with just
-`src/`'s own `--path` line. `proptest` (see below) is the one dependency
+`src/`'s own `--path` line. `nelli` (see below) is the one dependency
 `milpa.lock` ever records, and only once fetched with `--features
-proptest`. Run `milpa fetch` once after cloning.
+nelli`. Run `milpa fetch` once after cloning.
 
 **Reproducibility note:** milpa is the author's own tool, and this
-repository does not reference a public URL for it (unlike `proptest`,
+repository does not reference a public URL for it (unlike `nelli`,
 which is an ordinary public git repository pinned in `milpa.lock` once
 fetched); the container image the dev scripts build against,
 `ghcr.io/coreyleavitt/nim:2.2.10`, is likewise not established here as
@@ -609,7 +609,7 @@ gitignored/regenerated, not checked in; `config.nims`, which milpa never
 touches, is the other file Nim reads). The manual equivalent in any Nim
 2.2.10 environment for the core library is simply `--path:src` passed to
 `nim c`/`nim check` -- no dependency clone of any kind is needed. For the
-optional property tests (below), add [proptest][proptest-repo] cloned at
+optional property tests (below), add [nelli][nelli-repo] cloned at
 the commit `milpa.lock` records once fetched, plus its own transitive
 `nim-z3`/`softlink` clones, each contributing one more `--path:<clone>` --
 this is the one case where a dependency clone is needed at all, and it is
@@ -618,12 +618,12 @@ invocations themselves (what flags, what image, what mounts) are
 documented in `scripts/*.sh`, so the build is reproducible from the
 scripts' own text even without milpa or the container image.
 
-[proptest-repo]: https://github.com/coreyleavitt/proptest
+[nelli-repo]: https://github.com/coreyleavitt/nelli
 
 The property-based tests (`tests/unit/test_properties_*.nim`) need
-[proptest][proptest-repo], declared as an *optional* milpa dep so plain
+[nelli][nelli-repo], declared as an *optional* milpa dep so plain
 `milpa fetch` never pulls it in for consumers of sello. Enable it once for
-local development: `milpa fetch --features proptest`.
+local development: `milpa fetch --features nelli`.
 
 There is no host Nim toolchain requirement beyond the container image used
 in development; the commands below are what CI-less verification looks
@@ -634,10 +634,10 @@ scripts/test.sh                          # full suite, pure-Nim backend
 nim c -r tests/unit/test_field.nim       # one test module (after milpa fetch)
 ```
 
-A fresh clone's plain `milpa fetch` (no `--features proptest`) is enough to
+A fresh clone's plain `milpa fetch` (no `--features nelli`) is enough to
 run `scripts/test.sh` green: the six `test_properties_*.nim` files are
-detected as unavailable and print a loud `SKIPPED (proptest not fetched --
-run: milpa fetch --features proptest)` line instead of failing the build.
+detected as unavailable and print a loud `SKIPPED (nelli not fetched --
+run: milpa fetch --features nelli)` line instead of failing the build.
 
 The libsodium backend and the timing harness need extra setup and are
 separate scripts, not part of `scripts/test.sh`:
@@ -658,7 +658,7 @@ pass/fail vector) and takes considerably longer to run. See
 environment. `scripts/fuzz.sh` and `scripts/bmc.sh` are likewise separate:
 an open-ended fuzz campaign and a solver run are not fixed-assertion
 suites either. `scripts/bmc.sh` wraps its podman run in a hard external
-kill-timeout (mirroring proptest's own `scripts/dt-bounded.sh`) because Z3
+kill-timeout (mirroring nelli's own `scripts/dt-bounded.sh`) because Z3
 queries can fail to terminate rather than return a verdict -- see
 `tests/verify/symex_recode.nim`'s module doc comment for what happened
 when this project's own first attempt hit exactly that wall, and what it

@@ -1,7 +1,7 @@
 ## Machine-checked (Z3-backed) proof of the carry-propagation bound
 ## invariant shared by `scalar.scReduce` and `scalar.scMulAdd` (round-3
-## fix batch Z, items Z2/Z3), using COREY'S proptest library's symbolic-
-## execution engine (`proptest/symex`) -- the same tooling and register
+## fix batch Z, items Z2/Z3), using COREY'S nelli library's symbolic-
+## execution engine (`nelli/symex`) -- the same tooling and register
 ## `tests/verify/symex_recode.nim` established. Read that file's module
 ## doc comment first if this is your first time in `tests/verify/` -- it
 ## is the pattern library this harness follows (per-step lemma
@@ -209,7 +209,7 @@
 ## still machine-checks (or, empirically, attempts to -- see above) the
 ## carry-chain tail alone, which is the "carry chain" the mission text
 ## specifically names.
-import proptest/symex
+import nelli/symex
 import sello/scalar
 
 # -----------------------------------------------------------------------

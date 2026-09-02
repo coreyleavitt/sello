@@ -1,6 +1,6 @@
 ## Property-based coverage for sello/private/sha512 (RFC-006 slice 2).
 ##
-## See test_properties_field.nim's module doc comment for the proptest
+## See test_properties_field.nim's module doc comment for the nelli
 ## wiring notes (optional milpa dep, z3-avoidance) -- not repeated here.
 ## Imports `sello/private/sha512` directly, the same private-module-reach
 ## register `test_sha512.nim` and `test_ct.nim` already use for this
@@ -15,13 +15,13 @@
 ##
 ## Split points are derived as a proportional fraction of the generated
 ## message's own length (`(frac * msg.len) div 1000`), rather than a
-## dependent integer strategy keyed off `msg.len` -- proptest's `given`
+## dependent integer strategy keyed off `msg.len` -- nelli's `given`
 ## strategies are independent of each other, so this is the simplest way
 ## to land a split point that is always in `0 .. msg.len` regardless of
 ## which length `bytes()` happened to draw.
 
 import std/unittest
-import proptest
+import nelli
 import sello/private/sha512
 import ./property_crank
 

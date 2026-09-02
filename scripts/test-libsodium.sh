@@ -22,31 +22,31 @@
 # -gate job): the same dual-mode split scripts/test.sh/scripts/ci-property.sh
 # already had. CI runs this script inside the `sello-dev` image directly
 # (the job's own `container:` field), so there is no podman wrapper left
-# to invoke and no host-side milpa/proptest state to rely on -- see the
-# "proptest is now REQUIRED" paragraph below for what the in-container
+# to invoke and no host-side milpa/nelli state to rely on -- see the
+# "nelli is now REQUIRED" paragraph below for what the in-container
 # body does about that that host mode does not need to.
 #
-# proptest is now REQUIRED for this script, not merely optional (a genuine
+# nelli is now REQUIRED for this script, not merely optional (a genuine
 # finding, reproduced locally before being coded around, not assumed):
 # test_libsodium_interop.nim's `when defined(selloLibsodium)` branch does
-# an unconditional `import proptest` at module scope, needed for its OWN
+# an unconditional `import nelli` at module scope, needed for its OWN
 # embedded differential/random-sweep property checks (the ristretto255
 # hash-to-group/scalarmult sweeps, the SHA-512 random-input sweep) -- this
 # is NOT limited to the standalone test_properties_*.nim files the way
-# scripts/test.sh's own optional-proptest story is. Compiling this file
-# under -d:selloLibsodium with no proptest fetched is a hard COMPILE
-# ERROR ("cannot open file: proptest"), not a graceful runtime skip --
+# scripts/test.sh's own optional-nelli story is. Compiling this file
+# under -d:selloLibsodium with no nelli fetched is a hard COMPILE
+# ERROR ("cannot open file: nelli"), not a graceful runtime skip --
 # reproduced directly against this exact script before this comment was
-# written. Host mode therefore preflight-checks _deps/proptest and fails
+# written. Host mode therefore preflight-checks _deps/nelli and fails
 # fast with an actionable message (see below) rather than letting the
 # podman run fail confusingly mid-suite; the SELLO_IN_CONTAINER=1 body
-# fetches proptest itself via milpa (mirroring scripts/ci-property.sh's/
+# fetches nelli itself via milpa (mirroring scripts/ci-property.sh's/
 # scripts/build-smoke.sh's own in-container fetch pattern), since CI
 # starts from a bare checkout with no _deps/ of its own.
 #
 # Standalone property-suite files (test_properties_*.nim) are ALWAYS
 # excluded from this script's own compiled set, regardless of whether
-# proptest ends up fetched (RFC-005 slice 14, a confident scope call,
+# nelli ends up fetched (RFC-005 slice 14, a confident scope call,
 # recorded here): -d:selloLibsodium affects exactly ONE src/sello module
 # (signing.nim's backend dispatch) -- field.nim/scalar.nim/x25519.nim/
 # ristretto.nim/private/sha512.nim never branch on it at all, so five of
@@ -74,7 +74,7 @@
 # Mounts (host mode): the project + the milpa CAS (at both the canonical
 # path and its host-absolute path, so milpa's absolute dep symlinks under
 # _deps/ resolve in-container). Prerequisite: `milpa fetch --features
-# proptest` has been run on the host at least once (see the "proptest is
+# nelli` has been run on the host at least once (see the "nelli is
 # now REQUIRED" paragraph above) -- checked up front, below, with a fail-
 # fast message rather than a confusing mid-run compile error.
 set -euo pipefail
@@ -92,7 +92,7 @@ source "$(dirname "$0")/lib/tier-summary.sh"
 
 # RFC-005 slice 14 -- always exclude the standalone property-suite files
 # from this script's own compiled set, regardless of what
-# scripts/lib/unit-test-files.sh's own (proptest-presence-driven) filter
+# scripts/lib/unit-test-files.sh's own (nelli-presence-driven) filter
 # already decided -- see the header comment above for the full rationale.
 # Idempotent either way: unit-test-files.sh's filter and this one target
 # the exact same tests/unit/test_properties_*.nim glob, so a file already
@@ -123,11 +123,11 @@ for f in "${unit_test_files[@]}"; do
 done
 # Standalone property-suite files -- always skipped by this script (see
 # the header comment above), one uniform, always-accurate banner
-# regardless of whether proptest happens to be fetched -- unlike
-# scripts/test.sh's own skip banner (which really does mean "proptest not
+# regardless of whether nelli happens to be fetched -- unlike
+# scripts/test.sh's own skip banner (which really does mean "nelli not
 # fetched"), this one is a permanent scope decision, so it says so
 # instead of reusing that wording, which would be actively misleading
-# once proptest IS fetched (as it always is under SELLO_IN_CONTAINER=1,
+# once nelli IS fetched (as it always is under SELLO_IN_CONTAINER=1,
 # see below).
 for f in "${skipped_property_files[@]}"; do
   cmd+=$'\n'"echo '=== $f ==='"
@@ -138,16 +138,16 @@ log="build/test-libsodium.log"
 mkdir -p "$(dirname "$log")"
 
 if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
-  # Already inside the pinned sello-dev image (CI) -- fetch proptest
+  # Already inside the pinned sello-dev image (CI) -- fetch nelli
   # ourselves (a bare checkout has no _deps/ of its own; see the header
-  # comment's "proptest is now REQUIRED" paragraph), then run the suite
+  # comment's "nelli is now REQUIRED" paragraph), then run the suite
   # directly, no podman wrapper, no host milpa-lock preflight, no
   # sello-dev image resolution (the job's own `container:` field already
   # pinned the exact image).
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv"
-  echo "test-libsodium: fetching proptest + transitives (--locked: asserts against the committed milpa.lock) -- needed for test_libsodium_interop.nim's own embedded differential/property sweeps under -d:selloLibsodium" >&2
-  "$MILPA_BIN" fetch --features proptest --locked
+  echo "test-libsodium: fetching nelli + transitives (--locked: asserts against the committed milpa.lock) -- needed for test_libsodium_interop.nim's own embedded differential/property sweeps under -d:selloLibsodium" >&2
+  "$MILPA_BIN" fetch --features nelli --locked
 
   bash -c "$cmd" 2>&1 | tee "$log"
 else
@@ -159,20 +159,20 @@ else
   source "$(dirname "$0")/lib/milpa-preflight.sh"
   milpa_preflight
 
-  # RFC-005 slice 14's own preflight, host-mode only: proptest is now
+  # RFC-005 slice 14's own preflight, host-mode only: nelli is now
   # REQUIRED (see the header comment above), not merely nice-to-have --
   # fail fast with an actionable message here rather than letting the
   # podman run below fail confusingly mid-suite with a bare "cannot open
-  # file: proptest" from deep inside test_libsodium_interop.nim's compile.
-  if [ ! -d "_deps/proptest" ]; then
+  # file: nelli" from deep inside test_libsodium_interop.nim's compile.
+  if [ ! -d "_deps/nelli" ]; then
     echo "" >&2
-    echo "scripts/test-libsodium.sh: FAIL -- _deps/proptest is absent." >&2
-    echo "scripts/test-libsodium.sh: proptest is REQUIRED for this script (not merely" >&2
+    echo "scripts/test-libsodium.sh: FAIL -- _deps/nelli is absent." >&2
+    echo "scripts/test-libsodium.sh: nelli is REQUIRED for this script (not merely" >&2
     echo "scripts/test-libsodium.sh: optional the way it is for scripts/test.sh) --" >&2
     echo "scripts/test-libsodium.sh: test_libsodium_interop.nim's -d:selloLibsodium branch" >&2
     echo "scripts/test-libsodium.sh: unconditionally imports it for its own embedded" >&2
     echo "scripts/test-libsodium.sh: differential/property sweeps. Run:" >&2
-    echo "scripts/test-libsodium.sh:   milpa fetch --features proptest" >&2
+    echo "scripts/test-libsodium.sh:   milpa fetch --features nelli" >&2
     echo "scripts/test-libsodium.sh: then retry." >&2
     exit 1
   fi
@@ -220,4 +220,4 @@ fi
 echo "test-libsodium: no [SKIPPED] marker found, as required -- the libsodium interop suite ran for real." >&2
 
 print_tier_summary "scripts/test-libsodium.sh (-d:selloLibsodium)" \
-  "unit+interop-suite scope only, not proptest-absence -- see scripts/test-libsodium.sh's own header comment"
+  "unit+interop-suite scope only, not nelli-absence -- see scripts/test-libsodium.sh's own header comment"

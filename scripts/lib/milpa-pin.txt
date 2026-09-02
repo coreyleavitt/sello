@@ -19,7 +19,7 @@
 #
 # Repin ritual: update the SHA below, verify `milpa-install.sh` still
 # lands a working `milpa --version` inside the pinned image, verify
-# `milpa fetch --features proptest --locked` still resolves against the
+# `milpa fetch --features nelli --locked` still resolves against the
 # committed milpa.lock, commit both files together. RFC-005 A6 records a
 # future `milpa@HEAD` nightly canary leg that will watch for the resolver
 # drifting ahead of this pin; no such leg exists yet as of this slice.

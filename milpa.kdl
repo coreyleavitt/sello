@@ -7,42 +7,44 @@ version "0.5.0"
 src_dir "src"
 
 deps {
-    // RFC-005 slice 2: pinned by commit SHA, not ref="main" -- an
-    // unpinned branch ref left the code that executes in required CI
-    // jobs (the property suites) with no integrity check (milpa 0.0.1's
-    // `verify` has no --features flag, so it never covers this optional
-    // dep). Pinned at the canonical repo URL, not the redirecting
-    // "proptest" URL (the repo was renamed proptest -> nelli 2026-08-13;
-    // the redirect works today, but a future rename-reuse of the old name
-    // could otherwise silently retarget this dependency).
+    // nelli migration (superseding RFC-005 slice 2's re-pin below):
+    // pinned by commit SHA, not ref="main" -- same standing posture as
+    // before, at the canonical repo URL (github.com/coreyleavitt/nelli --
+    // this project never depended on the old redirecting "proptest" URL).
     //
-    // Commit ec7a405c354e79c30717b0692ad548bc8bee7414 (2026-08-13,
-    // "docs(handoff): record 0.3.4 release and stage-3 resume state") is
-    // deliberately NOT current main HEAD: it is the last commit before
-    // 785307c "refactor: rename package proptest -> nelli", which renamed
-    // the Nim source tree itself (src/proptest.nim -> src/nelli.nim,
-    // srcDir package identity, umbrella module name) -- not just the
-    // GitHub repo. Every sello test file does `import proptest`
-    // (tests/unit/test_properties_*.nim) and CLAUDE.md's "proptest"
-    // vocabulary runs throughout the whole project; following main past
-    // 785307c would break every one of those imports and require a
-    // project-wide `import proptest` -> `import nelli` sweep, which is
-    // its own deliberate migration, not a CI-integrity slice's job.
-    // ec7a405 is the newest commit that keeps `import proptest` working.
-    "proptest" git=(url)"https://github.com/coreyleavitt/nelli.git" ref="ec7a405c354e79c30717b0692ad548bc8bee7414" optional=#true
+    // Commit 67f890dee81480bc71fb47e985de05817e631147 (nelli main HEAD as
+    // of this migration, "ci: skip the Windows legs on prose-only
+    // pushes") absorbs the three breaking
+    // changes 0.6.0/0.7.0 introduced over the previously-pinned
+    // ec7a405c354e79c30717b0692ad548bc8bee7414: the FuzzSettings
+    // ExecutorConfig/GuidanceConfig/SchedulingConfig regroup (ADR-0031),
+    // `import nelli` no longer re-exporting `nelli/symex`, and the
+    // `writeCrashArtifacts` -> CrashRecorder/crashinfo replacement -- see
+    // CLAUDE.md's "Building & testing" section and the handoff doc for
+    // the full absorption record. The dep alias is renamed `proptest` ->
+    // `nelli` in the same commit (the package's own identity as of the
+    // 785307c rename this project's prior pin deliberately stayed behind)
+    // -- `--features nelli` is now the fetch flag, `_deps/nelli` the
+    // populated directory, `import nelli` the top-level import.
+    //
+    // Prior pin history (RFC-005 slice 2): ec7a405c354e79c30717b0692ad548bc8bee7414,
+    // the last commit before 785307c "refactor: rename package proptest ->
+    // nelli" (which renamed the Nim source tree itself, not just the
+    // GitHub repo) -- deliberately held back until this dedicated
+    // migration, per that slice's own re-pin paragraph.
+    "nelli" git=(url)"https://github.com/coreyleavitt/nelli.git" ref="67f890dee81480bc71fb47e985de05817e631147" optional=#true
 }
 
-// RFC-005 slice 2: proptest's own manifest pins nim-z3 at ref="main" too
-// (see _deps/proptest's milpa.kdl, or github.com/coreyleavitt/nelli's
-// manifest at the pinned commit above) -- the same mutable-branch hole
-// one level down the transitive graph, closed here with an override
-// pinned at nim-z3's main HEAD as of this slice (verified compatible:
-// z3/softlink are resolved and fetched but never compiled by the
-// property suite -- only proptest/symex imports z3, and the top-level
-// proptest module this project imports never does, per CLAUDE.md).
-// softlink is left unoverridden: nim-z3's own manifest already pins it
-// by version tag (ref="v0.11.1"), not a mutable branch -- the specific
-// hole this RFC targets.
+// nelli's own manifest still pins nim-z3 at ref="main" (see
+// _deps/nelli/milpa.kdl, or github.com/coreyleavitt/nelli's manifest at
+// the pinned commit above) -- the same mutable-branch hole one level down
+// the transitive graph, closed here with an override pinned at nim-z3's
+// main HEAD as of RFC-005 slice 2 (verified compatible: z3/softlink are
+// resolved and fetched but never compiled by the property suite -- only
+// nelli/symex imports z3, and the top-level nelli module this project
+// imports never does, per CLAUDE.md). softlink is left unoverridden:
+// nim-z3's own manifest already pins it by version tag (ref="v0.11.1"),
+// not a mutable branch -- the specific hole this RFC targets.
 overrides {
     pkg "z3" git=(url)"https://github.com/coreyleavitt/nim-z3.git" ref="7d9abdaefecce2e4175354a73b047e2548dd2a19"
 }

@@ -11,10 +11,10 @@
 ##
 ##   1. By `scripts/fuzz.sh`, with SanitizerCoverage instrumentation
 ##      (`-fsanitize-coverage=trace-pc -fno-pie`) and linked against the
-##      vendored, UNFLAGGED `proptest_cov.c` runtime -- the real fuzz
-##      target `fuzz_main.nim` drives as a subprocess via proptest's
+##      vendored, UNFLAGGED `nelli_cov.c` runtime -- the real fuzz
+##      target `fuzz_main.nim` drives as a subprocess via nelli's
 ##      `externalTarget`/`fuzz` (docs/fuzz/USAGE.md's Nim recipe in the
-##      `_deps/proptest` checkout).
+##      `_deps/nelli` checkout).
 ##   2. By `scripts/check-fuzz-target.sh`-equivalent `nim check` gates,
 ##      plain, uninstrumented -- this file imports ONLY `sello`'s public
 ##      verify-path modules, so a plain `nim check -d:release` catches
@@ -69,7 +69,7 @@
 ##     byte-compare, the same cost shape as pointDecode's own check above.
 ##
 ## A `doAssert` failure raises `AssertionDefect`, which (unhandled) aborts
-## the process (SIGABRT) -- proptest's `signalOracle` maps any terminating
+## the process (SIGABRT) -- nelli's `signalOracle` maps any terminating
 ## signal to `vInteresting`, i.e. a retained crash. This target never
 ## catches exceptions itself: an uncaught `IndexDefect`/`RangeDefect` from
 ## a bug in the dispatch logic below is exactly as much a finding as an

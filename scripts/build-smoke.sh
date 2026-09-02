@@ -12,7 +12,7 @@
 # compile-and-minimal-run check instead, on every push:
 #
 #   1. Builds the SanitizerCoverage-instrumented fuzz external target
-#      (real -fsanitize-coverage=trace-pc, real proptest_cov.c link --
+#      (real -fsanitize-coverage=trace-pc, real nelli_cov.c link --
 #      not a stubbed-out compile) and compiles the plain driver
 #      (fuzz_main.nim), via `scripts/fuzz.sh --build-only` (that flag's
 #      own header comment in fuzz.sh has the full design). Runs ONE
@@ -105,7 +105,7 @@
 # Design note -- build-sharing, not duplication (RFC-005 slice 16's own
 # instruction to prefer a shared build path over hand-copying commands):
 # this script does NOT re-type scripts/fuzz.sh's/scripts/ct.sh's own
-# build commands (SanitizerCoverage flags, the proptest_cov.c link
+# build commands (SanitizerCoverage flags, the nelli_cov.c link
 # recipe, the `-d:release` compile line). Both of those scripts gained a
 # `--build-only` flag plus the same SELLO_IN_CONTAINER dual-mode split
 # this script has (see each script's own header comment for the full
@@ -114,11 +114,11 @@
 # always has (the script a maintainer would run by hand for the real
 # thing), never a second copy here to drift out of sync.
 #
-# The fuzz driver (fuzz_main.nim) imports proptest -- unlike ct_main.nim,
+# The fuzz driver (fuzz_main.nim) imports nelli -- unlike ct_main.nim,
 # which imports nothing beyond std/sello (see ct.sh's own --build-only
 # header note) -- so this script needs the same milpa-install-then-fetch
 # preamble scripts/ci-property.sh uses (scripts/lib/milpa-install.sh,
-# `milpa fetch --features proptest --locked`) before calling
+# `milpa fetch --features nelli --locked`) before calling
 # `scripts/fuzz.sh --build-only`.
 #
 # Usage:  scripts/build-smoke.sh
@@ -131,8 +131,8 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv"
 
-  echo "build-smoke: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
-  "$MILPA_BIN" fetch --features proptest --locked
+  echo "build-smoke: fetching nelli + transitives (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features nelli --locked
 
   echo "=============================================================="
   echo "build-smoke: PHASE 1/5 -- fuzz external target (real SanitizerCoverage"
@@ -144,7 +144,7 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   echo ""
   echo "=============================================================="
   echo "build-smoke: PHASE 2/5 -- one deterministic input through the built,"
-  echo "build-smoke: instrumented target binary directly (not the proptest"
+  echo "build-smoke: instrumented target binary directly (not the nelli"
   echo "build-smoke: mutation campaign -- see scripts/fuzz.sh's --build-only"
   echo "build-smoke: header comment for why)"
   echo "=============================================================="
@@ -216,7 +216,7 @@ else
   # courtesy staleness check every other dual-mode script's host branch
   # runs before its podman invocation. Host-only: _deps/milpa.lock are
   # host-side state, meaningless to check from inside the container this
-  # preflight gates entry to. This job's OWN milpa/proptest fetch (inside
+  # preflight gates entry to. This job's OWN milpa/nelli fetch (inside
   # the container, from the commit pinned in scripts/lib/milpa-pin.txt) is
   # independent of and does not consult this host-side state -- it is
   # deliberately a from-scratch mirror of the CI job, matching

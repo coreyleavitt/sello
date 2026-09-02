@@ -26,8 +26,8 @@
 ## scripts/test-libsodium.sh that accidentally drops -d:selloLibsodium,
 ## or the job running against the wrong image/script) must be a red
 ## check, not a quietly-degraded no-op -- the same "silent skip is a red
-## check" posture scripts/ci-property.sh's proptest-skip-banner assertion
-## and the macOS/Windows legs' --expect-proptest-skip already hold
+## check" posture scripts/ci-property.sh's nelli-skip-banner assertion
+## and the macOS/Windows legs' --expect-nelli-skip already hold
 ## elsewhere in this codebase. When this env var is set to "1" and the
 ## else branch is reached, the skipped test fails loud via doAssert
 ## instead of calling skip() -- see that branch, at the bottom of this
@@ -41,7 +41,7 @@ import std/unittest
 
 when defined(selloLibsodium):
   import std/[options, strutils]
-  import proptest
+  import nelli
   import sello/signing
   import sello/ed25519
   import sello/x25519

@@ -44,7 +44,7 @@
 # host-absolute path, so milpa's absolute dep symlinks under _deps/
 # resolve in-container). Prerequisite: `milpa fetch` has been run on the
 # host at least once (see scripts/test.sh) -- moot for ct_main itself
-# (tests/ct/ imports no proptest module at all, see dudect.nim/ct_main.nim's
+# (tests/ct/ imports no nelli module at all, see dudect.nim/ct_main.nim's
 # own plain-stdlib-plus-sello import lists), but a bare `milpa fetch` is
 # still what populates nim.cfg's `--path:"src"` line this compile needs.
 set -euo pipefail

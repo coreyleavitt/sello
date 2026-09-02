@@ -17,7 +17,7 @@ name: nightly
 # Reordering note (recorded per RFC-005's own out-of-order-landing
 # convention, restated for this slice): slice 26 needs only the
 # always-available base `ghcr.io/coreyleavitt/nim` image plus the
-# already-public proptest dependency for its two in-scope deliverables
+# already-public nelli dependency for its two in-scope deliverables
 # (cranked properties, notification wiring) -- the SAME "needed only the
 # base image" reasoning that already pulled slices 16/18/24 forward -- so
 # it landed ahead of slice 25 and ahead of its own A9 sub-item, exactly as
@@ -227,7 +227,7 @@ jobs:
       # `v1` in the key: a format-version tag (matches this repo's
       # existing pin-file convention, e.g. `serialize.nim`'s own
       # `dbFormatVersion`) -- bump it if the on-disk corpus directory
-      # shape (proptest's `directoryBasedDatabase` layout, or this
+      # shape (nelli's `directoryBasedDatabase` layout, or this
       # workflow's own marker-file convention) ever changes
       # incompatibly, so an old-format cache entry is cleanly abandoned
       # rather than fed into code that no longer understands it.
@@ -311,10 +311,10 @@ jobs:
   # run as parallel independent jobs, each under its own limit."
   #
   # Mechanism (investigated before writing any code, per this slice's own
-  # task instruction): proptest exposes NO external "run at Nx examples"
+  # task instruction): nelli exposes NO external "run at Nx examples"
   # knob of its own -- `Settings.maxExamples` is a plain `int` field each
   # `test_properties_*.nim` file's own per-suite settings constructor
-  # already sets (verified by reading `_deps/proptest/src/proptest/
+  # already sets (verified by reading `_deps/nelli/src/nelli/
   # engine/types.nim`'s `defaultSettings()`, whose baseline is 100, and
   # all six `test_properties_*.nim` files' own `covSettings`/
   # `settingsWithExamples`/`settingsForPoints` constructors). Per this
@@ -359,7 +359,7 @@ jobs:
     # Safety net, not the expected runtime -- see the `fuzz` job's own
     # comment for the identical reasoning. 180 minutes: a 10x crank over
     # the required property job's own ~9.5-minute wall clock is not
-    # naively 10x the TIME (proptest's own fixed per-property overhead --
+    # naively 10x the TIME (nelli's own fixed per-property overhead --
     # process startup, shrinking search, DB I/O -- does not scale with
     # maxExamples), but budgeting generously here costs nothing (this job
     # runs nightly, not per-push) and keeps real headroom under GitHub's
@@ -575,14 +575,14 @@ jobs:
   # summed) under the identical cross-compile+qemu setup. One of six
   # property files alone already exceeds the RFC's own "~90 min total"
   # prohibitive threshold by a wide margin once extrapolated across all
-  # six (proptest's own generative search compounds directly with
+  # six (nelli's own generative search compounds directly with
   # qemu-user's per-instruction translation overhead on this codebase's
   # arithmetic-heavy hot paths -- a qualitatively different cost profile
   # from the fixed-iteration KAT suite). This job therefore invokes the
   # pre-authorized fallback: UNIT + KAT SUITE ONLY, no property sibling
   # (this job's own `scripts/ci-setup.sh` writes the bare zero-dependency
-  # `nim.cfg` and never fetches proptest, so `scripts/lib/unit-test-files.sh`'s
-  # own dynamic `_deps/proptest` detection naturally excludes the six
+  # `nim.cfg` and never fetches nelli, so `scripts/lib/unit-test-files.sh`'s
+  # own dynamic `_deps/nelli` detection naturally excludes the six
   # `test_properties_*.nim` files -- the same mechanism every other
   # unit-only leg in this project's matrix already relies on, e.g.
   # `unit-linux-amd64-gcc-asan-ubsan`/`unit-linux-i386-gcc`). See

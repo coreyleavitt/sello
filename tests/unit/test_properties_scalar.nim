@@ -1,6 +1,6 @@
 ## Property-based coverage for sello/scalar (RFC-001 finding 10).
 ##
-## See test_properties_field.nim's module doc comment for the proptest
+## See test_properties_field.nim's module doc comment for the nelli
 ## wiring notes (optional milpa dep, z3-avoidance, canonical-encoding
 ## comparison discipline) -- not repeated here.
 ##
@@ -12,7 +12,7 @@
 ## itself against its own codebase.
 
 import std/unittest
-import proptest
+import nelli
 import sello/field
 import sello/scalar
 import sello/ed25519
@@ -194,7 +194,7 @@ suite "scalar property: recodeScalarRadix16 reconstruction":
 # ---------------------------------------------------------------------------
 # Group-law identity properties. Generalizes the fixed-sample standing
 # guard in test_scalar.nim's "geScalarmultBase" suite from a counter-mode
-# PRNG to a shrinking proptest strategy, over both scalar domains
+# PRNG to a shrinking nelli strategy, over both scalar domains
 # geScalarmultBase actually serves (clamped and reduced-mod-L).
 # ---------------------------------------------------------------------------
 

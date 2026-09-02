@@ -23,7 +23,7 @@
 #     # already inside the pinned image (CI, or scripts/api-surface-check.sh
 #     # calling this from its own in-container body)
 #
-# No milpa/proptest needed (the generator only needs `nim jsondoc` and
+# No milpa/nelli needed (the generator only needs `nim jsondoc` and
 # python3, both already in the base image) -- same "zero-dependency"
 # category as scripts/check-readme.sh, hence the same minimal dual-mode
 # shape (ci-setup.sh's nim.cfg, no milpa preflight chain).
@@ -50,8 +50,8 @@ else
   # Lockfile-conformance preflight (RFC-001 ledger finding 30), same
   # courtesy every other dual-mode script's host branch runs -- harmless
   # here too even though this gate needs no milpa dependency of its own
-  # (this checkout may still carry proptest/z3/softlink from an earlier
-  # `milpa fetch --features proptest`, and the preflight only checks
+  # (this checkout may still carry nelli/z3/softlink from an earlier
+  # `milpa fetch --features nelli`, and the preflight only checks
   # consistency, not that any particular dep is present).
   source "$(dirname "$0")/lib/milpa-preflight.sh"
   milpa_preflight

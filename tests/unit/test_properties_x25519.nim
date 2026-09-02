@@ -3,7 +3,7 @@
 ## The Montgomery-side analog of test_properties_scalar.nim's Edwards-side
 ## agreement properties: this is the natural home for future X25519
 ## properties. See test_properties_field.nim's module doc comment for the
-## proptest wiring notes (optional milpa dep, z3-avoidance) -- not repeated
+## nelli wiring notes (optional milpa dep, z3-avoidance) -- not repeated
 ## here.
 ##
 ## `X25519StaticSecret` values are built directly from random 32-byte
@@ -12,7 +12,7 @@
 ## covers the full input domain the public API accepts.
 
 import std/[unittest, options]
-import proptest
+import nelli
 import sello/x25519
 import ./property_crank
 

@@ -39,7 +39,7 @@ jobs:
   # the same Corey-owned ghcr credential as slices 10/14/15, so this
   # slice, needing only the base image, lands the shared library first;
   # see CLAUDE.md's own placement-swap note). Same digest-pinned image as
-  # every other amd64 build job -- no milpa/proptest needed (the
+  # every other amd64 build job -- no milpa/nelli needed (the
   # generator only needs `nim jsondoc` and python3, both already in the
   # base image), same "zero-dependency" category as check-readme below.
   api-surface:
@@ -253,7 +253,7 @@ jobs:
   # has the full mechanics), so this job's run step is the same
   # `scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/<script>` shape
   # every other unit-suite job in this workflow uses. Unit suite only, no
-  # property sibling -- this script fetches no proptest of its own, so the
+  # property sibling -- this script fetches no nelli of its own, so the
   # property files self-skip exactly as scripts/test.sh's own unit-only
   # legs do.
   #
@@ -262,8 +262,8 @@ jobs:
   # path (reached only when `-d:selloLibsodium` is absent) fails loud via
   # doAssert instead of silently reporting a green no-op suite when this
   # env var is set -- the "silent skip must be a red check" posture
-  # scripts/ci-property.sh's proptest-skip-banner assertion and the
-  # macOS/Windows legs' --expect-proptest-skip already hold elsewhere in
+  # scripts/ci-property.sh's nelli-skip-banner assertion and the
+  # macOS/Windows legs' --expect-nelli-skip already hold elsewhere in
   # this workflow. scripts/test-libsodium.sh additionally greps its own
   # run log for std/unittest's bracketed `[SKIPPED]` marker as a second,
   # independent layer (future-proofing against any OTHER skip() a later
@@ -289,7 +289,7 @@ jobs:
   # RFC-005 slice 15 (mutation job -- MEASUREMENT PUSH, unsharded). Runs
   # tests/mutation/run_mutation.py's full 84-mutant catalog against the
   # unit+property suite (scripts/mutation.sh's own SELLO_IN_CONTAINER=1
-  # branch fetches proptest itself, for full parity with a maintainer's
+  # branch fetches nelli itself, for full parity with a maintainer's
   # local run -- see that script's header comment). Needs only the base
   # ghcr.io/coreyleavitt/nim image (no libsodium/z3) -- the same image as
   # unit-linux-amd64-gcc/build-smoke, not sello-dev (see scripts/mutation.sh's
@@ -312,11 +312,11 @@ jobs:
   # scripts/bmc.sh's four Z3 symex proof files (tests/verify/symex_*.nim)
   # inside the sello-dev image (needs z3-devel, which only that image
   # carries -- see scripts/bmc.sh's own header comment). scripts/bmc.sh's
-  # own SELLO_IN_CONTAINER=1 branch fetches milpa+proptest (which pulls in
+  # own SELLO_IN_CONTAINER=1 branch fetches milpa+nelli (which pulls in
   # z3/softlink transitively) itself, mirroring
   # scripts/ci-property.sh's/scripts/build-smoke.sh's in-container fetch
   # pattern -- a bare CI checkout has none of `_deps/z3`/`_deps/softlink`/
-  # `_deps/proptest` populated the way a maintainer's host does. The
+  # `_deps/nelli` populated the way a maintainer's host does. The
   # `timeout-minutes` value below and scripts/bmc.sh's own internal
   # `timeout --signal=KILL` argument are both provisional at this push --
   # CLAUDE.md's own "Mutation + bmc jobs" CI paragraph records the real
@@ -331,7 +331,7 @@ jobs:
     # Calibrated from a real hosted measurement (RFC-005 slice 15's
     # measurement push, run 33274740413/job bmc-symex): 2m47s (167s) total,
     # including the in-container milpa-from-source build, the
-    # proptest+z3+softlink fetch, and all four symex_*.nim compiles+proofs
+    # nelli+z3+softlink fetch, and all four symex_*.nim compiles+proofs
     # -- see CLAUDE.md's own "Mutation + bmc jobs" CI paragraph for the
     # full record. The script's own internal `timeout --signal=KILL`
     # argument (450s, below) is the real Z3-hang guard; this job-level
@@ -402,12 +402,12 @@ jobs:
       - run: SELLO_IN_CONTAINER=1 scripts/secret-target-register-check.sh
 
   # RFC-005 slice 2 (milpa-in-CI): the property suites need the optional
-  # proptest dependency, which only milpa can fetch -- this job builds
+  # nelli dependency, which only milpa can fetch -- this job builds
   # milpa from the pinned commit (scripts/lib/milpa-pin.txt) inside the
-  # same pinned image, fetches proptest under `--locked` (asserts the
+  # same pinned image, fetches nelli under `--locked` (asserts the
   # fetch matches the committed milpa.lock -- identity + provenance, the
   # replacement for `milpa verify`, which milpa 0.0.1 cannot run against a
-  # non-default feature selection), and asserts the proptest SKIPPED
+  # non-default feature selection), and asserts the nelli SKIPPED
   # banner is ABSENT from the run log (a silent skip here must be a red
   # check, not a quietly weaker suite -- RFC-005 Part B). See
   # scripts/ci-property.sh's own header comment for the full mechanics.
@@ -427,7 +427,7 @@ jobs:
   # above -- scripts/ci-property.sh forwards --cc clang straight through
   # to scripts/test.sh (that script's own header comment has the
   # mechanics), so the property suites compile and run under clang too,
-  # with the identical proptest-skip-banner-absent assertion and
+  # with the identical nelli-skip-banner-absent assertion and
   # toolchain canary as their gcc sibling.
   property-linux-amd64-clang:
     name: property-linux-amd64-clang
@@ -447,7 +447,7 @@ jobs:
   # ubuntu-latest) and forwards straight through to scripts/test.sh, which
   # picks up the toolchain scripts/ci-nim-setup.sh just installed via the
   # $HOME/.sello-nim/current on-disk convention (scripts/test.sh's own
-  # header). Same proptest-skip-banner-ABSENT assertion as every other
+  # header). Same nelli-skip-banner-ABSENT assertion as every other
   # property leg.
   property-linux-arm64-gcc:
     name: property-linux-arm64-gcc
@@ -458,9 +458,9 @@ jobs:
       - run: SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 
   # RFC-005 slice 12: the macOS-arm64 leg. Unit suite ONLY, per Part B's
-  # merge-gate paragraph ("macOS-arm64 ... unit suite (proptest-skip loud
+  # merge-gate paragraph ("macOS-arm64 ... unit suite (nelli-skip loud
   # and asserted)") -- there is no property-macos-arm64 sibling: this
-  # runner has no milpa/proptest story of its own (no network-installed
+  # runner has no milpa/nelli story of its own (no network-installed
   # Python venv chain has been built for it, and nothing in the RFC calls
   # for one), so the property suites are EXPECTED to self-skip loud, not
   # run for real.
@@ -501,9 +501,9 @@ jobs:
   # this leg's own DoD ("pin story = runner label + Nim pin + observed
   # Apple clang version recorded").
   #
-  # `--expect-proptest-skip`: this leg's own proptest-skip assertion,
+  # `--expect-nelli-skip`: this leg's own nelli-skip assertion,
   # inverted from every property-* job's own (which assert the banner is
-  # ABSENT) -- this leg has no proptest fetch story, so the banner's
+  # ABSENT) -- this leg has no nelli fetch story, so the banner's
   # PRESENCE is the correct, expected outcome, and its absence (or the
   # property suites somehow running for real) must go red here
   # (scripts/test.sh's own header comment has the full mechanism).
@@ -513,11 +513,11 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-nim-setup.sh --expect-arch arm64
-      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-proptest-skip
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-nelli-skip
 
   # RFC-005 slice 13: the Windows/MinGW-gcc leg, the last hosted-native
   # matrix leg. Unit suite ONLY, no property sibling -- same rationale as
-  # unit-macos-arm64-clang above (no milpa/proptest fetch story on this
+  # unit-macos-arm64-clang above (no milpa/nelli fetch story on this
   # runner). `runs-on: windows-2025` -- the current, non-deprecated
   # GitHub-hosted Windows runner label, recorded explicitly here since,
   # like macOS, there is no separate image digest to carry that story
@@ -570,10 +570,10 @@ jobs:
   # underneath (gcc, the default `--cc`), proving Nim actually invoked it,
   # for free, exactly like every other leg.
   #
-  # `--expect-proptest-skip`: this leg's own proptest-skip assertion (the
+  # `--expect-nelli-skip`: this leg's own nelli-skip assertion (the
   # exact inverse of every property-* job's own "banner ABSENT"
   # assertion), same as unit-macos-arm64-clang above -- this runner has no
-  # milpa/proptest fetch story of its own, so the banner's PRESENCE is the
+  # milpa/nelli fetch story of its own, so the banner's PRESENCE is the
   # correct, expected outcome.
   unit-windows-amd64-gcc:
     name: unit-windows-amd64-gcc
@@ -584,7 +584,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw
-      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-proptest-skip
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-nelli-skip
 
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
@@ -667,7 +667,7 @@ jobs:
   # blocking on that credential). Compiles the fuzz external target with
   # its real SanitizerCoverage instrumentation plus its plain driver
   # (scripts/fuzz.sh --build-only), runs ONE deterministic known-valid
-  # input directly through the built target binary (not the proptest
+  # input directly through the built target binary (not the nelli
   # mutation campaign -- see scripts/fuzz.sh's --build-only header for
   # why), and compiles (never runs) tests/ct/ct_main.nim
   # (scripts/ct.sh --build-only) -- three harnesses under tests/fuzz/ and
@@ -701,10 +701,10 @@ jobs:
   # scripts/build-smoke.sh's own "IMAGE, changed this slice" header
   # paragraph for the full record, including the policy-lint.sh
   # cross-check confirming this needed no Containerfile change. Needs
-  # milpa+proptest (the fuzz driver imports proptest, unlike ct_main), so
+  # milpa+nelli (the fuzz driver imports nelli, unlike ct_main), so
   # its one run step needs no `ci-setup.sh` chain -- scripts/build-smoke.sh's
   # own in-container body does its own milpa install +
-  # `--features proptest --locked` fetch, mirroring
+  # `--features nelli --locked` fetch, mirroring
   # property-linux-amd64-gcc's run step shape exactly.
   build-smoke:
     name: build-smoke
@@ -734,7 +734,7 @@ jobs:
   # image every other sello-dev-pinned job in this workflow already
   # pulls -- no new pin needed. `scripts/ci-setup.sh` runs first (a bare
   # CI checkout has no milpa-generated `nim.cfg`; ct-taint.sh's own
-  # targets need only `--path:"src"`, no proptest), matching
+  # targets need only `--path:"src"`, no nelli), matching
   # unit-linux-i386-gcc's/unit-linux-amd64-gcc-libsodium's own run-step
   # shape exactly. `scripts/ct-taint.sh` is itself dual-mode
   # (SELLO_IN_CONTAINER=1 skips both the podman wrap and the host

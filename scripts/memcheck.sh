@@ -23,12 +23,12 @@
 #
 # Scope: UNIT SUITE ONLY, same as unit-linux-amd64-gcc-asan-ubsan/
 # unit-linux-i386-gcc/the two hosted-residual legs -- this script never
-# fetches proptest, so tests/unit/unit-test-files.sh's own dynamic
-# _deps/proptest detection (scripts/lib/unit-test-files.sh's header
+# fetches nelli, so tests/unit/unit-test-files.sh's own dynamic
+# _deps/nelli detection (scripts/lib/unit-test-files.sh's header
 # comment) naturally excludes the six test_properties_*.nim files from
 # the array this script iterates, with no special-casing needed here.
 # Property-based generative search under a 20-50x Valgrind slowdown on
-# TOP of proptest's own per-example overhead would blow well past this
+# TOP of nelli's own per-example overhead would blow well past this
 # job's nightly budget for a class of bug the property suites are not
 # designed to surface in the first place (they assert FUNCTIONAL
 # properties, not memory safety) -- the RFC's own A9 text scopes this to
@@ -106,7 +106,7 @@ memcheck_main() {
   source "$(dirname "$0")/lib/unit-test-files.sh"
 
   if [[ "${#skipped_property_files[@]}" -eq 0 && "${#unit_test_files[@]}" -gt 14 ]]; then
-    echo "memcheck: NOTE -- _deps/proptest is present in this environment, so unit-test-files.sh's own array already includes the property suites; this script does not filter them back out (see its own header on why nightly practice is to leave proptest unfetched for this job, not to special-case it here)." >&2
+    echo "memcheck: NOTE -- _deps/nelli is present in this environment, so unit-test-files.sh's own array already includes the property suites; this script does not filter them back out (see its own header on why nightly practice is to leave nelli unfetched for this job, not to special-case it here)." >&2
   fi
 
   echo "memcheck: platform-identity canary (gcc, -d:useMalloc)..." >&2

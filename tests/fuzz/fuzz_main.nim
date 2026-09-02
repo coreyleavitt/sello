@@ -2,7 +2,7 @@
 ## reworked to an EXTERNAL SanitizerCoverage target by RFC-002 slice 3):
 ## sello's audited attacker-facing surface (`pointDecode`, `verify`,
 ## `x25519`'s peer public u-coordinate, and -- RFC-004 slice 8a --
-## `ristretto.ristrettoDecode`), driven by COREY'S proptest
+## `ristretto.ristrettoDecode`), driven by COREY'S nelli
 ## library's `externalTarget`/`fuzz` against the separately-compiled,
 ## SanitizerCoverage-instrumented `build/fuzz_external_target` binary
 ## (see `fuzz_external_target.nim`'s module doc for the oracle logic and
@@ -15,14 +15,14 @@
 ## compiles and runs this driver.
 ##
 ## Corpus seeding (round-3 fix batch B, finding B2 -- SPIKE VERDICT: YES):
-## `FuzzSettings.initialIRCorpus: seq[seq[ChoiceNode]]` (`_deps/proptest/
-## src/proptest/fuzz.nim`) DOES support seeding IR-mode's corpus with
+## `FuzzSettings.initialIRCorpus: seq[seq[ChoiceNode]]` (`_deps/nelli/
+## src/nelli/fuzz.nim`) DOES support seeding IR-mode's corpus with
 ## concrete inputs -- not via a raw-bytes hook (there genuinely is none
 ## for IR mode), but via the typed choice-IR itself: a hand-built
 ## `seq[ChoiceNode]` matching a strategy's own draw shape (`fuzz_common.
-## nim`'s `byteChoices`/`listChoices`, built on `proptest/choice`'s
+## nim`'s `byteChoices`/`listChoices`, built on `nelli/choice`'s
 ## `integerChoice`/`booleanChoice` constructors -- deliberately NOT
-## re-exported by the top-level `proptest` module, reached via the
+## re-exported by the top-level `nelli` module, reached via the
 ## submodule import per that module's own doc comment) replays correctly
 ## through `captureIR` and is admitted as a real seed, per `datasource.
 ## nim`'s documented "replay clamps the recorded value" contract. Each of
@@ -42,13 +42,13 @@
 ## build instead of quietly losing this coverage.
 ##
 ## Corpus continuity (RFC-005 slice 24, A5): `SELLO_FUZZ_CORPUS_DIR`, when
-## set, turns on cross-run corpus persistence via proptest's own
+## set, turns on cross-run corpus persistence via nelli's own
 ## `directoryBasedDatabase` -- see `fuzz_common.nim`'s "Run + report"
 ## section doc paragraph for the full design and `scripts/nightly-fuzz.sh`
 ## for the one caller that sets it. Unset (every other caller), behavior
 ## is byte-for-byte the pre-slice-24 one-shot-in-memory-corpus run.
 import std/[os, parseutils]
-import proptest  # ExampleDatabase / directoryBasedDatabase (db.nim, re-exported)
+import nelli  # ExampleDatabase / directoryBasedDatabase (db.nim, re-exported)
 import ./fuzz_common
 
 proc secondsFromEnv(name: string; default: int): int =
@@ -68,8 +68,8 @@ when isMainModule:
   # maintainer's plain `scripts/fuzz.sh`): `scripts/nightly-fuzz.sh` is
   # the one caller that sets it, pointed at a directory restored from /
   # saved back to the GitHub Actions cache (that script's own header has
-  # the full cache-key design). `directoryBasedDatabase` (proptest's
-  # file-backed `ExampleDatabase`, re-exported by top-level `proptest`
+  # the full cache-key design). `directoryBasedDatabase` (nelli's
+  # file-backed `ExampleDatabase`, re-exported by top-level `nelli`
   # via its `db` submodule) is a value-type closure record; one instance
   # here is shared across all four `runExternalTarget` calls below, each
   # under its own `persistKey` (so the one directory holds four

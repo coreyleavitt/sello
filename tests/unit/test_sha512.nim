@@ -177,7 +177,7 @@ suite "sha512 one-shot: padding-boundary lengths (0,1,111,112,127,128,129,239,24
 suite "sha512 streaming: incremental split exactly at padding-boundary thresholds":
   test "init/update/update/finish matches the one-shot digest with the update boundary placed at 0/1/111/112/127/128 wherever that split point fits inside the message":
     # Deliberate boundary placement (RFC-006 slice 1b), not random split-point
-    # sampling (that is slice 2's proptest job) -- these candidates are
+    # sampling (that is slice 2's nelli job) -- these candidates are
     # exactly the thresholds a buffer-fill-off-by-one bug would hide behind.
     const candidateSplits = [0, 1, 111, 112, 127, 128]
     for bv in loadBoundaryVectors():

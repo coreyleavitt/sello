@@ -3,11 +3,11 @@
 ## the single-bit-flip properties below are a structured complement to
 ## the raw-bytes libFuzzer work the B4b batch adds on top).
 ##
-## See test_properties_field.nim's module doc comment for the proptest
+## See test_properties_field.nim's module doc comment for the nelli
 ## wiring notes (optional milpa dep, z3-avoidance) -- not repeated here.
 
 import std/[unittest]
-import proptest
+import nelli
 import sello/signing
 import sello/ed25519
 import ./property_crank

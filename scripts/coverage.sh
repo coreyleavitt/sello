@@ -44,9 +44,9 @@
 # assumed, that no new mechanism was needed here. Every one of the six
 # `test_properties_*.nim` files' own settings constructors
 # (`covSettings`/`settingsWithExamples`/`settingsForPoints`) builds its
-# Settings from proptest's own `defaultSettings()`, which already carries
+# Settings from nelli's own `defaultSettings()`, which already carries
 # a FIXED, non-random default (`Settings.seed = 0x1234567890abcdef'u64`,
-# `_deps/proptest/src/proptest/engine/types.nim`) -- and grep across all
+# `_deps/nelli/src/nelli/engine/types.nim`) -- and grep across all
 # six files confirms none of them ever sets `.seed`, `.testId`, or
 # `.derandomize` to anything time/entropy-derived. So a plain
 # `scripts/test.sh` run and this script's own coverage-instrumented run
@@ -72,12 +72,12 @@
 # the FIRST real hosted run of this job (a measurement push, mirroring
 # slice 15's own precedent) ran the double pass unconditionally and
 # measured a real ~26-minute job (two ~12.5-minute passes plus ~1 minute
-# of checkout/milpa/proptest-fetch overhead) -- well past the merge
+# of checkout/milpa/nelli-fetch overhead) -- well past the merge
 # gate's ~15-minute aim, and by a wide margin the new long pole (the
 # previous heaviest required check, property-linux-amd64-gcc, sits at
 # ~9.5 minutes). That SAME run's determinism check PASSED (both passes
 # produced byte-identical dumps) -- real, positive evidence the pipeline
-# IS deterministic (fixed proptest seeds -- see the FIXED SEEDS section
+# IS deterministic (fixed nelli seeds -- see the FIXED SEEDS section
 # below -- plus deterministic gcov capture/merge/extract), not merely
 # assumed. Rather than build a branch-pattern or sharding fallback (the
 # RFC's own pre-authorized escape hatch, `docs/rfc-005-validation-infra.md`'s
@@ -246,16 +246,16 @@ run_coverage_once() {
 if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv"
-  echo "coverage: fetching proptest + transitives (--locked: asserts against the committed milpa.lock)" >&2
-  "$MILPA_BIN" fetch --features proptest --locked
+  echo "coverage: fetching nelli + transitives (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features nelli --locked
 
   # Re-source AFTER the fetch, mirroring scripts/mutation.sh's own
   # in-container pattern -- a bare CI checkout starts with no
-  # _deps/proptest, so sourcing before the fetch would silently exclude
+  # _deps/nelli, so sourcing before the fetch would silently exclude
   # every test_properties_*.nim file from the coverage run.
   source "$(dirname "$0")/lib/unit-test-files.sh"
   if [[ ${#skipped_property_files[@]} -gt 0 ]]; then
-    echo "coverage: FAIL -- proptest was fetched above, but scripts/lib/unit-test-files.sh" >&2
+    echo "coverage: FAIL -- nelli was fetched above, but scripts/lib/unit-test-files.sh" >&2
     echo "coverage: still reports ${#skipped_property_files[@]} skipped property file(s)." >&2
     echo "coverage: this should be unreachable in CI; investigate before trusting these numbers." >&2
     exit 1
@@ -271,7 +271,7 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
       echo "" >&2
       echo "coverage: FAIL -- determinism check: two independent build+run passes produced" >&2
       echo "coverage: DIFFERENT coverage numbers. This gate requires the suite's covered set" >&2
-      echo "coverage: to be reproducible (fixed proptest seeds, deterministic gcov merge) --" >&2
+      echo "coverage: to be reproducible (fixed nelli seeds, deterministic gcov merge) --" >&2
       echo "coverage: investigate before trusting either run's numbers. Diff (run1 -> run2):" >&2
       diff <(printf '%s\n' "$run1_out") <(printf '%s\n' "$run2_out") >&2 || true
       exit 1

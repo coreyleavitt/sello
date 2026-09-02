@@ -1,7 +1,7 @@
 ## Machine-checked (Z3-backed) proof of the arithmetic-masking algebra
 ## behind `field.feCMove`/`field.feCSwap` (round-3 fix batch Z, item Z1),
-## using COREY'S proptest library's symbolic-execution engine
-## (`proptest/symex`) -- the same tooling and register `tests/verify/
+## using COREY'S nelli library's symbolic-execution engine
+## (`nelli/symex`) -- the same tooling and register `tests/verify/
 ## symex_recode.nim` established for `scalar.recodeScalarRadix16`'s
 ## digit-range invariant. Read that file's module doc comment first if
 ## this is your first time in `tests/verify/` -- it is the pattern
@@ -130,7 +130,7 @@
 ## confirm the two-lemma split, chained together, still reproduces the
 ## real functions' behavior -- the split changes HOW the proof is
 ## structured, not WHAT is proved.
-import proptest/symex
+import nelli/symex
 import sello/field
 
 # -----------------------------------------------------------------------

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Machine-checked (Z3) proofs, via COREY'S proptest library's symbolic-
-# execution engine (proptest/symex), run in one invocation:
+# Machine-checked (Z3) proofs, via COREY'S nelli library's symbolic-
+# execution engine (nelli/symex), run in one invocation:
 #   - tests/verify/symex_recode.nim: scalar.recodeScalarRadix16's
 #     digit-range invariant (RFC-001 review finding 22).
 #   - tests/verify/symex_mask.nim: field.feCMove/feCSwap's arithmetic-
@@ -19,9 +19,9 @@
 # proved -- do not assume parity between them; each documents its own
 # scope, encoding choices, and honest limits.
 #
-# HARD KILL TIMEOUT, like proptest's own scripts/dt-bounded.sh: Z3 queries
+# HARD KILL TIMEOUT, like nelli's own scripts/dt-bounded.sh: Z3 queries
 # can hang the solver outright on pathological mixed-theory shapes (a
-# documented proptest incident spun a full core for 24+ minutes on one
+# documented nelli incident spun a full core for 24+ minutes on one
 # query). A hung solver here must never peg a box indefinitely -- this
 # script `timeout --signal=KILL`s the whole podman run (host mode) or the
 # bare four-file proof chain (CI, RFC-005 slice 15 -- see below) and tears
@@ -64,12 +64,12 @@
 # Host mode mounts: the project + the milpa CAS (at both the canonical path
 # and its host-absolute path, so milpa's _deps/z3 and _deps/softlink
 # absolute symlinks resolve in-container) -- same pattern as
-# scripts/test.sh / proptest's own scripts/dt.sh. Prerequisite: `milpa
-# fetch --features proptest` has been run on the host at least once
-# (populates _deps/z3, _deps/softlink, _deps/proptest and their nim.cfg
+# scripts/test.sh / nelli's own scripts/dt.sh. Prerequisite: `milpa
+# fetch --features nelli` has been run on the host at least once
+# (populates _deps/z3, _deps/softlink, _deps/nelli and their nim.cfg
 # --path lines). CI mode (SELLO_IN_CONTAINER=1) has no such host state to
 # rely on -- a bare checkout starts with none of `_deps/z3`/
-# `_deps/softlink`/`_deps/proptest` populated, so that branch fetches them
+# `_deps/softlink`/`_deps/nelli` populated, so that branch fetches them
 # itself (mirroring scripts/ci-property.sh's/scripts/build-smoke.sh's own
 # in-container milpa-install-then-fetch pattern) before running the four
 # proof files.
@@ -94,14 +94,14 @@ if [ "${SELLO_IN_CONTAINER:-}" = "1" ]; then
   # milpa-lock preflight (there is no host to preflight-check from inside
   # the container CI already runs in — the identical reasoning
   # scripts/test.sh's own SELLO_IN_CONTAINER=1 branch documents). Fetches
-  # milpa + proptest (which pulls in z3/softlink transitively — see
+  # milpa + nelli (which pulls in z3/softlink transitively — see
   # milpa.kdl's own overrides block) itself, since a bare CI checkout has
   # none of that populated the way a maintainer's host does.
   source "$(dirname "$0")/lib/milpa-install.sh"
   install_milpa "build/milpa-venv" || exit 1
 
-  echo "bmc: fetching proptest + z3 + softlink (--locked: asserts against the committed milpa.lock)" >&2
-  "$MILPA_BIN" fetch --features proptest --locked || exit 1
+  echo "bmc: fetching nelli + z3 + softlink (--locked: asserts against the committed milpa.lock)" >&2
+  "$MILPA_BIN" fetch --features nelli --locked || exit 1
 
   timeout --signal=KILL "$timeout_secs" bash -c "
     set -e

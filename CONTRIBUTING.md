@@ -41,8 +41,8 @@ scripts/merge-gate.sh --help   # exact gate list, prerequisites, scope caveats
 Every gate script is dual-mode: run on a bare host it wraps itself in the
 pinned `ghcr.io/coreyleavitt/nim` container automatically (needs `podman`
 on `PATH`); there is nothing container-specific a contributor has to set
-up by hand. Property-based tests need the optional `proptest` dependency
-(`milpa fetch --features proptest`) -- without it, `scripts/test.sh` still
+up by hand. Property-based tests need the optional `nelli` dependency
+(`milpa fetch --features nelli`) -- without it, `scripts/test.sh` still
 passes and prints a loud skip banner instead of failing.
 
 Beyond the merge-gate set, `scripts/ct.sh` (timing harness),

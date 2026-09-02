@@ -246,7 +246,7 @@ suite "RistrettoPoint -- E[4] torsion invariance (Stage-3 amendment: [2]E/E[4], 
   # translates that preserve a RistrettoPoint's encoding. All four are
   # trivially/FeSqrtM1-expressible -- no offline derivation needed. This
   # suite is the deterministic plain-unittest torsion spot-check the RFC
-  # calls for (quotient coverage that survives a proptest-less build); the
+  # calls for (quotient coverage that survives a nelli-less build); the
   # random-P analog lives in test_properties_ristretto.nim.
   var negOne, negSqrtM1: Fe
   feNeg(negOne, FeOne)
