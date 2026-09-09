@@ -6,10 +6,10 @@ dep "nelli" {
     source {
         kind "git"
         url (url)"https://github.com/coreyleavitt/nelli"
-        ref "67f890dee81480bc71fb47e985de05817e631147"
+        ref "549dae8b7998985588b4cb7e6033cd52ffbcef68"
     }
-    identity "dag-sha256:45e194f023a71ca6f924cf4e4ee96c1fcc32f927ecb0d6e41c56bc44ec7ad4fe"
-    version "0.7.0"
+    identity "dag-sha256:c705e1132be63abd1b051727726290bf012ed389e90d18ccfadb3dd64d7f2b8d"
+    version "0.8.0"
     declared_version_source "manifest"
     src_dir "src"
     requires "z3"
@@ -17,8 +17,8 @@ dep "nelli" {
         origin "observed"
         kind "git"
         url "https://github.com/coreyleavitt/nelli.git"
-        ref "67f890dee81480bc71fb47e985de05817e631147"
-        commit_sha "67f890dee81480bc71fb47e985de05817e631147"
+        ref "549dae8b7998985588b4cb7e6033cd52ffbcef68"
+        commit_sha "549dae8b7998985588b4cb7e6033cd52ffbcef68"
     }
 }
 

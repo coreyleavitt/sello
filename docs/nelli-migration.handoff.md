@@ -380,3 +380,96 @@ is genuinely open, not merely unfinished bookkeeping:
   change to nelli itself.
 - The property-suite timing increase (above) is recorded but not root-
   caused — a genuine open follow-up, not a blocker for this migration.
+
+## Addendum — 2026-09-08: nelli v0.8.0 bump
+
+Bumped the pin from the migration's own unreleased main-HEAD commit,
+`67f890dee81480bc71fb47e985de05817e631147`, to nelli's first tagged
+release since, `v0.8.0` (commit
+`549dae8b7998985588b4cb7e6033cd52ffbcef68`, "release: 0.8.0 -- config
+discipline"). Branch `nelli-0.8.0` off `main`.
+
+**Scope check against the release's own downstream audit.** 0.8.0's
+headline change (partial object literals of `Settings`/`SymexSettings`/
+`ResourceBudget`/`BmcSettings`/`IntegerBiasConfig`/`OrchestratorPolicy`
+now carry that type's documented non-zero defaults for every omitted
+field, instead of Nim's ordinary zero-fill) is documented in nelli's
+`docs/rfc/0010-config-discipline.downstream-audit.md` (read at the
+`v0.8.0` tag). Re-ran that doc's own §1 greps against this tree:
+
+- Every affected-type constructor site in sello goes through
+  `defaultSettings()`/`defaultSymexSettings()` plus field mutation --
+  `tests/unit/test_properties_*.nim`'s `covSettings`/
+  `settingsWithExamples`/`settingsForPoints`, `tests/unit/property_crank.nim`,
+  `tests/verify/symex_recode.nim`, `tests/verify/symex_reduce.nim` -- never
+  a partial object literal of `Settings`/`SymexSettings`/`ResourceBudget`/
+  `BmcSettings`/`IntegerBiasConfig`/`OrchestratorPolicy`. Zero hits.
+- The one `FuzzSettings(...)` partial literal
+  (`tests/fuzz/fuzz_common.nim:552`) lists `timeBudget`/`seed`/
+  `initialIRCorpus`/`database`/`persistKey` and omits `integerBias` --
+  `FuzzSettings` is not itself one of the six affected types, and its
+  nested `integerBias` field already picked up `IntegerBiasConfig`'s
+  defaults recursively both before and after this bump (the audit's own
+  "unchanged end-to-end" category). No other affected-type literal sits
+  nearby.
+- Deprecated-symbol grep (`withSymexSettings`, `` `+` `` on
+  `SymexSettings`/`ResourceBudget`, `resolved()`, `orchestratorPolicy()`,
+  `optimisedSymexSettings()`, `looseSymexSettings()`): zero hits.
+
+Net: the config-discipline release is a verified no-op for sello. The
+`coverageGuided` per-example `CoverageFrontier`-snapshot perf regression
+(first-bad `1b80431`, tracked separately, recorded in this doc's own
+"Fuzz-engine adoption decisions" section above) is confirmed NOT fixed
+in 0.8.0 by diffing the relevant `forAll` source between the two pins --
+property-leg CI wall-clock time was expected to stay in the same
+~15-17 minute range this doc already recorded, not improve.
+
+**Local proof (podman, `ghcr.io/coreyleavitt/sello-dev:latest`,
+create+cp+exec against a container mirroring the host's absolute paths
+so milpa's relative CAS symlinks under `_deps/` resolve):**
+
+- `milpa fetch --features nelli` regenerated `milpa.lock` cleanly
+  (`nelli` version now records `"0.8.0"`, `dag-sha256:c705e1132be6...`);
+  `milpa fetch --features nelli --locked` passed with no drift.
+  `NOTICE` carries no nelli/proptest provenance entry to update (grepped
+  -- none exists; the dependency's provenance record lives in
+  `milpa.lock` only).
+- `SELLO_IN_CONTAINER=1 scripts/test.sh`: exit 0. Both suites ran --
+  unit + vectors (14 files: RFC 8032/7748 KATs, Wycheproof, libsodium
+  differential, facade/CT/taint/registers smoke, RFC 8032 signing KATs,
+  CAVP SHA-512) and property-based (all 6 `test_properties_*.nim`
+  files via nelli). No FAIL/Error/SKIPPED lines in the run's own
+  output; the script's final validation-tier summary printed cleanly.
+- `SELLO_IN_CONTAINER=1 scripts/bmc.sh 300`: exit 0. All four
+  `tests/verify/symex_*.nim` targets discharged their `sxUnsat`
+  queries cleanly against the new pin -- `symex_recode` (`oneStep`,
+  `finalStep`, the 63-step `wholeChainRecode` composition),
+  `symex_mask` (`maskConstructStep`, `cmoveSelectStep`,
+  `cswapSelectStep`), `symex_reduce` (`carryMacroBiasedStep`,
+  `carryMacroUnbiasedStep` -- the whole-body compositions stayed
+  gated behind `-d:selloBmcReduceFullChain` and were not run, per
+  their own standing resource-wall disclosure, unchanged by this
+  bump), and `symex_equal` (`orAccumulateChain`). The one place a
+  `SymexSettings` default drift could have hidden a surprise --
+  sello pins every field it relies on (`arithChecks = {}`,
+  `budget.maxLoopUnwind = 64`) explicitly, so 0.8.0's new
+  `SymexSettings()` defaults never reach these queries.
+- `SELLO_IN_CONTAINER=1 scripts/build-smoke.sh`: exit 0 -- fuzz
+  external target + driver compiled and ran cleanly on one real input;
+  `ct_main`, every `tests/ct_taint/` target, and `tests/ct_disasm/main.nim`
+  all compiled (and the disasm probe ran once) under the same
+  compile-smoke-only posture this script has always carried, unaffected
+  by the pin bump.
+
+**Records updated:** `milpa.kdl`'s dep comment and pin,
+`CLAUDE.md`'s dependency paragraph (a new paragraph documenting the
+bump and the no-op verification, dated alongside the migration
+paragraph it supersedes), this addendum.
+
+**Landing:** pushed to `nelli-0.8.0`, merge-gate run watched to green
+in the foreground (`gh run watch <id> --exit-status`), then
+`git push origin nelli-0.8.0:main` fast-forwarded `main`; branch
+deleted after (404 confirmed). See this repository's Actions history
+for the exact run id against this addendum's own commit -- not
+duplicated here to avoid this doc drifting from the real run the next
+time this file is regenerated by a later bump.

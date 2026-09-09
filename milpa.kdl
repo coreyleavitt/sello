@@ -7,6 +7,38 @@ version "0.5.0"
 src_dir "src"
 
 deps {
+    // nelli v0.8.0 bump ("release: 0.8.0 -- config discipline", supersedes
+    // the nelli-migration pin below): pinned by commit SHA at the v0.8.0
+    // TAG's own commit, 549dae8b7998985588b4cb7e6033cd52ffbcef68 -- the
+    // first sello nelli pin to land on a tagged release rather than a bare
+    // main-HEAD commit; the SHA-pin posture is unchanged either way (a tag
+    // is just another ref, not a substitute for pinning by commit).
+    //
+    // 0.8.0's headline (partial object literals of Settings/SymexSettings/
+    // ResourceBudget/BmcSettings/IntegerBiasConfig/OrchestratorPolicy now
+    // carry that type's documented non-zero defaults, instead of Nim's
+    // ordinary zero-fill, for every field the literal omits) is a verified
+    // NO-OP for sello: nelli's own
+    // docs/rfc/0010-config-discipline.downstream-audit.md §1 greps were run
+    // against this tree and found zero partial literals of any affected
+    // type -- every sello construction site goes through
+    // defaultSettings()/defaultSymexSettings() plus field mutation
+    // (`tests/unit/test_properties_*.nim`, `tests/unit/property_crank.nim`,
+    // `tests/verify/symex_recode.nim`, `tests/verify/symex_reduce.nim`), so
+    // the resolved default value set is bit-identical before and after.
+    // The one `FuzzSettings(...)` partial literal
+    // (`tests/fuzz/fuzz_common.nim`) is in the audit's own "unchanged
+    // end-to-end" category (only the nested `integerBias` picks up
+    // defaults recursively, and its resolved value is unchanged). The
+    // audit's deprecated-symbol list (`withSymexSettings`,
+    // `orchestratorPolicy()`, `resolved()`, `optimisedSymexSettings()`,
+    // `looseSymexSettings()`) also has zero call sites here. See
+    // CLAUDE.md's "Building & testing" section and
+    // docs/nelli-migration.handoff.md for the full record. Separately: the
+    // coverageGuided per-example CoverageFrontier-snapshot perf regression
+    // (first-bad 1b80431) is NOT fixed in 0.8.0 -- property-leg CI times
+    // are expected to stay in the same ~15-17 minute range.
+    //
     // nelli migration (superseding RFC-005 slice 2's re-pin below):
     // pinned by commit SHA, not ref="main" -- same standing posture as
     // before, at the canonical repo URL (github.com/coreyleavitt/nelli --
@@ -32,7 +64,7 @@ deps {
     // nelli" (which renamed the Nim source tree itself, not just the
     // GitHub repo) -- deliberately held back until this dedicated
     // migration, per that slice's own re-pin paragraph.
-    "nelli" git=(url)"https://github.com/coreyleavitt/nelli.git" ref="67f890dee81480bc71fb47e985de05817e631147" optional=#true
+    "nelli" git=(url)"https://github.com/coreyleavitt/nelli.git" ref="549dae8b7998985588b4cb7e6033cd52ffbcef68" optional=#true
 }
 
 // nelli's own manifest still pins nim-z3 at ref="main" (see
