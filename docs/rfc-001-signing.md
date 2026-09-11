@@ -2,11 +2,12 @@
 type    = "rfc"
 id      = "001"
 title   = "ed25519 signing milestone (sign, keygen, CT evidence, adapter)"
-state   = "living"
+state   = "complete"
 stage   = "review"
 review  = "floor"
 profile = "rfc-flow@3"
 
+reason = "v1 conversion mapped complete->living to satisfy the done role; relabeled now that complete carries it."
 [[item]]
 id     = "ledger-22"
 title  = "CT proof #22: per-step lemma Z3-proved, 63-step chain manual induction"

@@ -2,10 +2,11 @@
 type    = "rfc"
 id      = "003"
 title   = "Compromise audit, round 2 — remediation"
-state   = "living"
+state   = "complete"
 stage   = "review"
 review  = "floor"
 profile = "rfc-flow@3"
+reason = "v1 conversion mapped complete->living to satisfy the done role; relabeled now that complete carries it."
 +++
 
 # RFC-003: Compromise audit, round 2 — remediation
