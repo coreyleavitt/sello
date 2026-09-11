@@ -1,3 +1,13 @@
++++
+type    = "rfc"
+id      = "002"
+title   = "Design-audit remediation"
+state   = "living"
+stage   = "review"
+review  = "floor"
+profile = "rfc-flow@3"
++++
+
 # RFC-002: Design-audit remediation
 
 - **Status:** implemented — approved by Corey 2026-08-06 ("fix all of these to the full standard")

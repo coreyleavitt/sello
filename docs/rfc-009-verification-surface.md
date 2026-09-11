@@ -1,3 +1,15 @@
++++
+type    = "rfc"
+id      = "009"
+title   = "Verification surface — batch verify, Ed25519ph/ctx, cofactored semantics, WASM verify-only tier"
+state   = "draft"
+stage   = "rfc"
+size    = "l"
+value   = "med"
+profile = "rfc-flow@3"
+blocked_by = ["005"]
++++
+
 # RFC-009: verification surface — batch verify, Ed25519ph/ctx, cofactored semantics, and a WASM verify-only tier
 
 Status: DRAFT (stage 1 — not yet through architect review)

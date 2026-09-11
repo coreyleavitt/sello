@@ -1,3 +1,13 @@
++++
+type    = "rfc"
+id      = "004"
+title   = "Ristretto255 (RFC 9496)"
+state   = "living"
+stage   = "review"
+review  = "floor"
+profile = "rfc-flow@3"
++++
+
 # RFC-004: Ristretto255 (RFC 9496)
 
 - **Status:** APPROVED (Corey, 2026-08-13) — architect rounds 1, 2 AND 3 COMPLETE

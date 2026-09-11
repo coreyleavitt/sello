@@ -1,3 +1,25 @@
++++
+type    = "rfc"
+id      = "001"
+title   = "ed25519 signing milestone (sign, keygen, CT evidence, adapter)"
+state   = "living"
+stage   = "review"
+review  = "floor"
+profile = "rfc-flow@3"
+
+[[item]]
+id     = "ledger-22"
+title  = "CT proof #22: per-step lemma Z3-proved, 63-step chain manual induction"
+state  = "resolved"
+reason = "partial by design -- recorded at review close, 2026-08-06"
+
+[[item]]
+id     = "ledger-23"
+title  = "Review ledger #23"
+state  = "resolved"
+reason = "deferred as an RFC non-goal at review close, 2026-08-06"
++++
+
 # RFC-001: ed25519 signing milestone (sign, keygen, CT evidence, adapter)
 
 Status: implemented — (originally: draft) architect rounds 1 and 2 applied

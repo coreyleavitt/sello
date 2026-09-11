@@ -1,3 +1,13 @@
++++
+type    = "rfc"
+id      = "003"
+title   = "Compromise audit, round 2 — remediation"
+state   = "living"
+stage   = "review"
+review  = "floor"
+profile = "rfc-flow@3"
++++
+
 # RFC-003: Compromise audit, round 2 — remediation
 
 - **Status:** implemented — scope approved by Corey 2026-08-07 ("roll all of it into rfc-003") — every

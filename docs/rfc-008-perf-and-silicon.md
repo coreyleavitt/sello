@@ -1,3 +1,15 @@
++++
+type    = "rfc"
+id      = "008"
+title   = "Performance and silicon — verified 64-bit backend, published benchmarks, DIT modes"
+state   = "draft"
+stage   = "rfc"
+size    = "xl"
+value   = "med"
+profile = "rfc-flow@3"
+blocked_by = ["005"]
++++
+
 # RFC-008: performance and silicon — a verified 64-bit backend, published benchmarks, data-independent-timing modes
 
 Status: DRAFT (stage 1 — not yet through architect review)

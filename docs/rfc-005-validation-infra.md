@@ -1,3 +1,32 @@
++++
+type    = "rfc"
+id      = "005"
+title   = "Validation infrastructure — suite gaps, CI, and the public evidence story"
+state   = "in-progress"
+stage   = "implement"
+size    = "xl"
+value   = "critical"
+profile = "rfc-flow@3"
+
+[[item]]
+id    = "trust-root-attestation"
+title = "Trust-root owner-attestation confirmation (slice 5)"
+state = "open"
+owner = "corey"
+
+[[item]]
+id    = "fork-pr-demo"
+title = "Fork-PR held-for-approval demo (slice 6 DoD)"
+state = "open"
+owner = "corey"
+
+[[item]]
+id    = "first-release-version"
+title = "First-release version decision (slice 32 part 1)"
+state = "open"
+owner = "corey"
++++
+
 # RFC-005: Validation infrastructure — suite gaps, CI, and the public evidence story
 
 - **Status:** in-progress — ACCEPTED (stage 3 opened 2026-08-24 — Corey's sign-off given by

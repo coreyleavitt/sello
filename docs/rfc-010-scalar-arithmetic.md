@@ -1,3 +1,15 @@
++++
+type    = "rfc"
+id      = "010"
+title   = "The scalar layer — CT mod-L inversion and a public scalar API"
+state   = "draft"
+stage   = "rfc"
+size    = "l"
+value   = "high"
+profile = "rfc-flow@3"
+blocked_by = ["005"]
++++
+
 # RFC-010: the scalar layer — CT mod-L inversion and a public scalar API (OPRF client / Schnorr enablement)
 
 Status: DRAFT (stage 1 — not yet through architect review)
