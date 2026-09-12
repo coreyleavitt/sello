@@ -5,3 +5,8 @@
 
 [record]
 globs = ["docs/rfc-*.md"]
+
+# RFC 0004 fork debt-cap, proceeding on its recorded lean (K=3, per-repo);
+# the fork stays open for ratification.
+[roadmap]
+review_cap = 3
