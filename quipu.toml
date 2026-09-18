@@ -10,3 +10,22 @@ globs = ["docs/rfc-*.md"]
 # the fork stays open for ratification.
 [roadmap]
 review_cap = 3
+
+# RFC 0005 `deployment-cutover` (quipu 2026-09-17): where this repository's
+# pre-push / post-merge / post-rewrite hooks send their ingest payload, and
+# under what slug. The hub no longer mounts this checkout -- it has no git
+# at all -- so this table is the only thing that keeps its page current.
+#
+# Loopback rather than https://quipu.leavitt.dev because this host's stub
+# resolver does not serve *.leavitt.dev (technitium serves it to the rest of
+# the tailnet, not to the machine it runs on), and because a same-host hook
+# has no reason to go out through DNS, TLS and five Traefik middlewares to
+# reach a container one bridge away. The stack publishes 127.0.0.1:8001 for
+# exactly this. A checkout of this repo on ANY OTHER machine wants the
+# https URL instead.
+#
+# No `token` key: a shared secret in a committed file is a shared secret in
+# every clone, so it lives in .git/quipu-token instead.
+[hub]
+url = "http://127.0.0.1:8001"
+slug = "sello"
