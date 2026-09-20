@@ -134,14 +134,19 @@ func wipe*[T](data: var T) {.noinline.} =
     volatileStoreByte(addr base[i], 0'u8)
   # Compiler barrier, per-backend: the gcc/clang spelling is the inline-asm
   # clobber idiom; MSVC's C compiler has no `asm` statement, so the vcc arm
-  # uses `_ReadWriteBarrier()` (<intrin.h>), the canonical cl.exe
+  # uses `_ReadWriteBarrier()`, the canonical cl.exe
   # compiler-ordering fence with the SAME semantic -- forbids the optimizer
   # from moving memory accesses across it; neither form emits a CPU fence.
   # The disassembly verification recorded in the module doc covers the
   # gcc/clang arm; the vcc arm awaits its own /d:release disassembly check
   # on a real MSVC target (tracked in the consumer that first exercises it).
+  # Declared as a bare intrinsic prototype rather than via <intrin.h>:
+  # Nim hoists INCLUDESECTION emits above its own CRT includes, and
+  # intrin.h included first breaks the UCRT's SAL-annotated declarations
+  # downstream (observed: malloc.h C2143/C2065 storm on cl 19.5x). MSVC
+  # documents manual intrinsic declaration; the pragma keeps it intrinsic.
   when defined(vcc):
-    {.emit: "/*INCLUDESECTION*/\n#include <intrin.h>".}
+    {.emit: "/*INCLUDESECTION*/\nvoid __cdecl _ReadWriteBarrier(void);\n#pragma intrinsic(_ReadWriteBarrier)".}
     {.emit: "_ReadWriteBarrier();".}
   else:
     {.emit: "asm volatile(\"\" ::: \"memory\");".}
