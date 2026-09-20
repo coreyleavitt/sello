@@ -73,7 +73,19 @@ func wipe*[T](data: var T) {.noinline.} =
   let base = cast[ptr UncheckedArray[byte]](addr data)
   for i in 0 ..< sizeof(T):
     volatileStoreByte(addr base[i], 0'u8)
-  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+  # Compiler barrier, per-backend: the gcc/clang spelling is the inline-asm
+  # clobber idiom; MSVC's C compiler has no `asm` statement, so the vcc arm
+  # uses `_ReadWriteBarrier()` (<intrin.h>), the canonical cl.exe
+  # compiler-ordering fence with the SAME semantic -- forbids the optimizer
+  # from moving memory accesses across it; neither form emits a CPU fence.
+  # The disassembly verification in the module doc covers the gcc/clang
+  # arm; the vcc arm awaits its own -d:release disassembly check on a real
+  # MSVC target (crisol's windows CI leg is the first such consumer).
+  when defined(vcc):
+    {.emit: "/*INCLUDESECTION*/\n#include <intrin.h>".}
+    {.emit: "_ReadWriteBarrier();".}
+  else:
+    {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
 {.pop.}
 {.pop.}
