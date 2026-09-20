@@ -53,6 +53,17 @@
 {.push raises: [], gcsafe.}
 {.push checks: off.}
 
+when defined(vcc):
+  func rwBarrier() {.importc: "_ReadWriteBarrier", header: "<intrin.h>".}
+    ## MSVC's compiler-ordering fence, declared at module scope via the
+    ## `header` pragma so the include lands in Nim's own include block
+    ## (after the CRT headers -- an INCLUDESECTION emit is hoisted ABOVE
+    ## them and breaks the UCRT's SAL declarations; an emit inside this
+    ## GENERIC's body is re-emitted per instantiation, where cl rejects
+    ## `#pragma intrinsic` as pragma-inside-function). `func` because the
+    ## barrier has no observable Nim-semantics effect -- the same argument
+    ## the gcc/clang emit arm relies on.
+
 func volatileStoreByte(dest: ptr byte; val: byte) {.inline.} =
   ## Store `val` through `dest` as a volatile write, so the C compiler
   ## cannot prove the store dead and elide it (see module doc). Same emit
@@ -81,14 +92,8 @@ func wipe*[T](data: var T) {.noinline.} =
   # The disassembly verification in the module doc covers the gcc/clang
   # arm; the vcc arm awaits its own -d:release disassembly check on a real
   # MSVC target (crisol's windows CI leg is the first such consumer).
-  # Declared as a bare intrinsic prototype rather than via <intrin.h>:
-  # Nim hoists INCLUDESECTION emits above its own CRT includes, and
-  # intrin.h included first breaks the UCRT's SAL-annotated declarations
-  # downstream (observed: malloc.h C2143/C2065 storm on cl 19.5x). MSVC
-  # documents manual intrinsic declaration; the pragma keeps it intrinsic.
   when defined(vcc):
-    {.emit: "/*INCLUDESECTION*/\nvoid __cdecl _ReadWriteBarrier(void);\n#pragma intrinsic(_ReadWriteBarrier)".}
-    {.emit: "_ReadWriteBarrier();".}
+    rwBarrier()
   else:
     {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
