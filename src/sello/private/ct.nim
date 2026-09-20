@@ -112,6 +112,17 @@
 {.push raises: [], gcsafe.}
 {.push checks: off.}
 
+when defined(vcc):
+  func rwBarrier() {.importc: "_ReadWriteBarrier", header: "<intrin.h>".}
+    ## MSVC's compiler-ordering fence, declared at module scope via the
+    ## `header` pragma so the include lands in Nim's own include block
+    ## (after the CRT headers -- an INCLUDESECTION emit is hoisted ABOVE
+    ## them and breaks the UCRT's SAL declarations; an emit inside a
+    ## GENERIC's body is re-emitted per instantiation, where cl rejects
+    ## `#pragma intrinsic` as pragma-inside-function). `func` because the
+    ## barrier has no observable Nim-semantics effect -- the same argument
+    ## the gcc/clang emit arm relies on.
+
 func volatileStoreByte(dest: ptr byte; val: byte) {.inline.} =
   ## Store `val` through `dest` as a volatile write, so the C compiler
   ## cannot prove the store dead and elide it (see module doc). Same emit
@@ -132,7 +143,18 @@ func wipe*[T](data: var T) {.noinline.} =
   let base = cast[ptr UncheckedArray[byte]](addr data)
   for i in 0 ..< sizeof(T):
     volatileStoreByte(addr base[i], 0'u8)
-  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+  # Compiler barrier, per-backend: the gcc/clang spelling is the inline-asm
+  # clobber idiom; MSVC's C compiler has no `asm` statement, so the vcc arm
+  # uses `_ReadWriteBarrier()`, the canonical cl.exe
+  # compiler-ordering fence with the SAME semantic -- forbids the optimizer
+  # from moving memory accesses across it; neither form emits a CPU fence.
+  # The disassembly verification recorded in the module doc covers the
+  # gcc/clang arm; the vcc arm awaits its own /d:release disassembly check
+  # on a real MSVC target (tracked in the consumer that first exercises it).
+  when defined(vcc):
+    rwBarrier()
+  else:
+    {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
 func volatileStoreWord(dest: ptr uint64; val: uint64) {.inline.} =
   ## Word-granular sibling of `volatileStoreByte`: stores `val` through

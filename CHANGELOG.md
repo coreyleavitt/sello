@@ -9,6 +9,17 @@ until 1.0.0.
 
 ## [Unreleased]
 
+### Fixed
+
+- `ct.wipe`'s trailing compiler barrier now has an MSVC arm: `vcc` builds
+  emit `_ReadWriteBarrier()` (`<intrin.h>`) in place of the gcc/clang
+  `asm volatile("" ::: "memory")` clobber, which MSVC's C compiler rejects
+  (`C2065 'asm'`). Same compiler-ordering semantic, no CPU fence either
+  way; gcc/clang codegen is byte-identical. The module doc's disassembly
+  verification covers the gcc/clang arm -- the vcc arm's own
+  `-d:release` disassembly check is owed by the first consumer that
+  exercises it on a real MSVC target (crisol's windows CI leg).
+
 RFC-005: validation infrastructure (CI, timing/taint/disassembly CT
 instruments, mutation/coverage/fuzz/Z3 required checks, the release
 gate). No `src/sello/` API changed. One item below is a real,
