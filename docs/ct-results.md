@@ -1205,3 +1205,60 @@ environment" above for what it captured on this run. The banner is
 unconditional and its output lands in whatever the invoker redirects
 `scripts/ct.sh`'s stdout/stderr to, so future runs' environment sections
 can be built from the captured log instead of a separate manual check.
+
+## MSVC (`vcc`) arms: one-time manual disassembly inspection (2026-09-27)
+
+**Not a dudect run, and not a gate.** No CT instrument this project owns
+can run against `cl.exe` output (dudect's harness, the Valgrind taint
+harness, and the ELF disassembly gate are all Linux/ELF-bound), so the
+MSVC slice's evidence for `private/ct.nim`'s vcc arms is this one-time
+inspection plus the functional `unit-windows-amd64-vcc` leg. It is a
+point-in-time reading of one compiler version, not a regression guard:
+a future `cl.exe` update is unverified until RFC-007's static binary audit
+(or a repeat of this inspection) covers it.
+
+**Build.** Scratch workflow run `36362168995` (branch
+`scratch-vcc-disasm`, deleted afterward): `tests/ct_disasm/main.nim` (every
+disasm-gate root referenced) built on `windows-2025` with the pinned
+patched Nim 2.2.10 toolchain, `--cc:vcc -d:release` (cl `/O2`), plus
+`/FAs` source-annotated assembly listings. Compiler, from the listing
+header: **Microsoft Optimizing Compiler 19.51.36257.0** for x64. The
+binary ran to completion (`ct_disasm probe: ok`).
+
+**Findings, per site.**
+
+- **`valueBarrier32` (volatile round-trip).** Inlined at all three mask
+  construction sites (`feCMove`, `feCSwap`, `cmovCached`) as the intended
+  stack store and reload (`mov DWORD PTR selloValueBarrier$1[rsp], eax` /
+  `mov r11d, DWORD PTR selloValueBarrier$1[rsp]`). The reloaded mask
+  feeds only `xor`/`and`/`xor` arithmetic.
+- **`feCMove`.** Fully unrolled masked-XOR select over all ten limbs, no
+  conditional jump or `cmov` on the mask. The one conditional jump in the
+  function (`cmp BYTE PTR [rcx+rax], 0; jne $BeforeRet`) tests Nim's
+  thread-local `nimInErrorMode` flag (goto-based exception propagation),
+  public state unrelated to any secret.
+- **`feCSwap`.** Same shape as `feCMove`; its only conditional jump is the
+  same error-flag check.
+- **`cmovCached`.** The per-entry `match = absDigit == i` compiles to
+  `sete` (a branchless flag set), passed to the non-inlined `feCMove`. The
+  remaining conditional jumps are the public loop counter (`cmp rdi, 8;
+  jle`) and error-flag checks. The sign mask goes through the volatile
+  round-trip as above.
+- **x25519 `ladder`.** Four `feCSwap` calls (bit extracted
+  arithmetically); conditional jumps are the public bit-position loop
+  counter (`jns`), an inlined `feMul` loop counter (`jl`), and error-flag
+  checks.
+- **`wipe` (both memory-barrier sites).** The per-byte volatile stores
+  survive as literal `mov BYTE PTR [rax+rcx], 0` instructions in the loop;
+  `_ReadWriteBarrier()` emits no instruction, as intended (a compiler-only
+  ordering fence, identical in effect to the gcc/clang `"memory"`
+  clobber). The x25519 ladder's 30 wipe call sites are all present.
+
+**Benign branch classes on this compiler, for a future automated check.**
+(1) Nim's `nimInErrorMode` post-call error-flag check, emitted after
+inlined calls throughout; (2) MSVC's `/GS` stack-cookie check
+(`__security_check_cookie`, the analog of gcc/clang's
+`-fstack-protector-strong` canary documented in
+`tests/ct_disasm/expected/justifications.md`); (3) public loop counters.
+No branch or `cmov` on a mask, a scalar bit, or a verdict was found in any
+inspected root.
