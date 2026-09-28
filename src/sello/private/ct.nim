@@ -105,12 +105,59 @@
 ## caller-side "the result is unobserved" analysis can't see through the
 ## call and decide the wipe itself is dead).
 
+## ## The MSVC (`vcc`) arms
+##
+## x64 cl.exe has no inline assembler of any kind, so neither GCC
+## extended-asm idiom above compiles under `--cc:vcc` (`C2065 'asm'`, first
+## hit by crisol's Windows MSVC CI leg, run 35477207536). Each of the three
+## asm sites in this module carries a `when defined(vcc)` arm instead; the
+## gcc/clang arms are untouched, so their generated C is byte-identical.
+##
+## - **Memory barrier** (both `wipe` overloads): `_ReadWriteBarrier()`,
+##   cl.exe's compiler-ordering fence -- the same semantic as the
+##   `"memory"` clobber (the optimizer may not move memory accesses across
+##   it; no CPU fence is emitted in either form). Declared at module scope
+##   via `importc`/`header: "<intrin.h>"` so the include lands in Nim's own
+##   include block after the CRT headers; an INCLUDESECTION emit is hoisted
+##   ABOVE the CRT and breaks the UCRT's SAL declarations, and an emit
+##   inside a generic's body is re-emitted per instantiation, where cl
+##   rejects `#pragma intrinsic` inside a function (crisol runs 35481369248
+##   and after; carried over from sello PR #9, which this supersedes).
+##   Microsoft documents `_ReadWriteBarrier` as deprecated in favor of C11
+##   atomics, but no atomic fence has the compiler-only, no-instruction
+##   semantic this site needs; it remains supported by current cl.exe.
+## - **Value barrier** (`valueBarrier32`): cl.exe has no register-constraint
+##   launder, so the vcc arm round-trips the value through a `volatile`
+##   local. The C standard makes the value of a volatile read unknown to
+##   the compiler, so no range proof (the `{0, -1}` confinement clang
+##   exploited) survives it -- the same property the asm constraint
+##   provides, at the cost of one stack store and one load per mask
+##   construction (three call sites, none in an inner hot loop beyond the
+##   per-limb select itself).
+##
+## **Evidence status, stated plainly.** None of this project's CT
+## instruments (dudect, the Valgrind taint harness, the ELF disassembly
+## gate) can run against a cl.exe-built binary, so the vcc arms carry
+## functional coverage only (`unit-windows-amd64-vcc`: the full unit suite
+## compiled and run under MSVC) plus a one-time manual disassembly
+## inspection recorded in `docs/ct-results.md`. The constant-time claim for
+## MSVC builds is NOT backed by the instruments that back the gcc/clang
+## claim; RFC-007's static binary audit is the planned route to closing
+## that gap.
+
 ## Compiler-enforced effect contract (janus consumer finding 3) -- see
 ## `signing.nim`'s module doc for the surface-wide policy. A wipe
 ## primitive that could raise or touch global state would defeat its own
 ## every-exit-path guarantee.
 {.push raises: [], gcsafe.}
 {.push checks: off.}
+
+when defined(vcc):
+  func rwBarrier() {.importc: "_ReadWriteBarrier", header: "<intrin.h>".}
+    ## MSVC's compiler-ordering fence (see module doc, "The MSVC (`vcc`)
+    ## arms"). `func` because the barrier has no observable
+    ## Nim-semantics effect -- the same argument the gcc/clang emit arm
+    ## relies on.
 
 func volatileStoreByte(dest: ptr byte; val: byte) {.inline.} =
   ## Store `val` through `dest` as a volatile write, so the C compiler
@@ -132,7 +179,10 @@ func wipe*[T](data: var T) {.noinline.} =
   let base = cast[ptr UncheckedArray[byte]](addr data)
   for i in 0 ..< sizeof(T):
     volatileStoreByte(addr base[i], 0'u8)
-  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+  when defined(vcc):
+    rwBarrier()
+  else:
+    {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
 func volatileStoreWord(dest: ptr uint64; val: uint64) {.inline.} =
   ## Word-granular sibling of `volatileStoreByte`: stores `val` through
@@ -165,7 +215,10 @@ func wipe*[N: static int](data: var array[N, uint64]) {.noinline.} =
   let base = cast[ptr UncheckedArray[uint64]](addr data)
   for i in 0 ..< N:
     volatileStoreWord(addr base[i], 0'u64)
-  {.emit: "asm volatile(\"\" ::: \"memory\");".}
+  when defined(vcc):
+    rwBarrier()
+  else:
+    {.emit: "asm volatile(\"\" ::: \"memory\");".}
 
 func valueBarrier32*(x: int32): int32 {.inline.} =
   ## Value barrier (see module doc, "The value barrier" section above):
@@ -183,7 +236,14 @@ func valueBarrier32*(x: int32): int32 {.inline.} =
   ## read-write constraint to, and `result` is that symbol on every
   ## `func` regardless of parameter-passing convention.
   result = x
-  {.emit: ["asm volatile(\"\" : \"+r\"(", result, "));"].}
+  when defined(vcc):
+    # No register-constraint launder exists under cl.exe: round-trip
+    # through a volatile local instead (module doc, "The MSVC (`vcc`)
+    # arms").
+    {.emit: ["{ volatile NI32 selloValueBarrier = ", result, "; ",
+             result, " = selloValueBarrier; }"].}
+  else:
+    {.emit: ["asm volatile(\"\" : \"+r\"(", result, "));"].}
 
 {.pop.}
 {.pop.}

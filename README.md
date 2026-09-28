@@ -536,7 +536,7 @@ claimed:
 <!-- VALIDATION-MAP:TABLE START -->
 | Claim | Category | Mechanism | Freshness canary | Carve-out doc | Row key |
 |---|---|---|---|---|---|
-| Bit-exact pass of RFC 8032 (ed25519) and RFC 7748 (X25519) vectors | required-check | `unit-linux-amd64-gcc` (and its six sibling `unit-*` legs across the CI matrix) | n/a | none | rfc-vectors |
+| Bit-exact pass of RFC 8032 (ed25519) and RFC 7748 (X25519) vectors | required-check | `unit-linux-amd64-gcc` (and its eight sibling `unit-*` legs across the CI matrix) | n/a | none | rfc-vectors |
 | Pass Google Wycheproof adversarial vectors (ed25519 + X25519) | required-check | `unit-linux-amd64-gcc` (same unit suite; no Wycheproof corpus exists for ristretto255 -- RFC 9496 App. A plus fuzzing plus the libsodium differential suite carry that weight instead) | n/a | none | wycheproof |
 | dudect timing harness -- compiles cleanly, no verdict | required-check | `build-smoke` (compiles `tests/ct/ct_main.nim`, never runs it) | n/a | none | dudect-compile-smoke |
 | dudect timing harness -- real worst-case t-statistic verdict, ten targets | manual-ritual | `scripts/ct.sh` (maintainer-run, `-d:release`, roughly 1e6 samples/class) | pending slice 28 | `docs/ct-results.md` | dudect-full-battery |
@@ -565,10 +565,12 @@ CI matrix builds and tests sello on: linux amd64 (`unit-linux-amd64-gcc`,
 `unit-linux-amd64-clang`, `unit-linux-amd64-gcc-asan-ubsan`), linux i386
 (`unit-linux-i386-gcc`, 32-bit multilib, unit suite only), linux arm64
 (`unit-linux-arm64-gcc`), macOS arm64 (`unit-macos-arm64-clang`), and
-Windows amd64 (`unit-windows-amd64-gcc`, MinGW-w64 gcc). MSVC (`vcc`) is
-not a supported build target: the constant-time signer's secret-wipe
-primitive (`private/ct.nim`) depends on an `asm volatile` compiler
-barrier, which MSVC's compiler intrinsics have no equivalent for. WASM is
+Windows amd64 (`unit-windows-amd64-gcc`, MinGW-w64 gcc;
+`unit-windows-amd64-vcc`, MSVC `cl.exe` via Nim's `vccexe`). Under MSVC,
+`private/ct.nim`'s GCC-style `asm volatile` barriers are replaced by
+`_ReadWriteBarrier()` and a volatile round-trip value barrier (see that
+module's doc); the MSVC leg is functional coverage only -- see the CT claim
+scope below. WASM is
 not merely untested but **unsupported-for-secrets**: `private/ct.nim`'s
 wipe barrier and `std/sysrand` do not exist there, so the wipe and
 keygen guarantees are void; the verify-only path may well compile, but
@@ -585,7 +587,13 @@ toolchain -- a different gcc/clang version, a different libc, a different
 optimization level -- is compiling code this project believes is
 constant-time by construction (branchless on secret data, arithmetic
 masking throughout), but has not itself measured under that toolchain;
-that residual is disclosed here, not elided.<!-- VALIDATION-MAP:CT-SCOPE END -->
+that residual is disclosed here, not elided. **MSVC builds are the
+sharpest case of that residual**: none of this project's CT instruments
+(dudect, the Valgrind taint harness, the ELF disassembly gate) can run on
+`cl.exe` output, so the MSVC constant-time claim rests on the source-level
+construction plus a one-time manual disassembly inspection recorded in
+`docs/ct-results.md`, not on a gate. A static binary audit that can
+certify MSVC output is the subject of RFC-007.<!-- VALIDATION-MAP:CT-SCOPE END -->
 
 ## Building and testing
 

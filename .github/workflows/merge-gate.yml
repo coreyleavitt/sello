@@ -586,6 +586,31 @@ jobs:
       - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw
       - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-nelli-skip
 
+  # Windows/MSVC leg: the toolchain sello's Windows consumers actually ship
+  # with. `--patched` installs the maintainer's patched Nim 2.2.10 build
+  # (the backport patch set the linux image carries, plus vccexe.exe) from
+  # its OCI artifact, pinned by layer digest in
+  # scripts/lib/nim-patched-pin.txt; `--cc vcc` compiles every suite file
+  # through vccexe.exe to cl.exe, which vccexe locates via vswhere on the
+  # hosted image's Visual Studio install (the one unpinned component --
+  # cl.exe's version is whatever windows-2025 bundles, echoed in the log by
+  # every compile's own banner). This leg is what exercises
+  # private/ct.nim's vcc arms (_ReadWriteBarrier, the volatile value
+  # barrier). Functional coverage ONLY: no CT instrument runs against
+  # cl.exe output (see ct.nim's "The MSVC (`vcc`) arms" doc section and the
+  # README's CT claim scope). Unit suite only, `--expect-nelli-skip`, same
+  # rationale as unit-windows-amd64-gcc above.
+  unit-windows-amd64-vcc:
+    name: unit-windows-amd64-vcc
+    runs-on: windows-2025
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --patched
+      - run: scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc vcc --expect-nelli-skip
+
   # RFC-005 slice 2: check-readme.sh retrofitted with the same
   # SELLO_IN_CONTAINER split as scripts/test.sh (it used to hardcode
   # podman and skip the host milpa preflight -- see that script's header

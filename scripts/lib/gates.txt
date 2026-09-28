@@ -315,6 +315,9 @@ property-linux-amd64-clang          scripts/ci-property.sh --cc clang
 property-linux-arm64-gcc            scripts/ci-nim-setup.sh --expect-arch aarch64 && SELLO_IN_CONTAINER=1 scripts/ci-property.sh
 unit-macos-arm64-clang              scripts/ci-nim-setup.sh --expect-arch arm64 && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc clang --expect-nelli-skip
 unit-windows-amd64-gcc              scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --expect-nelli-skip
+# Windows/MSVC leg (patched toolchain via vccexe.exe -> cl.exe); hosted-only
+# residual like unit-windows-amd64-gcc. See merge-gate.yml's own job comment.
+unit-windows-amd64-vcc              scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --patched && scripts/ci-setup.sh && SELLO_IN_CONTAINER=1 scripts/test.sh --cc vcc --expect-nelli-skip
 check-readme                        scripts/check-readme.sh
 gates-manifest-sync                 scripts/gates-manifest-check.sh
 ruleset-sync                        scripts/ruleset-sync-check.sh

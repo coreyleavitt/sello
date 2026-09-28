@@ -70,7 +70,10 @@ fi
 # ONLY thing that went red, on exactly this `.exe` gap) followed by
 # whitespace, at the start of the line or after a path separator/
 # whitespace.
-line="$(printf '%s\n' "$out" | grep -m1 -E '(^|[ /\t])(gcc|clang)(\.exe)?(-[0-9.]+)?([ \t]|$)')"
+# `vccexe` (the unit-windows-amd64-vcc leg): under `--cc:vcc` Nim invokes
+# its own vccexe.exe wrapper, which locates and runs MSVC's cl.exe, so the
+# wrapper's name is what --listCmd records and what "vcc" matches.
+line="$(printf '%s\n' "$out" | grep -m1 -E '(^|[ /\t])(gcc|clang|vccexe)(\.exe)?(-[0-9.]+)?([ \t]|$)')"
 echo "toolchain canary: resolved C compiler invocation: ${line:-<none found in --listCmd output>}"
 
 case "$line" in

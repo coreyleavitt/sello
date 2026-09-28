@@ -148,9 +148,10 @@
 # (platform-key, url, sha256) tuple; a matching marker skips the
 # download+extract.
 #
-# Usage: scripts/ci-nim-setup.sh --expect-arch <uname-m-value> [--expect-os <case-glob>] [--with-mingw]
+# Usage: scripts/ci-nim-setup.sh --expect-arch <uname-m-value> [--expect-os <case-glob>] [--with-mingw] [--patched]
 #   e.g. scripts/ci-nim-setup.sh --expect-arch aarch64   # linux/arm64
 #        scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw   # windows/MinGW-gcc
+#        scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --patched      # windows/MSVC (patched toolchain, vccexe)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -195,6 +196,7 @@ fi
 expect_arch=""
 expect_os=""
 with_mingw=0
+patched=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --expect-arch)
@@ -217,6 +219,10 @@ while [[ $# -gt 0 ]]; do
       with_mingw=1
       shift
       ;;
+    --patched)
+      patched=1
+      shift
+      ;;
     *)
       echo "scripts/ci-nim-setup.sh: unrecognized argument '$1'" >&2
       exit 2
@@ -224,7 +230,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ -z "$expect_arch" ]]; then
-  echo "scripts/ci-nim-setup.sh: usage: scripts/ci-nim-setup.sh --expect-arch <name> [--expect-os <case-glob>] [--with-mingw]" >&2
+  echo "scripts/ci-nim-setup.sh: usage: scripts/ci-nim-setup.sh --expect-arch <name> [--expect-os <case-glob>] [--with-mingw] [--patched]" >&2
   echo "  e.g. scripts/ci-nim-setup.sh --expect-arch aarch64" >&2
   echo "  e.g. scripts/ci-nim-setup.sh --expect-arch x86_64 --expect-os 'MINGW64_NT*|MSYS*' --with-mingw" >&2
   exit 2
@@ -300,17 +306,39 @@ case "$actual_os_raw" in
 esac
 platform_key="${os_lower}-${actual_arch}"
 
-pin_file="$(dirname "$0")/lib/nim-pin.txt"
+# --patched (the unit-windows-amd64-vcc leg): install the maintainer's
+# patched Nim build (github.com/coreyleavitt/Nim, the backport patch set the
+# pinned linux image already carries, with vccexe.exe) from its OCI
+# artifact at ghcr.io/coreyleavitt/nim instead of a nim-lang/nightlies
+# release -- the same toolchain the maintainer's own MSVC production builds
+# and crisol's Windows MSVC leg use. Pinned by the artifact LAYER digest,
+# which is itself the SHA-256 of the downloaded blob, so the existing
+# checksum verification below applies unchanged. See
+# scripts/lib/nim-patched-pin.txt's header for the row format.
+if [[ "$patched" -eq 1 ]]; then
+  pin_file="$(dirname "$0")/lib/nim-patched-pin.txt"
+else
+  pin_file="$(dirname "$0")/lib/nim-pin.txt"
+fi
 pin_line="$(grep -v '^[[:space:]]*#' "$pin_file" | grep -v '^[[:space:]]*$' | awk -v k="$platform_key" '$1 == k { print; found=1 } END { if (!found) exit 1 }')" || {
   echo "ci-nim-setup: no pin row for platform-key '$platform_key' in $pin_file -- this platform is not wired yet." >&2
   exit 1
 }
-read -r _ release_tag asset_name expected_sha <<<"$pin_line"
+if [[ "$patched" -eq 1 ]]; then
+  read -r _ oci_repo expected_sha asset_name manifest_digest <<<"$pin_line"
+  release_tag="$oci_repo@$manifest_digest"
+else
+  read -r _ release_tag asset_name expected_sha <<<"$pin_line"
+fi
 echo "ci-nim-setup: platform-key '$platform_key' -> release '$release_tag', asset '$asset_name'"
 
 version="$(sed -E 's/^nim-([0-9.]+)-.*/\1/' <<<"$asset_name")"
 install_root="$HOME/.sello-nim"
-install_dir="$install_root/nim-${version}-${platform_key}"
+if [[ "$patched" -eq 1 ]]; then
+  install_dir="$install_root/nim-${version}-patched-${platform_key}"
+else
+  install_dir="$install_root/nim-${version}-${platform_key}"
+fi
 marker="$install_dir/.nim-pin-marker"
 expected_marker="$platform_key $release_tag $asset_name $expected_sha"
 
@@ -323,9 +351,22 @@ else
 
   tmp_tarball="$(mktemp)"
   trap 'rm -f "$tmp_tarball"' EXIT
-  url="https://github.com/nim-lang/nightlies/releases/download/${release_tag}/${asset_name}"
-  echo "ci-nim-setup: downloading $url"
-  curl -sSfL -o "$tmp_tarball" "$url"
+  if [[ "$patched" -eq 1 ]]; then
+    # Anonymous pull token (the package is public); the blob is fetched by
+    # its content digest, so the checksum check below is the integrity
+    # check of the pinned artifact itself. python3 (shipped on every
+    # hosted runner) parses the token JSON; `tr -d '\r'` strips the CRLF
+    # Windows python writes even into pipes (crisol run 35475575832).
+    token="$(curl -sSfL "https://ghcr.io/token?scope=repository:${oci_repo}:pull" \
+      | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' | tr -d '\r')"
+    url="https://ghcr.io/v2/${oci_repo}/blobs/sha256:${expected_sha}"
+    echo "ci-nim-setup: downloading $url (artifact manifest $manifest_digest)"
+    curl -sSfL -H "Authorization: Bearer $token" -o "$tmp_tarball" "$url"
+  else
+    url="https://github.com/nim-lang/nightlies/releases/download/${release_tag}/${asset_name}"
+    echo "ci-nim-setup: downloading $url"
+    curl -sSfL -o "$tmp_tarball" "$url"
+  fi
 
   actual_sha="$(sha256 "$tmp_tarball")"
   if [[ "$actual_sha" != "$expected_sha" ]]; then

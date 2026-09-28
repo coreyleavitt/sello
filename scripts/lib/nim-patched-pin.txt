@@ -1,0 +1,39 @@
+# scripts/lib/nim-patched-pin.txt -- pin table for scripts/ci-nim-setup.sh
+# --patched: the maintainer's patched Nim build, installed from its OCI
+# artifact at ghcr.io/coreyleavitt/nim rather than a nim-lang/nightlies
+# release (scripts/lib/nim-pin.txt, the sibling table for every other
+# direct-install leg).
+#
+# Why a second source: the unit-windows-amd64-vcc leg exists to test sello
+# under the toolchain its Windows consumers actually ship with -- the
+# patched 2.2.10 build (github.com/coreyleavitt/Nim, the same backport patch
+# set the pinned linux container image already carries) compiling through
+# vccexe.exe to MSVC's cl.exe. crisol's Windows leg installs the same
+# artifact. The artifact is an OCI artifact (artifactType
+# application/x-nim-toolchain, one zip layer holding a nim-2.2.10-patched/
+# tree), not a container image, so it is fetched as a raw blob.
+#
+# Pinning: crisol fetches it by its mutable tag (2.2.10-windows-x64); this
+# table pins the LAYER digest instead. An OCI blob digest is the SHA-256 of
+# the blob's bytes, so ci-nim-setup.sh's existing checksum verification
+# checks the pinned artifact directly -- a retagged or rebuilt toolchain
+# cannot reach this leg without a deliberate edit here. The manifest digest
+# is recorded for provenance (and is what `release_tag` names in the
+# install marker). Resolved 2026-09-27 from tag 2.2.10-windows-x64
+# (manifest annotations: dev.leavitt.nim.version 2.2.10, created
+# 2026-09-02T05:46:04Z, patches 0001-0006); the blob was downloaded and
+# its sha256sum recomputed locally before being recorded, and the zip's
+# single top-level directory (nim-2.2.10-patched/, containing
+# bin/nim.exe and bin/vccexe.exe) was inspected.
+#
+# Repin: resolve the tag's manifest (Accept:
+# application/vnd.oci.image.manifest.v1+json), take layers[0].digest and
+# its org.opencontainers.image.title annotation, download and sha256sum the
+# blob, and update both digest columns together.
+#
+# Format: five whitespace-separated columns --
+#   platform-key   oci-repo   layer-sha256 (hex, no prefix)   asset-title   manifest-digest
+# Comments/blank lines as in nim-pin.txt.
+#
+# platform-key   oci-repo            layer-sha256                                                        asset-title                              manifest-digest
+windows-x86_64   coreyleavitt/nim    655c9253817e228c9b657d4eac80de89603224f283430e8fdfee6712fb94e6a8    nim-2.2.10-patched-windows-x64.zip       sha256:eddee4f56d9ab2c0003b5b3739e05930af5897f43fe93d05c3452d9e8c6e28cd
